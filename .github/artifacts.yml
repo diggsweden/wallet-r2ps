@@ -1,0 +1,26 @@
+# SPDX-FileCopyrightText: 2025 diggsweden/wallet-r2ps
+#
+# SPDX-License-Identifier: CC0-1.0
+
+# Artifacts Configuration for wallet-backend-reference
+# Defines what to build and where to publish
+
+artifacts:
+  - name: wallet-r2ps-backend
+    project-type: maven
+    working-directory: ./wallet-r2ps-backend
+    build-type: application
+    config:
+      java-version: 21
+
+containers:
+  - name: wallet-r2ps-backend
+    from: [wallet-r2ps-backend]
+    container-file: Containerfile
+    context: ./wallet-r2ps-backend
+    platforms: linux/amd64,linux/arm64
+    registry: ghcr.io
+
+publishers:
+  - type: github-packages
+    artifacts: [wallet-r2ps-backend]

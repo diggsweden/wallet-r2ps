@@ -1,0 +1,170 @@
+name: rhsm-demo
+
+services:
+#  rhsm-client:
+#    image: rhsm-client
+#    container_name: rhsm-client
+#    ports:
+#      - "9000:8443"
+#      - "9002:8000"
+#    restart: on-failure
+#    volumes:
+#      - ./remote-hsm-client/src/main/resources:/resources
+#      - ./demo:/demo
+#    env_file: .env
+#    environment:
+#      SPRING_CONFIG_ADDITIONAL_LOCATION: /config/
+#      SPRING_PROFILES_ACTIVE: demo
+#      TZ: "Europe/Stockholm"
+#    networks:
+#      - wallet-network
+
+#  rhsm-bff:
+#    image: rhsm-bff
+#    container_name: rhsm-bff
+#    ports:
+#      - "9010:8443"
+#      - "9012:8000"
+#    restart: on-failure
+#    volumes:
+#      - ./remote-hsm-bff/target/test-data:/target/test-data
+#      - ./demo:/demo
+#    env_file: .env
+#    environment:
+#      SPRING_CONFIG_ADDITIONAL_LOCATION: /config/
+#      SPRING_PROFILES_ACTIVE: demo
+#      SPRING_KAFKA_BOOTSTRAP-SERVERS: "kafka:29092"
+#      SPRING_DATA_REDIS_HOST: "valkey"
+#      SPRING_DATA_REDIS_PORT: 6379
+#      SPRING_DATA_REDIS_USERNAME: "default"
+#      SPRING_DATA_REDIS_PASSWORD: "secret"
+#      SPRING_DATA_REDIS_DATABASE: 0
+#
+#      TZ: "Europe/Stockholm"
+#    networks:
+#      - wallet-network
+#
+#  rhsm-hsm:
+#    image: rhsm-hsm
+#    container_name: rhsm-hsm
+#    ports:
+#      - "9020:8443"
+#      - "9022:8000"
+#    restart: on-failure
+#    volumes:
+#      - ./remote-hsm-hsmserver/target/test-data:/target/test-data
+#      - ./demo:/demo
+#    env_file: .env
+#    environment:
+#      SPRING_CONFIG_ADDITIONAL_LOCATION: /config/
+#      SPRING_PROFILES_ACTIVE: hsm,demo
+#      SPRING_KAFKA_BOOTSTRAP-SERVERS: "kafka:29092"
+#      TZ: "Europe/Stockholm"
+#    networks:
+#      - wallet-network
+
+  valkey:
+    image: valkey/valkey:8.0.2-alpine3.21
+    container_name: valkey
+    ports:
+      - 6379:6379
+    command: [ "valkey-server", "/usr/local/etc/valkey/valkey.conf" ]
+    volumes:
+      - ./config/valkey.conf:/usr/local/etc/valkey/valkey.conf
+    networks:
+      - wallet-network
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.4.0
+    hostname: zookeeper
+    container_name: zookeeper
+    ports:
+      - "2181:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    volumes:
+      - zookeeper-data:/var/lib/zookeeper/data
+      - zookeeper-logs:/var/lib/zookeeper/log
+    networks:
+      - wallet-network
+
+  kafka:
+    image: confluentinc/cp-kafka:7.4.0
+    hostname: kafka
+    container_name: kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+      - "9101:9101"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:29092,PLAINTEXT_HOST://0.0.0.0:9092
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_JMX_PORT: 9101
+      KAFKA_JMX_HOSTNAME: localhost
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
+      KAFKA_DELETE_TOPIC_ENABLE: 'true'
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    networks:
+      - wallet-network
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # Optional: Kafka UI for management
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: kafka-ui
+    depends_on:
+      - kafka
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+      KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:2181
+    networks:
+      - wallet-network
+  db:
+    image: postgres
+    restart: always
+    # set shared memory limit when using docker compose
+    shm_size: 128mb
+    # or set shared memory limit when deploy via swarm stack
+    #volumes:
+    #  - type: tmpfs
+    #    target: /dev/shm
+    #    tmpfs:
+    #      size: 134217728 # 128*2^20 bytes = 128Mb
+    environment:
+      POSTGRES_PASSWORD: s3cret
+      POSTGRES_DB: wallet
+      POSTGRES_USER: walletuser
+    ports:
+      - "5432:5432"
+    networks:
+      - wallet-network
+
+volumes:
+  zookeeper-data:
+    driver: local
+  zookeeper-logs:
+    driver: local
+  kafka-data:
+    driver: local
+
+networks:
+  wallet-network:
+    driver: bridge

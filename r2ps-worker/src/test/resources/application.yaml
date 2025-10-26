@@ -1,0 +1,16 @@
+# SPDX-FileCopyrightText: 2025 diggsweden/wallet-r2ps
+#
+# SPDX-License-Identifier: EUPL-1.2
+
+spring:
+  application:
+    name: demo
+  jpa:
+    database: POSTGRESQL
+    hibernate:
+      ddl-auto: none
+  datasource:
+    platform: postgres
+    driverClassName: org.postgresql.Driver
+  liquibase:
+    change-log: classpath:db/changelog/changelog-master.xml

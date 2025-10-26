@@ -1,0 +1,6 @@
+clients:
+  - client-cert: wallet-gen.crt
+    client-id: https://wallets/digg.se/1234567890
+    kid: wallet-gen-key-1
+    contexts:
+      - wallet

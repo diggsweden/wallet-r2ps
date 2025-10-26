@@ -1,0 +1,52 @@
+# SPDX-FileCopyrightText: 2025 diggsweden/wallet-r2ps
+#
+# SPDX-License-Identifier: EUPL-1.2
+
+server:
+  port: 8090
+  servlet:
+    context-path: /rhsm-bff
+spring:
+  application:
+    name: wallet-r2ps-backend
+
+  datasource:
+    url: jdbc:postgresql://localhost:5432/wallet
+    username: walletuser
+    password: s3cret
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 5
+      connection-timeout: 30000
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+        show_sql: false
+    open-in-view: false
+  liquibase:
+    change-log: classpath:db/changelog/changelog-master.xml
+  kafka:
+    bootstrap-servers: localhost:9092
+    consumer:
+      group-id: wallet-service
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      acks: all
+      retries: 3
+
+logging:
+  level:
+    se.digg.wallet: DEBUG
+    org.springframework.kafka: INFO
+    org.hibernate.SQL: DEBUG

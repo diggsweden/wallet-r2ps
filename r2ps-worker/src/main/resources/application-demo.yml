@@ -1,0 +1,13 @@
+#server:
+#  ssl:
+#    enabled: true
+#    key-store: ./demo/tls.jks
+#    key-store-type: JKS
+#    key-store-password: "secret"
+#    key-password: "secret"
+#    key-alias: "tls"
+#  port: 8443
+
+rps-ops:
+  context-url:
+    hsm: https://rhsm-hsm:8443/rhsm-hsm/service
