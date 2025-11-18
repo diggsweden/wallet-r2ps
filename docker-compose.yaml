@@ -1,71 +1,78 @@
-name: rhsm-demo
+name: r2ps-dev
 
 services:
-#  rhsm-client:
-#    image: rhsm-client
-#    container_name: rhsm-client
-#    ports:
-#      - "9000:8443"
-#      - "9002:8000"
-#    restart: on-failure
-#    volumes:
-#      - ./remote-hsm-client/src/main/resources:/resources
-#      - ./demo:/demo
-#    env_file: .env
-#    environment:
-#      SPRING_CONFIG_ADDITIONAL_LOCATION: /config/
-#      SPRING_PROFILES_ACTIVE: demo
-#      TZ: "Europe/Stockholm"
-#    networks:
-#      - wallet-network
 
-#  rhsm-bff:
-#    image: rhsm-bff
-#    container_name: rhsm-bff
-#    ports:
-#      - "9010:8443"
-#      - "9012:8000"
-#    restart: on-failure
-#    volumes:
-#      - ./remote-hsm-bff/target/test-data:/target/test-data
-#      - ./demo:/demo
-#    env_file: .env
-#    environment:
-#      SPRING_CONFIG_ADDITIONAL_LOCATION: /config/
-#      SPRING_PROFILES_ACTIVE: demo
-#      SPRING_KAFKA_BOOTSTRAP-SERVERS: "kafka:29092"
-#      SPRING_DATA_REDIS_HOST: "valkey"
-#      SPRING_DATA_REDIS_PORT: 6379
-#      SPRING_DATA_REDIS_USERNAME: "default"
-#      SPRING_DATA_REDIS_PASSWORD: "secret"
-#      SPRING_DATA_REDIS_DATABASE: 0
-#
-#      TZ: "Europe/Stockholm"
-#    networks:
-#      - wallet-network
-#
-#  rhsm-hsm:
-#    image: rhsm-hsm
-#    container_name: rhsm-hsm
-#    ports:
-#      - "9020:8443"
-#      - "9022:8000"
-#    restart: on-failure
-#    volumes:
-#      - ./remote-hsm-hsmserver/target/test-data:/target/test-data
-#      - ./demo:/demo
-#    env_file: .env
-#    environment:
-#      SPRING_CONFIG_ADDITIONAL_LOCATION: /config/
-#      SPRING_PROFILES_ACTIVE: hsm,demo
-#      SPRING_KAFKA_BOOTSTRAP-SERVERS: "kafka:29092"
-#      TZ: "Europe/Stockholm"
-#    networks:
-#      - wallet-network
+  r2ps-rest-api:
+    build:
+      context: .
+      dockerfile: ./r2ps-rest-api/Containerfile
+    ports:
+      - "8088:8088"
+      - "9012:8000"
+    restart: on-failure
+    depends_on:
+      - kafka
+    environment:
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: "kafka:29092"
+      SPRING_DATA_REDIS_HOST: "valkey"
+      SPRING_DATA_REDIS_PORT: 6379
+      SPRING_DATA_REDIS_USERNAME: "default"
+      SPRING_DATA_REDIS_PASSWORD: "secret"
+      SPRING_DATA_REDIS_DATABASE: 0
+      TZ: "Europe/Stockholm"
+    env_file: .env
+    networks:
+      - wallet-network
+
+  r2ps-worker:
+    build:
+      context: .
+      dockerfile: ./r2ps-worker/Containerfile
+    ports:
+      - "9020:8443"
+      - "9022:8000"
+    restart: on-failure
+    depends_on:
+      - kafka
+    volumes:
+      - ./r2ps-worker/target/test-data:/target/test-data
+      - ./demo:/demo
+      - ./filestorage:/app/filestorage
+      - ./foo:/app/foo
+    env_file: .env
+    environment:
+      SERVER_PORT: 8099
+      #SPRING_CONFIG_ADDITIONAL_LOCATION: /config/
+      SPRING_PROFILES_ACTIVE: hsm,demo
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: "kafka:29092"
+      SPRING_KAFKA_BOOTSTRAP-SERVERS: "kafka:29092"
+      SPRING_DATA_REDIS_HOST: "valkey"
+      SPRING_DATA_REDIS_PORT: 6379
+      SPRING_DATA_REDIS_USERNAME: "default"
+      SPRING_DATA_REDIS_PASSWORD: "secret"
+      SPRING_DATA_REDIS_DATABASE: 0
+      SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/wallet
+      SPRING_DATASOURCE_USERNAME: walletuser
+      SPRING_DATASOURCE_PASSWORD: s3cret
+      RPS_OPS_CLIENT_REGISTRY_INIT_DIRECTORY: /app/filestorage/dev
+      TZ: "Europe/Stockholm"
+    networks:
+      - wallet-network
+
+  rust-r2ps-worker:
+    build:
+      context: ./rust-r2ps-worker
+      dockerfile: Containerfile
+    environment:
+      RUST_LOG: info
+      BOOTSTRAP_SERVERS: "kafka:29092"
+    depends_on:
+      - kafka
+    networks:
+      - wallet-network
 
   valkey:
     image: valkey/valkey:8.0.2-alpine3.21
-    container_name: valkey
     ports:
       - 6379:6379
     command: [ "valkey-server", "/usr/local/etc/valkey/valkey.conf" ]
@@ -74,59 +81,47 @@ services:
     networks:
       - wallet-network
 
-  zookeeper:
-    image: confluentinc/cp-zookeeper:7.4.0
-    hostname: zookeeper
-    container_name: zookeeper
-    ports:
-      - "2181:2181"
-    environment:
-      ZOOKEEPER_CLIENT_PORT: 2181
-      ZOOKEEPER_TICK_TIME: 2000
-    volumes:
-      - zookeeper-data:/var/lib/zookeeper/data
-      - zookeeper-logs:/var/lib/zookeeper/log
-    networks:
-      - wallet-network
-
   kafka:
-    image: confluentinc/cp-kafka:7.4.0
-    hostname: kafka
-    container_name: kafka
-    depends_on:
-      - zookeeper
+    image: apache/kafka:latest
+    container_name: r2ps-dev-kafka-1
+    environment:
+      # KRaft mode requires CLUSTER_ID
+      CLUSTER_ID: 'MkU3OEVBNTcwNTJENDM2Qk'
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+
+      # Simplified listener configuration
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:29092,PLAINTEXT_HOST://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+
+      # Replication settings
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_NUM_PARTITIONS: 3
+
+      # Important: Specify log directory
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
     ports:
       - "9092:9092"
-      - "9101:9101"
-    environment:
-      KAFKA_BROKER_ID: 1
-      KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181'
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
-      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:29092,PLAINTEXT_HOST://0.0.0.0:9092
-      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
-      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
-      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
-      KAFKA_JMX_PORT: 9101
-      KAFKA_JMX_HOSTNAME: localhost
-      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
-      KAFKA_DELETE_TOPIC_ENABLE: 'true'
     volumes:
       - kafka-data:/var/lib/kafka/data
     networks:
       - wallet-network
     healthcheck:
-      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
-      interval: 30s
+      test: [ "CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 || exit 1" ]
+      interval: 10s
       timeout: 10s
-      retries: 5
+      retries: 10
+      start_period: 60s
 
   # Optional: Kafka UI for management
   kafka-ui:
     image: provectuslabs/kafka-ui:latest
-    container_name: kafka-ui
     depends_on:
       - kafka
     ports:
@@ -158,12 +153,7 @@ services:
       - wallet-network
 
 volumes:
-  zookeeper-data:
-    driver: local
-  zookeeper-logs:
-    driver: local
   kafka-data:
-    driver: local
 
 networks:
   wallet-network:

@@ -1,6 +1,0 @@
-###
-POST http://localhost:8090/rhsm-bff/wallet
-Content-Type: application/json
-
-###
-GET http://localhost:8090/rhsm-bff/wallet/b0e720df-442a-4102-a569-ab16547f4e9e

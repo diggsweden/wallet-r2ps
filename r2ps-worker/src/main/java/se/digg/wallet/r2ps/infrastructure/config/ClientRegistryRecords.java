@@ -12,8 +12,7 @@ public class ClientRegistryRecords {
     this.clients = clients;
   }
 
-  public ClientRegistryRecords() {
-  }
+  public ClientRegistryRecords() {}
 
   public List<ClientRegistryRecord> getClients() {
     return this.clients;
@@ -74,8 +73,7 @@ public class ClientRegistryRecords {
       this.contexts = contexts;
     }
 
-    public ClientRegistryRecord() {
-    }
+    public ClientRegistryRecord() {}
 
     public String getClientCert() {
       return this.clientCert;
@@ -123,9 +121,8 @@ public class ClientRegistryRecords {
         return false;
       final Object this$clientCert = this.getClientCert();
       final Object other$clientCert = other.getClientCert();
-      if (this$clientCert == null ?
-          other$clientCert != null :
-          !this$clientCert.equals(other$clientCert))
+      if (this$clientCert == null ? other$clientCert != null
+          : !this$clientCert.equals(other$clientCert))
         return false;
       final Object this$clientId = this.getClientId();
       final Object other$clientId = other.getClientId();
@@ -161,7 +158,9 @@ public class ClientRegistryRecords {
     }
 
     public String toString() {
-      return "ClientRegistryRecords.ClientRegistryRecord(clientCert=" + this.getClientCert() + ", clientId=" + this.getClientId() + ", kid=" + this.getKid() + ", contexts=" + this.getContexts() + ")";
+      return "ClientRegistryRecords.ClientRegistryRecord(clientCert=" + this.getClientCert()
+          + ", clientId=" + this.getClientId() + ", kid=" + this.getKid() + ", contexts="
+          + this.getContexts() + ")";
     }
   }
 

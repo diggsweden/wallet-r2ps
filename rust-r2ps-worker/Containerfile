@@ -1,0 +1,33 @@
+FROM rust:1.90-bookworm AS builder
+
+RUN apt-get update && apt-get install -y \
+    zlib1g zlib1g-dev \
+    cmake \
+    libssl-dev \
+    libsasl2-dev \
+    libzstd-dev \
+    pkg-config
+
+WORKDIR /app
+
+COPY Cargo.toml ./
+COPY src ./src
+
+# Build static binary
+RUN cargo build --release
+
+# Runtime stage using scratch
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y \
+    zlib1g \
+    libssl3 \
+    libsasl2-2 \
+    libzstd1 \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy the binary from builder
+COPY --from=builder /app/target/release/rust-r2ps-worker /rust-r2ps-worker
+
+ENTRYPOINT ["/rust-r2ps-worker"]

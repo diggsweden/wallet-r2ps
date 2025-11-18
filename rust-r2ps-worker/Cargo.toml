@@ -1,0 +1,16 @@
+[package]
+name = "rust-r2ps-worker"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+rdkafka = { version = "0.36", features = ["cmake-build"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+jws = { version="0.2.9" }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+ctrlc = {  version="3.4", features = ["termination"] }
+dotenvy = "0.15.7"
+dotenv_config="0.2.2"
+foyer = "0.20"

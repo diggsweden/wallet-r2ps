@@ -67,11 +67,10 @@ public class ConfigUtils {
   public static ServiceTypeRegistry getDemoServiceTypeRegistry() {
     ServiceTypeRegistry serviceTypeRegistry = new ServiceTypeRegistry();
     serviceTypeRegistry.registerServiceType(DemoServiceType.REGISTER_AUTHORIZATION,
-        EncryptOption.DEVICE);
+        EncryptOption.device);
     return serviceTypeRegistry;
   }
 
 }
-
 
 

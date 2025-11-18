@@ -1,0 +1,42 @@
+# Stage 1: Build stage
+FROM maven:3.9-eclipse-temurin-21 AS builder
+
+# Set working directory
+WORKDIR /app
+
+# Copy Maven files for dependency caching
+COPY mvnw ./
+COPY .mvn ./.mvn
+COPY pom.xml ./
+RUN chmod +x ./mvnw
+#COPY r2ps-common-domain/pom.xml ./r2ps-common-domain/
+#COPY r2ps-worker/pom.xml ./r2ps-worker/
+#COPY r2ps-rest-api/pom.xml ./r2ps-rest-api/
+# RUN ./mvnw dependency:go-offline -B -s settings.xml
+# RUN ./mvnw dependency:go-offline -B
+
+COPY r2ps-common-domain ./r2ps-common-domain
+COPY r2ps-worker ./r2ps-worker
+COPY r2ps-rest-api ./r2ps-rest-api
+
+# Make mvnw executable
+RUN ./mvnw install
+RUN ./mvnw package -pl r2ps-worker -am -DskipTests
+
+# Build the application
+RUN mvn clean package -DskipTests
+
+# Stage 2: Runtime stage using distroless
+FROM gcr.io/distroless/java21-debian12:nonroot
+
+# Set working directory
+WORKDIR /app
+
+# Copy the built JAR from builder stage
+COPY --from=builder /app/r2ps-rest-api/target/*.jar app.jar
+
+# Expose the default Spring Boot port
+EXPOSE 8080
+
+# Run the application
+ENTRYPOINT ["java", "-jar", "app.jar"]

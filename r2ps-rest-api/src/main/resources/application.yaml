@@ -1,0 +1,46 @@
+# SPDX-FileCopyrightText: 2025 diggsweden/wallet-r2ps
+#
+# SPDX-License-Identifier: EUPL-1.2
+server:
+  port: 8088
+  servlet:
+    context-path: /r2ps-api
+spring:
+  application:
+    name: wallet-r2ps-rest-api
+  data:
+    redis:
+      host: "localhost"
+      port: 6379
+      database: 0
+      username: "default"
+      password: "secret"
+  kafka:
+    #bootstrap-servers: "localhost:9092"
+    consumer:
+      group-id: wallet-service
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      acks: all
+      retries: 3
+logging:
+  level:
+    se.digg.wallet: DEBUG
+    org.springframework.kafka: INFO
+    org.hibernate.SQL: DEBUG
+
+r2ps:
+  rest:
+    response-template-url: http://localhost:8088/r2ps-api/task/%s
+    serve-sync: true
+    sync-timeout-ms: 3000
+  out:
+    topic: "r2ps-requests"
+  in:
+    topic: "r2ps-responses"
+    group-id: "r2ps-rest-api-group"

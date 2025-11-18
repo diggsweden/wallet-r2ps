@@ -9,7 +9,8 @@ import org.springframework.boot.SpringApplication;
 public class TestDemoApplication {
 
   public static void main(String[] args) {
-    SpringApplication.from(R2psWorkerApplication::main).with(TestcontainersConfiguration.class).run(args);
+    SpringApplication.from(R2psWorkerApplication::main).with(TestcontainersConfiguration.class)
+        .run(args);
   }
 
 }

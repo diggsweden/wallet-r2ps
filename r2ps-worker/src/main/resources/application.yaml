@@ -12,6 +12,36 @@ spring:
       database: 0
       username: "default"
       password: "secret"
+  datasource:
+    url: jdbc:postgresql://localhost:5432/wallet
+    username: walletuser
+    password: s3cret
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 5
+      connection-timeout: 30000
+  kafka:
+    bootstrap-servers: localhost:9092
+  jpa:
+    hibernate:
+      ddl-auto: create
+
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+        show_sql: false
+        type:
+          json_format_mapper: com.fasterxml.jackson.databind.ObjectMapper
+    open-in-view: false
+  liquibase:
+    change-log: classpath:db/changelog/changelog-master.xml
+hypersistence:
+  utils:
+    jackson:
+      object:
+        mapper: "se.digg.wallet.r2ps.infrastructure.config.CustomObjectMapperSupplier"
 server:
   port: 8082
 
@@ -27,19 +57,33 @@ r2ps:
 credential:
   bundles:
     jks:
-      bff-gen:
-        name: "BFF server - General context"
-        store-reference: bff-gen-store
+      rhsm-server:
+        name: "Remote HSM server"
+        store-reference: rhsm-server
         key:
-          alias: gen-context
+          alias: server
           key-password: Test1234
-        key-id: bff-gen-key
+        key-id: rhsm-server
+        metadata:
+          jws-algorithm: ES256
+          keyuse: sign
+      rhsm-hsm:
+        name: "Remote HSM - HSM key"
+        store-reference: rhsm-hsm
+        key:
+          alias: server-hsm
+          key-password: Test1234
+        key-id: rhsm-hsm
         metadata:
           jws-algorithm: ES256
           keyuse: sign
     keystore:
-      bff-gen-store:
-        location: classpath:dev/bff-gen.p12
+      rhsm-server:
+        location: classpath:/dev/server-key.p12
+        password: Test1234
+        type: PKCS12
+      rhsm-hsm:
+        location: classpath:/dev/server-hsm-key.p12
         password: Test1234
         type: PKCS12
     monitoring:
@@ -47,7 +91,7 @@ credential:
 rps-ops:
   server-identity: https://cloud-wallet.digg.se/bff
   oprf-seed: a27366b536549dc6630f719bbcbaa16cbf70253d273640d7690f6e2e4ef6a5c7
-  server-opaque-key: bff-gen
+  server-opaque-key: rhsm-server
   client-record-registry-file: target/test-data/client-record-registry.json
   session-duration: PT15M
   replay-check-duration: PT15M
@@ -55,3 +99,15 @@ rps-ops:
   client-registry-init-directory: filestorage/dev
   context-url:
     hsm: http://localhost:8091/rhsm-hsm/service
+  config-location: target/test-data
+  wallet-keys:
+    #    pkcs11ConfigFile:
+    keystore-password: Test1234
+    #    key-wrap-alias:
+    keystore-file-location: target/test-data/wallet-keys.jks
+
+logging:
+  level:
+    se.digg.wallet: DEBUG
+    org.springframework.kafka: INFO
+    org.hibernate.SQL: INFO

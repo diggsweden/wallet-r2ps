@@ -1,6 +1,6 @@
 clients:
-  - client-cert: wallet-gen.crt
-    client-id: https://wallets/digg.se/1234567890
-    kid: wallet-gen-key-1
+  - client-cert: wallet-hsm.crt
+    client-id: a25d8884-c77b-43ab-bf9d-1279c08d860d
+    kid: wallet-hsm-key-1
     contexts:
-      - wallet
+      - hsm
