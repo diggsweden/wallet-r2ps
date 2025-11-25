@@ -14,3 +14,20 @@ ctrlc = {  version="3.4", features = ["termination"] }
 dotenvy = "0.15.7"
 dotenv_config="0.2.2"
 foyer = "0.20"
+
+opaque-ke = { git = "https://github.com/facebook/opaque-ke", features = ["argon2"]} #, rev = "6d2af37a" }
+rand = "0.8"
+sha2 = "0.10.9"
+josekit = "0.10.3"
+base64 = "0.22.1"
+p256 = { version = "0.13", default-features = false, features = [
+    "ecdsa",
+    "hash2curve",
+    "pkcs8",
+    "voprf",
+] }
+jsonwebtoken = "9"
+
+argon2 = { version = "0.5", features = ["std"] }
+hmac = "0.12"
+generic-array = "0.14"
