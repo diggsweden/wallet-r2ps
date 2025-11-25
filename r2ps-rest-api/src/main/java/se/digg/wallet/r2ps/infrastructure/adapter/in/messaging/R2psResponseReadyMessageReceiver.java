@@ -8,6 +8,10 @@ import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Service;
+import se.digg.wallet.r2ps.application.port.in.R2psResponseUseCase;
+import se.digg.wallet.r2ps.application.port.out.R2psResponseSinkSpiPort;
+import se.digg.wallet.r2ps.application.service.R2psResponseService;
+import se.digg.wallet.r2ps.domain.model.R2psResponse;
 import se.digg.wallet.r2ps.infrastructure.adapter.dto.R2psResponseDto;
 import se.digg.wallet.r2ps.infrastructure.config.Config;
 
@@ -29,52 +33,33 @@ public class R2psResponseSink {
   private final Config config;
   private final ObjectMapper objectMapper;
   private final RedisTemplate<String, R2psResponseDto> redisTemplate;
+  private final R2psResponseUseCase r2psResponseUseCase;
 
   public R2psResponseSink(Config config, ObjectMapper objectMapper,
-      RedisTemplate<String, R2psResponseDto> redisTemplate) {
+      RedisTemplate<String, R2psResponseDto> redisTemplate, R2psResponseSinkSpiPort r2psResponseSinkSpiPort) {
     this.config = config;
     this.objectMapper = objectMapper;
     this.redisTemplate = redisTemplate;
+    r2psResponseUseCase = new R2psResponseService(r2psResponseSinkSpiPort)
   }
 
-
-  public Optional<R2psResponseDto> waitForR2psResponse(UUID correlationId, long timeoutMillis) {
-    long endTime = System.currentTimeMillis() + timeoutMillis;
-
-    try {
-      while (System.currentTimeMillis() < endTime) {
-        R2psResponseDto r2psResponseDto = redisTemplate.opsForValue().get(correlationId.toString());
-        if (r2psResponseDto != null) {
-          log.info("Got r2psResponseDto for {}", correlationId);
-          return Optional.of(r2psResponseDto);
-        }
-        sleep(100); // poll interval
-      }
-    } catch (InterruptedException e) {
-      log.info("Interrupted while waiting for register wallet response for correlationId: {}",
-          correlationId);
-    }
-    return Optional.empty();
-  }
 
   @KafkaListener(topics = "${r2ps.in.topic}", groupId = "${r2ps.in.group-id}")
   public void consume(ConsumerRecord<String, String> record) {
     // TODO deserialize directly to domain model in the listener
     String key = record.key();
-    R2psResponseDto r2psResponseDto = null;
+    R2psResponse r2psResponse = null;
     try {
-      r2psResponseDto = objectMapper.readValue(record.value(), R2psResponseDto.class);
+      r2psResponse = objectMapper.readValue(record.value(), R2psResponse.class);
     } catch (JsonProcessingException e) {
       log.error("Could not deserialize message {} ", record.value(), e);
       return;
     }
 
     log.info("Received message - Key: {}, payload: {}",
-        key, r2psResponseDto);
+        key, r2psResponse);
 
-    redisTemplate.opsForValue().set(
-        r2psResponseDto.requestId().toString(), r2psResponseDto, RESPONSE_TTL_SECONDS,
-        TimeUnit.SECONDS);
+    r2psResponseUseCase.r2psResponseReady(r2psResponse);
 
   }
 }
