@@ -23,14 +23,14 @@ import java.util.stream.Stream;
 
 public class ServerWalletEventApplier {
 
-  public ServerWallet apply(Optional<ServerWallet> currentAggregate, Event e) {
+  public Optional<ServerWallet> apply(Optional<ServerWallet> currentAggregate, Event e) {
     return switch (e) {
-      case ServerWalletRegistered ev -> applyEvent(currentAggregate, ev);
-      case ServerWalletRevoked ev -> applyEvent(currentAggregate, ev);
-      case DeviceKeyAdded ev -> applyEvent(currentAggregate, ev);
-      case DeviceKeyRevoked ev -> applyEvent(currentAggregate, ev);
-      case HsmKeyCreated ev -> applyEvent(currentAggregate, ev);
-      case HsmKeyDeleted ev -> applyEvent(currentAggregate, ev);
+      case ServerWalletRegistered ev -> Optional.of(applyEvent(currentAggregate, ev));
+      case ServerWalletRevoked ev -> Optional.of(applyEvent(currentAggregate, ev));
+      case DeviceKeyAdded ev -> Optional.of(applyEvent(currentAggregate, ev));
+      case DeviceKeyRevoked ev -> Optional.of(applyEvent(currentAggregate, ev));
+      case HsmKeyCreated ev -> Optional.of(applyEvent(currentAggregate, ev));
+      case HsmKeyDeleted ev -> Optional.of(applyEvent(currentAggregate, ev));
 
       default -> throw new IllegalStateException("Unexpected event type: " + e.getClass());
     };

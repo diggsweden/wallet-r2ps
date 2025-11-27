@@ -7,6 +7,5 @@ public record KeyCacheRecord(
     KeyStore keyStore,
     char[] pin,
     String alias,
-    PrivateKey privateKey
-) {
+    PrivateKey privateKey) {
 }

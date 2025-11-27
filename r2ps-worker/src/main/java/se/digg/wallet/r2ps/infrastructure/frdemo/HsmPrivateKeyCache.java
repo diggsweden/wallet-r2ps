@@ -37,7 +37,8 @@ public class HsmPrivateKeyCache implements AutoCloseable {
             return;
           }
           log.debug("Removal listener for cache triggered for cause: {}", cause.name());
-          // Only delete on expiration/size pressure; keep delete on explicit invalidate too? your call:
+          // Only delete on expiration/size pressure; keep delete on explicit invalidate too? your
+          // call:
           boolean shouldDelete =
               cause == RemovalCause.EXPIRED ||
                   cause == RemovalCause.SIZE ||

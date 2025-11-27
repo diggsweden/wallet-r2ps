@@ -3,6 +3,8 @@ name: r2ps-dev
 services:
 
   r2ps-rest-api:
+    profiles:
+      - dev
     build:
       context: .
       dockerfile: ./r2ps-rest-api/Containerfile
@@ -25,6 +27,8 @@ services:
       - wallet-network
 
   r2ps-worker:
+    profiles:
+      - dev
     build:
       context: .
       dockerfile: ./r2ps-worker/Containerfile
@@ -71,6 +75,62 @@ services:
     networks:
       - wallet-network
 
+  r2ps-command-to-event-worker:
+    profiles:
+      - dev
+    build:
+      context: .
+      dockerfile: ./r2ps-command-to-event-worker/Containerfile
+    ports:
+      - "9027:8000"
+    restart: on-failure
+    depends_on:
+      - kafka
+    env_file: .env
+    environment:
+      SERVER_PORT: 8080
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: "kafka:29092"
+      SPRING_KAFKA_BOOTSTRAP-SERVERS: "kafka:29092"
+      SPRING_DATA_REDIS_HOST: "valkey"
+      SPRING_DATA_REDIS_PORT: 6379
+      SPRING_DATA_REDIS_USERNAME: "default"
+      SPRING_DATA_REDIS_PASSWORD: "secret"
+      SPRING_DATA_REDIS_DATABASE: 0
+      SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/wallet
+      SPRING_DATASOURCE_USERNAME: walletuser
+      SPRING_DATASOURCE_PASSWORD: s3cret
+      TZ: "Europe/Stockholm"
+    networks:
+      - wallet-network
+
+  r2ps-materialized-server-wallet-service:
+    profiles:
+      - dev
+    build:
+      context: .
+      dockerfile: ./r2ps-materialized-server-wallet-service/Containerfile
+    ports:
+      - "9028:8000"
+    restart: on-failure
+    depends_on:
+      - kafka
+    env_file: .env
+    environment:
+      SERVER_PORT: 8080
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: "kafka:29092"
+      SPRING_KAFKA_BOOTSTRAP-SERVERS: "kafka:29092"
+      SPRING_DATA_REDIS_HOST: "valkey"
+      SPRING_DATA_REDIS_PORT: 6379
+      SPRING_DATA_REDIS_USERNAME: "default"
+      SPRING_DATA_REDIS_PASSWORD: "secret"
+      SPRING_DATA_REDIS_DATABASE: 0
+      SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/wallet
+      SPRING_DATASOURCE_USERNAME: walletuser
+      SPRING_DATASOURCE_PASSWORD: s3cret
+      TZ: "Europe/Stockholm"
+    networks:
+      - wallet-network
+
   valkey:
     image: valkey/valkey:8.0.2-alpine3.21
     ports:
@@ -82,7 +142,7 @@ services:
       - wallet-network
 
   kafka:
-    image: apache/kafka:latest
+    image: apache/kafka-native:latest
     container_name: r2ps-dev-kafka-1
     environment:
       # KRaft mode requires CLUSTER_ID
@@ -108,12 +168,14 @@ services:
       KAFKA_LOG_DIRS: /var/lib/kafka/data
     ports:
       - "9092:9092"
-    volumes:
-      - kafka-data:/var/lib/kafka/data
+    tmpfs:
+      - /var/lib/kafka/data:uid=1000,gid=1000
+#    volumes:
+#      - kafka-data:/var/lib/kafka/data
     networks:
       - wallet-network
     healthcheck:
-      test: [ "CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 || exit 1" ]
+      test: [ "CMD-SHELL", "nc -z localhost 9092 || exit 1" ]
       interval: 10s
       timeout: 10s
       retries: 10
@@ -152,8 +214,9 @@ services:
     networks:
       - wallet-network
 
-volumes:
-  kafka-data:
+#volumes:
+#  kafka-data:
+#    driver: local
 
 networks:
   wallet-network:

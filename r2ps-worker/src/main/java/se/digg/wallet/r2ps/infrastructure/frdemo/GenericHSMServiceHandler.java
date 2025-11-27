@@ -43,8 +43,10 @@ public class GenericHSMServiceHandler extends HsmServiceHandler {
    * @param supportedCurves the list of elliptic curves supported by this HSM service handler
    * @param supportedContexts the list of operation contexts supported by this HSM service handler
    */
-  public GenericHSMServiceHandler(final List<String> supportedCurves, final List<String> supportedContexts,
-      final EcKeyPairRecordRegistry keyRegistry, final Map<String, KeyProviderBundle> keyProviderBundles) {
+  public GenericHSMServiceHandler(final List<String> supportedCurves,
+      final List<String> supportedContexts,
+      final EcKeyPairRecordRegistry keyRegistry,
+      final Map<String, KeyProviderBundle> keyProviderBundles) {
     super(supportedCurves, supportedContexts);
     this.keyRegistry = keyRegistry;
     this.keyProviderBundles = keyProviderBundles;
@@ -53,29 +55,34 @@ public class GenericHSMServiceHandler extends HsmServiceHandler {
   /**
    * Determines whether a request for a key operation is accepted based on the client's key pairs.
    * <p>
-   * If the provided client ID does not have any associated key pairs, the method will accept the request. Otherwise, it
-   * validates that none of the client's existing key pairs use the curve specified by the requested curve name.
+   * If the provided client ID does not have any associated key pairs, the method will accept the
+   * request. Otherwise, it validates that none of the client's existing key pairs use the curve
+   * specified by the requested curve name.
    * <p>
-   * This is appropriate for test. Production variations of this class should also evaluate whether the request suits a
-   * valid need for re-keying and should take into account the existing key count and creation times.
+   * This is appropriate for test. Production variations of this class should also evaluate whether
+   * the request suits a valid need for re-keying and should take into account the existing key
+   * count and creation times.
    * <p>
    *
    * @param clientId the unique identifier representing the client making the request
    * @param keyRequestCurveName the name of the elliptic curve being requested for a key operation
-   * @return {@code true} if the request is accepted (i.e., no conflicting key pair exists for the client and curve
-   *     name), otherwise {@code false}
+   * @return {@code true} if the request is accepted (i.e., no conflicting key pair exists for the
+   *         client and curve name), otherwise {@code false}
    */
   @Override
-  protected void validateAgainstKeyGenerationPolicy(final String clientId, final String keyRequestCurveName)
+  protected void validateAgainstKeyGenerationPolicy(final String clientId,
+      final String keyRequestCurveName)
       throws ServiceRequestHandlingException {
     if (keyRegistry.numberOfKeys(clientId, keyRequestCurveName) >= 2) {
-      throw new ServiceRequestHandlingException("The this curve already has the maximum number of keys (2)",
+      throw new ServiceRequestHandlingException(
+          "The this curve already has the maximum number of keys (2)",
           ErrorCode.UNAUTHORIZED);
     }
   }
 
   @Override
-  protected List<ListKeysResponsePayload.KeyInfo> getKeyInfo(final String clientId, List<String> requestedCurveNames)
+  protected List<ListKeysResponsePayload.KeyInfo> getKeyInfo(final String clientId,
+      List<String> requestedCurveNames)
       throws ServiceRequestException {
 
     List<ListKeysResponsePayload.KeyInfo> keyInfoList = new ArrayList<>();
@@ -102,19 +109,20 @@ public class GenericHSMServiceHandler extends HsmServiceHandler {
     try {
       final KeyProviderBundle kpBundle = getKeyProviderBundle(keyRequestCurveName);
       keyRegistry.generateAndStoreKey(clientId, kpBundle);
-    }
-    catch (Exception e) {
-      throw new ServiceRequestHandlingException("Failed to generate key: " + e.getMessage(), ErrorCode.SERVER_ERROR);
+    } catch (Exception e) {
+      throw new ServiceRequestHandlingException("Failed to generate key: " + e.getMessage(),
+          ErrorCode.SERVER_ERROR);
     }
   }
 
   @Override
-  protected void deleteKey(final String clientId, final String kid) throws ServiceRequestHandlingException {
+  protected void deleteKey(final String clientId, final String kid)
+      throws ServiceRequestHandlingException {
     try {
       keyRegistry.deleteKey(clientId, kid);
-    }
-    catch (ServiceRequestException e) {
-      throw new ServiceRequestHandlingException("Unable to remove key key store", ErrorCode.SERVER_ERROR);
+    } catch (ServiceRequestException e) {
+      throw new ServiceRequestHandlingException("Unable to remove key key store",
+          ErrorCode.SERVER_ERROR);
     }
   }
 
@@ -137,26 +145,25 @@ public class GenericHSMServiceHandler extends HsmServiceHandler {
         keyAgreement.doPhase(publicKey, true);
         // figure out Z length from the EC curve size
         int fieldSize = ((ECKey) publicKey).getParams().getCurve().getField().getFieldSize();
-        int zLen = (fieldSize + 7) / 8;    // P-256→32, P-384→48, P-521→66
+        int zLen = (fieldSize + 7) / 8; // P-256→32, P-384→48, P-521→66
 
         byte[] sharedSecret = new byte[zLen];
         keyAgreement.generateSecret(sharedSecret, 0);
-          return sharedSecret;
-      }
-      catch (InvalidKeyException | ShortBufferException e) {
+        return sharedSecret;
+      } catch (InvalidKeyException | ShortBufferException e) {
         throw new ServiceRequestHandlingException("Curve mismatch between public and private key",
             ErrorCode.ILLEGAL_REQUEST_DATA);
       }
 
-    }
-    catch (NoSuchAlgorithmException | ServiceRequestException e) {
+    } catch (NoSuchAlgorithmException | ServiceRequestException e) {
       throw new ServiceRequestHandlingException("Error performing DH operation: " + e.getMessage(),
           ErrorCode.SERVER_ERROR);
     }
   }
 
   @Override
-  protected byte[] ecdsaSignHashed(final String clientId, final String kid, final byte[] signRequestHashedData)
+  protected byte[] ecdsaSignHashed(final String clientId, final String kid,
+      final byte[] signRequestHashedData)
       throws ServiceRequestHandlingException {
     try {
       Optional<EcKeyPairRecord> recordOptional = keyRegistry.getRecord(clientId, kid);
@@ -182,9 +189,10 @@ public class GenericHSMServiceHandler extends HsmServiceHandler {
       signature.initSign(keyPair.getPrivate());
       signature.update(signRequestHashedData);
       return signature.sign();
-    }
-    catch (NoSuchAlgorithmException | InvalidKeyException | SignatureException | ServiceRequestException e) {
-      throw new ServiceRequestHandlingException("Error performing signature operation: " + e.getMessage(),
+    } catch (NoSuchAlgorithmException | InvalidKeyException | SignatureException
+        | ServiceRequestException e) {
+      throw new ServiceRequestHandlingException(
+          "Error performing signature operation: " + e.getMessage(),
           ErrorCode.SERVER_ERROR);
     }
   }

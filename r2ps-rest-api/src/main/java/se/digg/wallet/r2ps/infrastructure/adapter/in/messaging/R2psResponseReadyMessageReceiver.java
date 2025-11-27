@@ -1,4 +1,4 @@
-package se.digg.wallet.r2ps.infrastructure.adapter.in;
+package se.digg.wallet.r2ps.infrastructure.adapter.in.messaging;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -15,32 +15,24 @@ import se.digg.wallet.r2ps.domain.model.R2psResponse;
 import se.digg.wallet.r2ps.infrastructure.adapter.dto.R2psResponseDto;
 import se.digg.wallet.r2ps.infrastructure.config.Config;
 
-import java.util.Optional;
-import java.util.UUID;
-import java.util.concurrent.TimeUnit;
-
 import static java.lang.Thread.sleep;
 
 @Service
-public class R2psResponseSink {
+public class R2psResponseReadyMessageReceiver {
 
   /** temporary work-around for synchronous client **/
   private static final String SOURCE_TOPIC = "r2ps-responses";
   private static final long RESPONSE_TTL_SECONDS = 120;
 
-  private static final Logger log = LoggerFactory.getLogger(R2psResponseSink.class);
+  private static final Logger log = LoggerFactory.getLogger(R2psResponseReadyMessageReceiver.class);
 
-  private final Config config;
   private final ObjectMapper objectMapper;
-  private final RedisTemplate<String, R2psResponseDto> redisTemplate;
   private final R2psResponseUseCase r2psResponseUseCase;
 
-  public R2psResponseSink(Config config, ObjectMapper objectMapper,
-      RedisTemplate<String, R2psResponseDto> redisTemplate, R2psResponseSinkSpiPort r2psResponseSinkSpiPort) {
-    this.config = config;
+  public R2psResponseReadyMessageReceiver(ObjectMapper objectMapper,
+      R2psResponseSinkSpiPort r2psResponseSinkSpiPort) {
     this.objectMapper = objectMapper;
-    this.redisTemplate = redisTemplate;
-    r2psResponseUseCase = new R2psResponseService(r2psResponseSinkSpiPort)
+    r2psResponseUseCase = new R2psResponseService(r2psResponseSinkSpiPort);
   }
 
 

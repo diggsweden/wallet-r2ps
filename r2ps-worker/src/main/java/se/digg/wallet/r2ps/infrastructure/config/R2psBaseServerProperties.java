@@ -233,8 +233,7 @@ public class R2psBaseServerProperties {
     String keystoreFileLocation;
     Duration hsmKeyRetensionDuration;
 
-    public HSMConfigurationProperties() {
-    }
+    public HSMConfigurationProperties() {}
 
     public List<PKCS11ConfigFileProperties> getPkcs11Config() {
       return this.pkcs11Config;
@@ -286,33 +285,28 @@ public class R2psBaseServerProperties {
         return false;
       final Object this$pkcs11Config = this.getPkcs11Config();
       final Object other$pkcs11Config = other.getPkcs11Config();
-      if (this$pkcs11Config == null ?
-          other$pkcs11Config != null :
-          !this$pkcs11Config.equals(other$pkcs11Config))
+      if (this$pkcs11Config == null ? other$pkcs11Config != null
+          : !this$pkcs11Config.equals(other$pkcs11Config))
         return false;
       final Object this$keystorePassword = this.getKeystorePassword();
       final Object other$keystorePassword = other.getKeystorePassword();
-      if (this$keystorePassword == null ?
-          other$keystorePassword != null :
-          !this$keystorePassword.equals(other$keystorePassword))
+      if (this$keystorePassword == null ? other$keystorePassword != null
+          : !this$keystorePassword.equals(other$keystorePassword))
         return false;
       final Object this$keyWrapAlias = this.getKeyWrapAlias();
       final Object other$keyWrapAlias = other.getKeyWrapAlias();
-      if (this$keyWrapAlias == null ?
-          other$keyWrapAlias != null :
-          !this$keyWrapAlias.equals(other$keyWrapAlias))
+      if (this$keyWrapAlias == null ? other$keyWrapAlias != null
+          : !this$keyWrapAlias.equals(other$keyWrapAlias))
         return false;
       final Object this$keystoreFileLocation = this.getKeystoreFileLocation();
       final Object other$keystoreFileLocation = other.getKeystoreFileLocation();
-      if (this$keystoreFileLocation == null ?
-          other$keystoreFileLocation != null :
-          !this$keystoreFileLocation.equals(other$keystoreFileLocation))
+      if (this$keystoreFileLocation == null ? other$keystoreFileLocation != null
+          : !this$keystoreFileLocation.equals(other$keystoreFileLocation))
         return false;
       final Object this$hsmKeyRetensionDuration = this.getHsmKeyRetensionDuration();
       final Object other$hsmKeyRetensionDuration = other.getHsmKeyRetensionDuration();
-      if (this$hsmKeyRetensionDuration == null ?
-          other$hsmKeyRetensionDuration != null :
-          !this$hsmKeyRetensionDuration.equals(other$hsmKeyRetensionDuration))
+      if (this$hsmKeyRetensionDuration == null ? other$hsmKeyRetensionDuration != null
+          : !this$hsmKeyRetensionDuration.equals(other$hsmKeyRetensionDuration))
         return false;
       return true;
     }
@@ -334,14 +328,17 @@ public class R2psBaseServerProperties {
       result =
           result * PRIME + ($keystoreFileLocation == null ? 43 : $keystoreFileLocation.hashCode());
       final Object $hsmKeyRetensionDuration = this.getHsmKeyRetensionDuration();
-      result = result * PRIME + ($hsmKeyRetensionDuration == null ?
-          43 :
-          $hsmKeyRetensionDuration.hashCode());
+      result = result * PRIME
+          + ($hsmKeyRetensionDuration == null ? 43 : $hsmKeyRetensionDuration.hashCode());
       return result;
     }
 
     public String toString() {
-      return "R2psBaseServerProperties.HSMConfigurationProperties(pkcs11Config=" + this.getPkcs11Config() + ", keystorePassword=" + this.getKeystorePassword() + ", keyWrapAlias=" + this.getKeyWrapAlias() + ", keystoreFileLocation=" + this.getKeystoreFileLocation() + ", hsmKeyRetensionDuration=" + this.getHsmKeyRetensionDuration() + ")";
+      return "R2psBaseServerProperties.HSMConfigurationProperties(pkcs11Config="
+          + this.getPkcs11Config() + ", keystorePassword=" + this.getKeystorePassword()
+          + ", keyWrapAlias=" + this.getKeyWrapAlias() + ", keystoreFileLocation="
+          + this.getKeystoreFileLocation() + ", hsmKeyRetensionDuration="
+          + this.getHsmKeyRetensionDuration() + ")";
     }
   }
 
@@ -350,8 +347,7 @@ public class R2psBaseServerProperties {
     private SupportedCurve curve;
     private String location;
 
-    public PKCS11ConfigFileProperties() {
-    }
+    public PKCS11ConfigFileProperties() {}
 
     public SupportedCurve getCurve() {
       return this.curve;
@@ -403,7 +399,8 @@ public class R2psBaseServerProperties {
     }
 
     public String toString() {
-      return "R2psBaseServerProperties.PKCS11ConfigFileProperties(curve=" + this.getCurve() + ", location=" + this.getLocation() + ")";
+      return "R2psBaseServerProperties.PKCS11ConfigFileProperties(curve=" + this.getCurve()
+          + ", location=" + this.getLocation() + ")";
     }
   }
 }

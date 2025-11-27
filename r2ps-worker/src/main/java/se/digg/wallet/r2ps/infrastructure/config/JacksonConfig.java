@@ -56,6 +56,4 @@ public class JacksonConfig {
         .put(AvailableSettings.JSON_FORMAT_MAPPER, new JacksonJsonFormatMapper(objectMapper));
   }
 
-
-
 }

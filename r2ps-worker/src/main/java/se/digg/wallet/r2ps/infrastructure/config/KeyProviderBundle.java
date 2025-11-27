@@ -28,8 +28,7 @@ public class KeyProviderBundle {
     this.keyStoreStrategy = keyStoreStrategy;
   }
 
-  public KeyProviderBundle() {
-  }
+  public KeyProviderBundle() {}
 
   public static KeyProviderBundleBuilder builder() {
     return new KeyProviderBundleBuilder();
@@ -113,23 +112,20 @@ public class KeyProviderBundle {
       return false;
     final Object this$keyPairGenerator = this.getKeyPairGenerator();
     final Object other$keyPairGenerator = other.getKeyPairGenerator();
-    if (this$keyPairGenerator == null ?
-        other$keyPairGenerator != null :
-        !this$keyPairGenerator.equals(other$keyPairGenerator))
+    if (this$keyPairGenerator == null ? other$keyPairGenerator != null
+        : !this$keyPairGenerator.equals(other$keyPairGenerator))
       return false;
     if (!java.util.Arrays.equals(this.getKsPassword(), other.getKsPassword()))
       return false;
     final Object this$ksLocation = this.getKsLocation();
     final Object other$ksLocation = other.getKsLocation();
-    if (this$ksLocation == null ?
-        other$ksLocation != null :
-        !this$ksLocation.equals(other$ksLocation))
+    if (this$ksLocation == null ? other$ksLocation != null
+        : !this$ksLocation.equals(other$ksLocation))
       return false;
     final Object this$keyStoreStrategy = this.getKeyStoreStrategy();
     final Object other$keyStoreStrategy = other.getKeyStoreStrategy();
-    if (this$keyStoreStrategy == null ?
-        other$keyStoreStrategy != null :
-        !this$keyStoreStrategy.equals(other$keyStoreStrategy))
+    if (this$keyStoreStrategy == null ? other$keyStoreStrategy != null
+        : !this$keyStoreStrategy.equals(other$keyStoreStrategy))
       return false;
     return true;
   }
@@ -158,8 +154,12 @@ public class KeyProviderBundle {
   }
 
   public String toString() {
-    return "KeyProviderBundle(curve=" + this.getCurve() + ", provider=" + this.getProvider() + ", keyStore=" + this.getKeyStore() + ", keyPairGenerator=" + this.getKeyPairGenerator() + ", ksPassword=" + java.util.Arrays.toString(
-        this.getKsPassword()) + ", ksLocation=" + this.getKsLocation() + ", keyStoreStrategy=" + this.getKeyStoreStrategy() + ")";
+    return "KeyProviderBundle(curve=" + this.getCurve() + ", provider=" + this.getProvider()
+        + ", keyStore=" + this.getKeyStore() + ", keyPairGenerator=" + this.getKeyPairGenerator()
+        + ", ksPassword=" + java.util.Arrays.toString(
+            this.getKsPassword())
+        + ", ksLocation=" + this.getKsLocation() + ", keyStoreStrategy="
+        + this.getKeyStoreStrategy() + ")";
   }
 
   public static class KeyProviderBundleBuilder {
@@ -171,8 +171,7 @@ public class KeyProviderBundle {
     private File ksLocation;
     private KeyStoreStrategy keyStoreStrategy;
 
-    KeyProviderBundleBuilder() {
-    }
+    KeyProviderBundleBuilder() {}
 
     public KeyProviderBundleBuilder curve(String curve) {
       this.curve = curve;
@@ -215,8 +214,11 @@ public class KeyProviderBundle {
     }
 
     public String toString() {
-      return "KeyProviderBundle.KeyProviderBundleBuilder(curve=" + this.curve + ", provider=" + this.provider + ", keyStore=" + this.keyStore + ", keyPairGenerator=" + this.keyPairGenerator + ", ksPassword=" + java.util.Arrays.toString(
-          this.ksPassword) + ", ksLocation=" + this.ksLocation + ", keyStoreStrategy=" + this.keyStoreStrategy + ")";
+      return "KeyProviderBundle.KeyProviderBundleBuilder(curve=" + this.curve + ", provider="
+          + this.provider + ", keyStore=" + this.keyStore + ", keyPairGenerator="
+          + this.keyPairGenerator + ", ksPassword=" + java.util.Arrays.toString(
+              this.ksPassword)
+          + ", ksLocation=" + this.ksLocation + ", keyStoreStrategy=" + this.keyStoreStrategy + ")";
     }
   }
 }

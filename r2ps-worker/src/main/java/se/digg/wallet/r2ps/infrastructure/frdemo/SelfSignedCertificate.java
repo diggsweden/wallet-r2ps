@@ -20,7 +20,8 @@ public class SelfSignedCertificate {
 
   public static SecureRandom RNG = new SecureRandom();
 
-  public static X509Certificate create(KeyPair kp, String subjectDn, int days, Provider provider) throws Exception {
+  public static X509Certificate create(KeyPair kp, String subjectDn, int days, Provider provider)
+      throws Exception {
     long now = System.currentTimeMillis();
     Date start = new Date(now);
     Date end = Date.from(Instant.now().plus(Duration.ofDays(days)));

@@ -11,7 +11,8 @@ public interface PrivateKeyWrapper {
 
   void generateKey(String kid, KeyProviderBundle kpBundle) throws ServiceRequestException;
 
-  PrivateKey unwrapKey(EcKeyPairRecord keyPairRecord, String kid, KeyProviderBundle kpBundle) throws ServiceRequestException;
+  PrivateKey unwrapKey(EcKeyPairRecord keyPairRecord, String kid, KeyProviderBundle kpBundle)
+      throws ServiceRequestException;
 
   void deleteKeyFromHsm(KeyCacheRecord keyCacheRecord) throws ServiceRequestException;
 

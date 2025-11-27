@@ -1,4 +1,7 @@
 package se.digg.wallet.r2ps.domain.command;
 
-public record RegisterServerWallet(CommandMetadata metadata) implements Command  {
+import java.security.PublicKey;
+import java.util.Optional;
+
+public record RegisterServerWallet(Optional<PublicKey> devicePublicKey, CommandMetadata metadata) implements Command  {
 }

@@ -1,14 +1,18 @@
 package se.digg.wallet.r2ps.infrastructure.config;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JavaType;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.serializer.Jackson2JsonRedisSerializer;
+import se.digg.wallet.r2ps.domain.aggregate.ServerWallet;
 import se.digg.wallet.r2ps.domain.event.Event;
-import se.digg.wallet.r2ps.infrastructure.adapter.dto.R2psResponseDto;
+import se.digg.wallet.r2ps.domain.model.R2psResponse;
 
+import java.util.List;
 import java.util.UUID;
 
 @Configuration
@@ -22,18 +26,38 @@ class ValKeyConfig {
   }
 
   @Bean
-  RedisTemplate<String, R2psResponseDto> redisTemplate(RedisConnectionFactory connectionFactory) {
-    RedisTemplate<String, R2psResponseDto> template = new RedisTemplate<>();
+  RedisTemplate<String, R2psResponse> redisTemplate(RedisConnectionFactory connectionFactory) {
+    RedisTemplate<String, R2psResponse> template = new RedisTemplate<>();
     template.setConnectionFactory(connectionFactory);
-    template.setValueSerializer(new Jackson2JsonRedisSerializer<>(mapper, R2psResponseDto.class));
+    template.setValueSerializer(new Jackson2JsonRedisSerializer<>(mapper, R2psResponse.class));
     return template;
   }
 
   @Bean
-  RedisTemplate<UUID, Event> redisTemplateEvent(RedisConnectionFactory connectionFactory) {
-    RedisTemplate<UUID, Event> template = new RedisTemplate<>();
+  RedisTemplate<UUID, List<Event>> redisTemplateEvent(RedisConnectionFactory connectionFactory) {
+    RedisTemplate<UUID, List<Event>> template = new RedisTemplate<>();
     template.setConnectionFactory(connectionFactory);
-    template.setValueSerializer(new Jackson2JsonRedisSerializer<>(mapper, Event.class));
+    JavaType javaType = mapper.getTypeFactory().constructCollectionType(List.class, Event.class);
+    template.setValueSerializer(new Jackson2JsonRedisSerializer<>(mapper, javaType));
     return template;
   }
+
+  @Bean
+  RedisTemplate<UUID, ServerWallet> redisTemplateServerWallet(
+      RedisConnectionFactory connectionFactory) {
+    RedisTemplate<UUID, ServerWallet> template = new RedisTemplate<>();
+    template.setConnectionFactory(connectionFactory);
+    template.setValueSerializer(new Jackson2JsonRedisSerializer<>(mapper, ServerWallet.class));
+    return template;
+  }
+
+  @Bean
+  RedisTemplate<String, ServerWallet> redisTemplateStringServerWallet(
+      RedisConnectionFactory connectionFactory) {
+    RedisTemplate<String, ServerWallet> template = new RedisTemplate<>();
+    template.setConnectionFactory(connectionFactory);
+    template.setValueSerializer(new Jackson2JsonRedisSerializer<>(mapper, ServerWallet.class));
+    return template;
+  }
+
 }

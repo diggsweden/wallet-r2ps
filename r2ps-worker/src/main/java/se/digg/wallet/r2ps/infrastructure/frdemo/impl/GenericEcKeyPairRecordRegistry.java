@@ -63,8 +63,8 @@ public class GenericEcKeyPairRecordRegistry implements EcKeyPairRecordRegistry, 
             .addSerializer(X509Certificate.class, new X509CertificateSerializer())
             .addDeserializer(X509Certificate.class, new X509CertificateDeserializer())
             .addSerializer(Instant.class, new InstantMillisSerializer())
-            .addDeserializer(Instant.class, new InstantMillisDeserializer())
-        ).build();
+            .addDeserializer(Instant.class, new InstantMillisDeserializer()))
+        .build();
   }
 
   private final File registryFile;
@@ -94,8 +94,7 @@ public class GenericEcKeyPairRecordRegistry implements EcKeyPairRecordRegistry, 
       try {
         final Map<String, Map<String, EcKeyPairRecord>> loadedRecords =
             OBJECT_MAPPER.readValue(registryFile,
-                new TypeReference<Map<String, Map<String, EcKeyPairRecord>>>() {
-                });
+                new TypeReference<Map<String, Map<String, EcKeyPairRecord>>>() {});
         this.records.putAll(loadedRecords);
         // Remove dangling keys from keyStores
         synchronize();
@@ -115,7 +114,8 @@ public class GenericEcKeyPairRecordRegistry implements EcKeyPairRecordRegistry, 
 
   private void backupKeyStore(KeyProviderBundle kpBundle)
       throws IOException, CertificateException, KeyStoreException, NoSuchAlgorithmException {
-    if (kpBundle.getKsLocation() != null && kpBundle.getKeyStoreStrategy() == KeyStoreStrategy.objects) {
+    if (kpBundle.getKsLocation() != null
+        && kpBundle.getKeyStoreStrategy() == KeyStoreStrategy.objects) {
       // Save back to the same file (atomic write shown below)
       Path ksPath = kpBundle.getKsLocation().toPath();
       Path tmp = ksPath.resolveSibling(ksPath.getFileName() + ".tmp");
@@ -176,20 +176,22 @@ public class GenericEcKeyPairRecordRegistry implements EcKeyPairRecordRegistry, 
             (PrivateKey) kpBundle.getKeyStore().getKey(kid, kpBundle.getKsPassword());
         return new KeyPair(record.certificate().getPublicKey(), key);
       }
-      // This key is not in the KeyStore. It is only wrapped by the HSM and stored outside as an encrypted key.
+      // This key is not in the KeyStore. It is only wrapped by the HSM and stored outside as an
+      // encrypted key.
       // Attempt to find the PrivateKey handle in the cache?
       PrivateKey cachedPrivateKey = privateKeyCache.getKey(kid);
       if (cachedPrivateKey != null) {
         return new KeyPair(record.certificate().getPublicKey(), cachedPrivateKey);
       }
-      // It is not in the cache. Unwrap it and put the PrivateKey handle it in the cache under its kid.
+      // It is not in the cache. Unwrap it and put the PrivateKey handle it in the cache under its
+      // kid.
       PrivateKey unwrappedPrivateKey = keyWrapper.unwrapKey(record, kid, kpBundle);
       privateKeyCache.putKey(kid, unwrappedPrivateKey, kpBundle);
       // This key will be usable until its TTL is reached, then deleted from the HSM and the cache.
       // The TTL is reset after each getKey(), making the TTL a max idle time before it's removed.
       return new KeyPair(record.certificate().getPublicKey(), unwrappedPrivateKey);
-    } catch (UnrecoverableKeyException | KeyStoreException | NoSuchAlgorithmException |
-        ClassCastException e) {
+    } catch (UnrecoverableKeyException | KeyStoreException | NoSuchAlgorithmException
+        | ClassCastException e) {
       throw new ServiceRequestException("Unable to retrieve key: " + e.getMessage(), e);
     }
   }
@@ -278,8 +280,7 @@ public class GenericEcKeyPairRecordRegistry implements EcKeyPairRecordRegistry, 
             continue;
           }
           boolean inUse = false;
-          outer:
-          for (Map<String, EcKeyPairRecord> map : records.values()) {
+          outer: for (Map<String, EcKeyPairRecord> map : records.values()) {
             for (EcKeyPairRecord rec : map.values()) {
               if (kid.equals(rec.kid())) {
                 inUse = true;
@@ -309,43 +310,39 @@ public class GenericEcKeyPairRecordRegistry implements EcKeyPairRecordRegistry, 
 
   }
 
-/*  private byte[] wrapPrivateKey(final KeyProviderBundle kpBundle, final PrivateKey privateKey)
-      throws NoSuchPaddingException, NoSuchAlgorithmException,
-      InvalidKeyException, IllegalBlockSizeException, IOException, InvalidKeySpecException,
-      InvalidAlgorithmParameterException {
-    Provider p11Provider = kpBundle.getProvider();
-    PublicKey kekPub = getKekPublicKey();
-
-    // List ciphers:
-    log.debug("Available ciphers:\n{}",
-        p11Provider.getServices().stream()
-            .filter(s -> s.getType().equals("Cipher"))
-            .map(s -> s.getAlgorithm())
-            .sorted().toList());
-
-    var oaep = new OAEPParameterSpec("SHA-1", "MGF1", MGF1ParameterSpec.SHA1, PSource.PSpecified.DEFAULT);
-    Cipher wrapC = Cipher.getInstance("RSA/ECB/OAEPWithSHA-1AndMGF1Padding", p11Provider);
-    wrapC.init(Cipher.WRAP_MODE, kekPub, oaep);
-    return wrapC.wrap(privateKey);  // returns PKCS#8 wrapped by RSA-OAEP
-  }
-
-  private PublicKey getKekPublicKey() throws NoSuchAlgorithmException, IOException, InvalidKeySpecException {
-    return null;
-  }
-
-  private PrivateKey unwrapPrivateKey(final KeyProviderBundle kpBundle, final String keyWrapAlias, byte[] wrappedPkcs8)
-      throws KeyStoreException, NoSuchPaddingException, NoSuchAlgorithmException, UnrecoverableKeyException,
-      InvalidAlgorithmParameterException, InvalidKeyException {
-
-    KeyStore keyStore = kpBundle.getKeyStore();
-    Provider p11Provider = kpBundle.getProvider();
-    PrivateKey kekPriv = (PrivateKey) keyStore.getKey(keyWrapAlias, kpBundle.getKsPassword());
-
-    var oaep = new OAEPParameterSpec("SHA-1", "MGF1", MGF1ParameterSpec.SHA1, PSource.PSpecified.DEFAULT);
-    Cipher unwrapC = Cipher.getInstance("RSA/ECB/OAEPWithSHA-1AndMGF1Padding", p11Provider);
-    unwrapC.init(Cipher.UNWRAP_MODE, kekPriv, oaep);
-    return (PrivateKey) unwrapC.unwrap(wrappedPkcs8, "EC", Cipher.PRIVATE_KEY);
-  }*/
+  /*
+   * private byte[] wrapPrivateKey(final KeyProviderBundle kpBundle, final PrivateKey privateKey)
+   * throws NoSuchPaddingException, NoSuchAlgorithmException, InvalidKeyException,
+   * IllegalBlockSizeException, IOException, InvalidKeySpecException,
+   * InvalidAlgorithmParameterException { Provider p11Provider = kpBundle.getProvider(); PublicKey
+   * kekPub = getKekPublicKey();
+   *
+   * // List ciphers: log.debug("Available ciphers:\n{}", p11Provider.getServices().stream()
+   * .filter(s -> s.getType().equals("Cipher")) .map(s -> s.getAlgorithm()) .sorted().toList());
+   *
+   * var oaep = new OAEPParameterSpec("SHA-1", "MGF1", MGF1ParameterSpec.SHA1,
+   * PSource.PSpecified.DEFAULT); Cipher wrapC =
+   * Cipher.getInstance("RSA/ECB/OAEPWithSHA-1AndMGF1Padding", p11Provider);
+   * wrapC.init(Cipher.WRAP_MODE, kekPub, oaep); return wrapC.wrap(privateKey); // returns PKCS#8
+   * wrapped by RSA-OAEP }
+   *
+   * private PublicKey getKekPublicKey() throws NoSuchAlgorithmException, IOException,
+   * InvalidKeySpecException { return null; }
+   *
+   * private PrivateKey unwrapPrivateKey(final KeyProviderBundle kpBundle, final String
+   * keyWrapAlias, byte[] wrappedPkcs8) throws KeyStoreException, NoSuchPaddingException,
+   * NoSuchAlgorithmException, UnrecoverableKeyException, InvalidAlgorithmParameterException,
+   * InvalidKeyException {
+   *
+   * KeyStore keyStore = kpBundle.getKeyStore(); Provider p11Provider = kpBundle.getProvider();
+   * PrivateKey kekPriv = (PrivateKey) keyStore.getKey(keyWrapAlias, kpBundle.getKsPassword());
+   *
+   * var oaep = new OAEPParameterSpec("SHA-1", "MGF1", MGF1ParameterSpec.SHA1,
+   * PSource.PSpecified.DEFAULT); Cipher unwrapC =
+   * Cipher.getInstance("RSA/ECB/OAEPWithSHA-1AndMGF1Padding", p11Provider);
+   * unwrapC.init(Cipher.UNWRAP_MODE, kekPriv, oaep); return (PrivateKey)
+   * unwrapC.unwrap(wrappedPkcs8, "EC", Cipher.PRIVATE_KEY); }
+   */
 
 
 

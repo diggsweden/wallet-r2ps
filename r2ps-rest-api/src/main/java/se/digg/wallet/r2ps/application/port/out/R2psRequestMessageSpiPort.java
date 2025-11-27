@@ -6,5 +6,5 @@ import se.digg.wallet.r2ps.infrastructure.adapter.dto.R2psRequestDto;
 import se.digg.wallet.r2ps.infrastructure.adapter.dto.R2psResponseDto;
 
 public interface R2psRequestMessageSpiPort {
-  void sendR2psRequestMessage(R2psRequestDto r2psRequestDto);
+  void sendR2psRequestMessage(R2psRequest r2psRequest);
 }

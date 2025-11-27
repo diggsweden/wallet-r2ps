@@ -36,9 +36,11 @@ logging:
 
 r2ps:
   rest:
-    response-template-url: http://localhost:8088/r2ps-api/task/%s
+    response-events-template-url: http://localhost:8088/r2ps-api/task/%s
+    response-wallet-template-url: http://localhost:8088/r2ps-api/wallet/response/%s
     serve-sync: true
     sync-timeout-ms: 3000
+    responseTtlSeconds: 600
   out:
     topic: "r2ps-requests"
   in:

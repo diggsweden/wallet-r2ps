@@ -13,6 +13,5 @@ public record EcKeyPairRecord(
     /* Name of the elliptic curve used to identify the curve in the Service API */
     String curveName,
     /* Time of original key creation */
-    Instant creationTime
-) {
+    Instant creationTime) {
 }

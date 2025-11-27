@@ -7,6 +7,8 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.nimbusds.jose.JOSEException;
 import com.nimbusds.jose.JWSAlgorithm;
 import org.bouncycastle.util.encoders.Hex;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
 import org.springframework.data.redis.core.RedisTemplate;
@@ -55,6 +57,7 @@ import java.util.Map;
 @Component
 public class R2psBaseConfig {
   public static final ObjectMapper YAML_MAPPER;
+  private static final Logger log = LoggerFactory.getLogger(R2psBaseConfig.class);
 
   static {
     YAML_MAPPER = new ObjectMapper(new YAMLFactory());
@@ -74,14 +77,14 @@ public class R2psBaseConfig {
       CredentialBundles credentialBundles, R2psBaseServerProperties rpsOpsServerProperties,
       ServiceTypeRegistry serviceTypeRegistry,
       List<ServiceRequestDispatcher> serviceRequestDispatchers,
-      //List<ServiceTypeHandler> serviceTypeHandlerList,
+      // List<ServiceTypeHandler> serviceTypeHandlerList,
       PakeSessionRegistry<ServerPakeRecord> serverPakeSessionRegistry,
       ClientPublicKeyRegistry clientPublicKeyRegistry,
       GenericHSMServiceHandler genericHSMServiceHandler,
-  SessionServiceHandler sessionServiceHandler,
-      SessionTaskRegistry sessionTaskRegistry, ClientRecordRegistry clientRecordRegistry
-  ) {
+      SessionServiceHandler sessionServiceHandler,
+      SessionTaskRegistry sessionTaskRegistry, ClientRecordRegistry clientRecordRegistry) {
 
+    log.info("SERVER OPAQUE KEY: {}", rpsOpsServerProperties.getServerOpaqueKey());
     final PkiCredential opaqueCredential =
         credentialBundles.getCredential(rpsOpsServerProperties.getServerOpaqueKey());
     final Map<String, Object> serverKeyProp =
@@ -90,8 +93,8 @@ public class R2psBaseConfig {
     JWSAlgorithm serverJwsAlgorithm =
         JWSAlgorithm.parse((String) serverKeyProp.get("jws-algorithm"));
 
-    //final PkiCredential opaqueCredential =
-      //  credentialBundles.getCredential("rhsm-server");
+    // final PkiCredential opaqueCredential =
+    // credentialBundles.getCredential("rhsm-server");
 
 
     OpaqueServiceHandler opaqueServiceHandler = new OpaqueServiceHandler(
@@ -107,7 +110,7 @@ public class R2psBaseConfig {
         Duration.ofMinutes(15),
         Duration.ofSeconds(5));
 
-    List<ServiceTypeHandler> serviceTypeHandlerList =  List.of(
+    List<ServiceTypeHandler> serviceTypeHandlerList = List.of(
         opaqueServiceHandler,
         sessionServiceHandler,
 
@@ -173,36 +176,25 @@ public class R2psBaseConfig {
   }
 
   /*
-  @Bean
-  List<ServiceTypeHandler> serviceTypeHandlerList(SessionServiceHandler sessionServiceHandler,
-      ClientPublicKeyRegistry clientPublicKeyRegistry,
-      CredentialBundles credentialBundles,
-      PakeSessionRegistry<ServerPakeRecord> serverPakeSessionRegistry,
-      SessionTaskRegistry sessionTaskRegistry, ClientRecordRegistry clientRecordRegistry) {
-
-    final PkiCredential opaqueCredential =
-        credentialBundles.getCredential("rhsm-server");
-
-
-    OpaqueServiceHandler opaqueServiceHandler = new OpaqueServiceHandler(
-        List.of("hsm"),
-        new CodeMatchPinAuthorization(clientPublicKeyRegistry),
-        OpaqueConfiguration.defaultConfiguration(),
-        "https://cloud-wallet.digg.se/rhsm",
-        Hex.decode("9aba66b536549dc6630f719bbcbaa16cbf70253d273640d7690f6e2e4ef69875"),
-        new KeyPair(opaqueCredential.getPublicKey(), opaqueCredential.getPrivateKey()),
-        serverPakeSessionRegistry,
-        clientRecordRegistry,
-        sessionTaskRegistry,
-        Duration.ofMinutes(15),
-        Duration.ofSeconds(5));
-
-    return List.of(
-        opaqueServiceHandler,
-        sessionServiceHandler,
-        new AuthzRegistrationServiceHandler(clientPublicKeyRegistry));
-  }
-*/
+   * @Bean List<ServiceTypeHandler> serviceTypeHandlerList(SessionServiceHandler
+   * sessionServiceHandler, ClientPublicKeyRegistry clientPublicKeyRegistry, CredentialBundles
+   * credentialBundles, PakeSessionRegistry<ServerPakeRecord> serverPakeSessionRegistry,
+   * SessionTaskRegistry sessionTaskRegistry, ClientRecordRegistry clientRecordRegistry) {
+   *
+   * final PkiCredential opaqueCredential = credentialBundles.getCredential("rhsm-server");
+   *
+   *
+   * OpaqueServiceHandler opaqueServiceHandler = new OpaqueServiceHandler( List.of("hsm"), new
+   * CodeMatchPinAuthorization(clientPublicKeyRegistry), OpaqueConfiguration.defaultConfiguration(),
+   * "https://cloud-wallet.digg.se/rhsm",
+   * Hex.decode("9aba66b536549dc6630f719bbcbaa16cbf70253d273640d7690f6e2e4ef69875"), new
+   * KeyPair(opaqueCredential.getPublicKey(), opaqueCredential.getPrivateKey()),
+   * serverPakeSessionRegistry, clientRecordRegistry, sessionTaskRegistry, Duration.ofMinutes(15),
+   * Duration.ofSeconds(5));
+   *
+   * return List.of( opaqueServiceHandler, sessionServiceHandler, new
+   * AuthzRegistrationServiceHandler(clientPublicKeyRegistry)); }
+   */
   @Bean
   SessionServiceHandler sessionServiceHandler(
       PakeSessionRegistry<ServerPakeRecord> pakeSessionRegistry) {

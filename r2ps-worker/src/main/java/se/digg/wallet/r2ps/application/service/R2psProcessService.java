@@ -11,8 +11,8 @@ import se.digg.wallet.r2ps.commons.StaticResources;
 import se.digg.wallet.r2ps.commons.dto.ErrorCode;
 import se.digg.wallet.r2ps.commons.dto.ErrorResponse;
 import se.digg.wallet.r2ps.commons.exception.ServiceRequestHandlingException;
-import se.digg.wallet.r2ps.domain.domain.model.R2psRequest;
-import se.digg.wallet.r2ps.domain.domain.model.R2psResponse;
+import se.digg.wallet.r2ps.domain.model.R2psRequest;
+import se.digg.wallet.r2ps.domain.model.R2psResponse;
 import se.digg.wallet.r2ps.server.service.ServiceRequestHandler;
 
 import java.util.List;
@@ -47,15 +47,13 @@ public class R2psProcessService implements R2psRequestUseCase {
           r2psRequest.walletId(),
           r2psRequest.deviceId(),
           200,
-          responseBody,
-          null,
-          List.of());
+          responseBody);
     } catch (ServiceRequestHandlingException e) {
       log.error("R2PS request failed for requestId: {} error: ", r2psRequest.requestId(), e);
       r2psResponse = getErrorResponseString(r2psRequest, e.getErrorCode(), e.getMessage());
     } catch (RuntimeException re) {
-        log.error("Unexpected error while processing R2PS request for requestId: {} ",
-            r2psRequest.requestId(), re);
+      log.error("Unexpected error while processing R2PS request for requestId: {} ",
+          r2psRequest.requestId(), re);
       throw re;
     }
 
@@ -74,7 +72,7 @@ public class R2psProcessService implements R2psRequestUseCase {
           r2psRequest.walletId(),
           r2psRequest.deviceId(),
           errorCode.getResponseCode(),
-          body, null, List.of());
+          r2psRequest.payload());
     } catch (JsonProcessingException e) {
       throw new RuntimeException(e);
     }

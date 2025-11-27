@@ -218,8 +218,8 @@ public class CLIPrivateKeyWrapper implements PrivateKeyWrapper {
       }
       return (PrivateKey) keyStore.getKey(keyLabel, kpBundle.getKsPassword());
     } catch (
-        KeyStoreException | UnrecoverableKeyException | NoSuchAlgorithmException | IOException |
-            CertificateException e) {
+        KeyStoreException | UnrecoverableKeyException | NoSuchAlgorithmException | IOException
+        | CertificateException e) {
       throw new RuntimeException(e);
     }
   }
@@ -351,7 +351,7 @@ public class CLIPrivateKeyWrapper implements PrivateKeyWrapper {
       List<String> output = new ArrayList<>();
       try (BufferedReader reader = new BufferedReader(
           new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
-        for (String line; (line = reader.readLine()) != null; ) {
+        for (String line; (line = reader.readLine()) != null;) {
           output.add(line);
         }
       }

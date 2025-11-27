@@ -57,7 +57,7 @@ public class HsmBeanConfiguration {
               p11Config.getCurve(), p11Config.getLocation());
           final File hsmConfigFile = ConfigUtils.getFile(p11Config.getLocation());
           log.info("HSM config file exists: {}", hsmConfigFile.exists());
-          log.debug("HSM config file content\n{}", Files.readString(hsmConfigFile.toPath()));
+          log.debug("HSM config file content{}", Files.readString(hsmConfigFile.toPath()));
           Provider p11Provider =
               Security.getProvider("SunPKCS11").configure(hsmConfigFile.getAbsolutePath());
 

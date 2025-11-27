@@ -16,11 +16,18 @@ public class UrlFormatterService {
   }
 
   public URI responseUrl(AsyncResponseDto<?> asyncResponseDto) {
-    return responseUrl(asyncResponseDto.correlationId());
+    return responseEventsUrl(asyncResponseDto.correlationId());
   }
 
-  public URI responseUrl(UUID correlationId) {
+  public URI responseEventsUrl(UUID correlationId) {
     return URI.create(
-        String.format(config.getKafka().rest().responseTemplateUrl(), correlationId.toString()));
+        String.format(config.getKafka().rest().responseEventsTemplateUrl(),
+            correlationId.toString()));
+  }
+
+  public URI responseWalletUrl(UUID correlationId) {
+    return URI.create(
+        String.format(config.getKafka().rest().responseWalletTemplateUrl(),
+            correlationId.toString()));
   }
 }

@@ -14,8 +14,8 @@ import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.core.ProducerFactory;
 import org.springframework.kafka.support.serializer.JsonDeserializer;
 import org.springframework.kafka.support.serializer.JsonSerializer;
-import se.digg.wallet.r2ps.infrastructure.adapter.dto.R2psRequestDto;
-import se.digg.wallet.r2ps.infrastructure.adapter.dto.R2psResponseDto;
+import se.digg.wallet.r2ps.domain.model.R2psRequest;
+import se.digg.wallet.r2ps.domain.model.R2psResponse;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -30,7 +30,7 @@ public class KafkaProducerConfig {
   }
 
   @Bean
-  public ConsumerFactory<String, R2psRequestDto> consumerFactoryR2psRequest() {
+  public ConsumerFactory<String, R2psRequest> consumerFactoryR2psRequest() {
     Map<String, Object> configProps = new HashMap<>(kafkaProperties.buildProducerProperties(null));
     configProps.put(
         ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG,
@@ -40,11 +40,11 @@ public class KafkaProducerConfig {
         JsonDeserializer.class);
     // JSON Deserializer configuration
     configProps.put(JsonDeserializer.TRUSTED_PACKAGES, "*");
-    configProps.put(JsonDeserializer.VALUE_DEFAULT_TYPE, R2psRequestDto.class.getName());
+    configProps.put(JsonDeserializer.VALUE_DEFAULT_TYPE, R2psRequest.class.getName());
     configProps.put(JsonDeserializer.USE_TYPE_INFO_HEADERS, false);
     return new DefaultKafkaConsumerFactory<>(configProps, new StringDeserializer(),
         new JsonDeserializer<>(
-            R2psRequestDto.class, false));
+            R2psRequest.class, false));
   }
 
   @Bean
@@ -65,7 +65,7 @@ public class KafkaProducerConfig {
   }
 
   @Bean
-  public ProducerFactory<String, R2psResponseDto> producerFactoryR2psResponse() {
+  public ProducerFactory<String, R2psResponse> producerFactoryR2psResponse() {
     Map<String, Object> configProps = new HashMap<>(kafkaProperties.buildProducerProperties(null));
     configProps.put(
         ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG,
@@ -77,7 +77,7 @@ public class KafkaProducerConfig {
   }
 
   @Bean
-  public ConsumerFactory<String, R2psResponseDto> consumerFactoryR2psResponse() {
+  public ConsumerFactory<String, R2psResponse> consumerFactoryR2psResponse() {
     Map<String, Object> configProps = new HashMap<>(kafkaProperties.buildProducerProperties(null));
     configProps.put(
         ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG,
@@ -87,13 +87,13 @@ public class KafkaProducerConfig {
         JsonDeserializer.class);
     return new DefaultKafkaConsumerFactory<>(configProps, new StringDeserializer(),
         new JsonDeserializer<>(
-            R2psResponseDto.class));
+            R2psResponse.class));
   }
 
 
   @Bean
-  public KafkaTemplate<String, R2psResponseDto> kafkaTemplateR2psResponse(
-      ProducerFactory<String, R2psResponseDto> producerFactory) {
+  public KafkaTemplate<String, R2psResponse> kafkaTemplateR2psResponse(
+      ProducerFactory<String, R2psResponse> producerFactory) {
     return new KafkaTemplate<>(producerFactory);
   }
 
