@@ -31,7 +31,7 @@ impl R2psResponseSpiPort for R2psResponseKafkaMessageSender {
             Ok(output_json) => {
                 let key = r2ps_response.wallet_id;
                 let request_id = r2ps_response.request_id.clone();
-                let record = BaseRecord::to("r2ps-responses-rust")
+                let record = BaseRecord::to("r2ps-responses")
                     .key(&key)
                     .payload(&output_json);
 

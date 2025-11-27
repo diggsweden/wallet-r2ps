@@ -2,7 +2,6 @@ mod domain;
 mod infrastructure;
 mod application;
 
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tracing::{info, instrument, warn};
@@ -11,33 +10,20 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
 //use foyer::{Cache, CacheBuilder, EvictionConfig, LruConfig};
-use opaque_ke::{ServerRegistrationLen, ServerSetup};
-use opaque_ke::generic_array::GenericArray;
-use rand::rngs::OsRng;
-use crate::application::{R2psService};
+use crate::application::{ClientRepositorySpiPort, R2psService};
 use crate::domain::{DefaultCipherSuite};
 use crate::infrastructure::{KafkaConfig, R2psRequestKafkaMessageReceiver};
+use crate::infrastructure::client_repository_memory_cache::ClientRepositoryMemoryCache;
 use crate::infrastructure::r2ps_response_kafka_message_sender::R2psResponseKafkaMessageSender;
+use crate::infrastructure::session_key_memory_cache::SessionKeyMemoryCache;
 
 #[instrument(name="main", skip_all)]
 fn main() {
 
     /*
     TODO
-    let cache: Cache<String, String> = CacheBuilder::new(2048)
-        .with_eviction_config(EvictionConfig::Lru(LruConfig {
-            high_priority_pool_ratio: 0.8,
-        }))
-        .build();
+
 */
-    let mut rng = OsRng;
-
-    let server_setup = ServerSetup::<DefaultCipherSuite>::new(&mut rng);
-
-    // TODO
-    let mut registered_users =
-        HashMap::<String, GenericArray<u8, ServerRegistrationLen<DefaultCipherSuite>>>::new();
-    //registered_users.insert("a25d8884-c77b-43ab-bf9d-1279c08d860d".to_string(), Default::default());
 
     // init tracing
     tracing_subscriber::registry()
@@ -72,7 +58,9 @@ fn main() {
 
     // init server
     let r2ps_kafka_sender = R2psResponseKafkaMessageSender::new(&cfg.clone());
-    let r2ps_service = R2psService::new(Arc::new(r2ps_kafka_sender), server_setup);
+    let client_repository = Arc::new(ClientRepositoryMemoryCache::new());
+    let session_key_cache = Arc::new(SessionKeyMemoryCache::new());
+    let r2ps_service = R2psService::new(Arc::new(r2ps_kafka_sender), client_repository.clone(), session_key_cache.clone());
     let r2ps_kafka_receiver = R2psRequestKafkaMessageReceiver::new(&r2ps_service, running.clone());
 
     // start worker i.e. process requests to responses

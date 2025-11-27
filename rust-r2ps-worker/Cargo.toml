@@ -13,7 +13,10 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 ctrlc = {  version="3.4", features = ["termination"] }
 dotenvy = "0.15.7"
 dotenv_config="0.2.2"
+dotenv_codegen="0.15.0"
 foyer = "0.20"
+moka = { version = "0.12", features = ["sync"] }
+strum_macros = "0.27.2"
 
 opaque-ke = { git = "https://github.com/facebook/opaque-ke", features = ["argon2"]} #, rev = "6d2af37a" }
 rand = "0.8"
@@ -25,9 +28,15 @@ p256 = { version = "0.13", default-features = false, features = [
     "hash2curve",
     "pkcs8",
     "voprf",
+    "pem",
+    "ecdh",
 ] }
+elliptic-curve = { version = "0.13", features = ["sec1"] }
 jsonwebtoken = "9"
-
+pem = "3"
 argon2 = { version = "0.5", features = ["std"] }
 hmac = "0.12"
 generic-array = "0.14"
+chrono = "0.4.42"
+uuid = { version = "1.18.1", features = ["v4"] }
+digest = "0.10.7"

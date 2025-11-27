@@ -1,4 +1,6 @@
 use std::time::Duration;
+use josekit::jwk::Jwk;
+use pem::Pem;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize)]
@@ -17,7 +19,7 @@ pub struct R2PsResponse {
     pub request_id: String,
     pub wallet_id: String,
     pub device_id: String,
-    pub status: u16,
+    pub http_status: u16,
     pub payload: String,
 }
 
@@ -27,7 +29,7 @@ pub struct ServiceRequest {
     pub kid: String,
     pub context: String,
     #[serde(rename = "type")]
-    pub service_type: String,
+    pub service_type: ServiceTypeId,
     pub pake_session_id: Option<String>,
     #[serde(rename = "ver")]
     pub version: Option<String>,
@@ -37,6 +39,29 @@ pub struct ServiceRequest {
     #[serde(rename = "data")]
     pub service_data: Option<String>,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ServiceTypeId {
+    Authenticate,
+    PinRegistration,
+    PinChange,
+    HsmEcdsa,
+    HsmEcdh,
+    #[serde(rename = "hsm_ec_keygen")]
+    HsmEcKeygen,
+    #[serde(rename = "hsm_ec_delete_key")]
+    HsmEcDeleteKey,
+    HsmListKeys,
+    SessionEnd,
+    SessionContextEnd,
+    Store,
+    Retrieve,
+    Log,
+    GetLog,
+    Info,
+}
+
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PakeResponsePayload {
@@ -146,4 +171,10 @@ mod duration_serde {
         let secs = Option::<u64>::deserialize(deserializer)?;
         Ok(secs.map(Duration::from_secs))
     }
+}
+#[derive(Debug, Clone)]
+pub struct R2psServerConfig {
+    //pub private_key_jwk: Jwk,
+    pub server_public_key: Pem,
+    pub server_private_key: Pem,
 }
