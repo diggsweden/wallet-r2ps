@@ -40,3 +40,4 @@ generic-array = "0.14"
 chrono = "0.4.42"
 uuid = { version = "1.18.1", features = ["v4"] }
 digest = "0.10.7"
+hex = "0.4.3"

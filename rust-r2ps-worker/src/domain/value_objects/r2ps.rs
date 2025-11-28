@@ -2,6 +2,7 @@ use std::time::Duration;
 use josekit::jwk::Jwk;
 use pem::Pem;
 use serde::{Deserialize, Serialize};
+use strum_macros::Display;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -177,4 +178,26 @@ pub struct R2psServerConfig {
     //pub private_key_jwk: Jwk,
     pub server_public_key: Pem,
     pub server_private_key: Pem,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Display)]
+pub enum ServiceRequestError {
+    JwsError,
+    JweError,
+    InvalidServiceRequestFormat,
+    InvalidClientPublicKey,
+    UnsupportedContext,
+    Unknown,
+}
+
+#[derive(Debug)]
+pub enum R2psRequestError {
+    ConnectionError,
+    UnknownClient,
+    JwsError,
+    DecryptionError,
+    EncryptionError,
+    UnsupportedContext,
+    NotImplemented,
+    ServiceError(ServiceRequestError)
 }

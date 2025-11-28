@@ -1,8 +1,8 @@
 use crate::application::client_repository_spi_port::ClientRepositorySpiPort;
 use crate::application::session_key_spi_port::{LoginSession, SessionKeySpiPort};
-use crate::application::{load_pem_from_bas64_env, R2psRequestError, R2psRequestId, R2psRequestUseCase, R2psResponseSpiPort};
+use crate::application::{load_pem_from_bas64_env, R2psRequestId, R2psRequestUseCase, R2psResponseSpiPort};
 use crate::domain::value_objects::r2ps::{Claims, PakeRequestPayload, PakeResponsePayload, ServiceRequest};
-use crate::domain::{ClientMetadata, PakeState, R2PsResponse, R2psRequest, R2psServerConfig, ServiceTypeId};
+use crate::domain::{ClientMetadata, PakeState, R2PsResponse, R2psRequest, R2psRequestError, R2psServerConfig, ServiceRequestError, ServiceTypeId};
 use crate::DefaultCipherSuite;
 use argon2::password_hash::rand_core::OsRng;
 use base64::engine::general_purpose;
@@ -21,7 +21,7 @@ use generic_array::GenericArray;
 use opaque_ke::keypair::{KeyPair, OprfSeed, PrivateKey, PublicKey};
 use p256::NistP256;
 use rdkafka::message::ToBytes;
-use tracing::{error, info, instrument};
+use tracing::{debug, error, info, instrument};
 use strum_macros::Display;
 use uuid::Uuid;
 use p256::pkcs8::DecodePrivateKey;
@@ -76,16 +76,22 @@ impl R2psService {
                 // 5. Create KeyPair
                 let keypair = KeyPair::new(opaque_private_key, opaque_public_key);
 
+                let mut hasher = Sha256::new();
+                hasher.update(keypair.public().serialize().to_vec());
+                let result = hasher.finalize();
+                info!("######## OPAQUE public key: {} {:?} {:?}", hex::encode(result), result, &keypair.public().serialize().to_vec());
+
 
                 // 6. Create OPRF seed - needs to be Output<Sha256> (32 bytes)
-                let seed_hash: Output<Sha256> = Sha256::digest("a27366b536549dc6630f719bbcbaa16cbf70253d273640d7690f6e2e4ef6a5c7".as_bytes());
-              //  let oprf_seed = OprfSeed::<Sha256>::new(seed_hash);
-
+                //let seed_hash: Output<Sha256> = Sha256::digest("a27366b536549dc6630f719bbcbaa16cbf70253d273640d7690f6e2e4ef6a5c7".as_bytes());
+               // let oprf_seed = OprfSeed::<Sha256>::new();
 
                 let server_setup = ServerSetup::<DefaultCipherSuite>::new_with_key_pair(
                     &mut rng,
                     keypair,
                 );
+
+
 
                 Self {
                     r2ps_response_spi_port,
@@ -113,95 +119,66 @@ impl R2psService {
 
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Display)]
-enum ServiceRequestError {
-    JwsError,
-    JweError,
-    InvalidServiceRequestFormat,
-    InvalidClientPublicKey,
-    UnsupportedContext,
-    Unknown,
-}
+
 
 impl R2psRequestUseCase for R2psService {
 
     fn execute(&self, r2ps_request: R2psRequest) -> Result<R2psRequestId, R2psRequestError> {
-        let r2ps_response: Result<R2PsResponse, ServiceRequestError> = match self.client_repository_spi_port.client_metadata(r2ps_request.device_id.as_str()) {
-            Some(client_metadata) => {
-                match decode_r2ps_request_jws(&r2ps_request, &client_metadata.client_public_key) {
-                    Ok(service_request) => {
-                        info!("DECODED JWS {:?}", service_request);
-                        match service_request.context == "hsm" {
-                            true => match service_request.pake_session_id {
-                                Some(pake_session_id) => {
-                                    // TODO identifies session key for request....
-                                    info!("pake_session_id: {:?}", pake_session_id);
-                                    Err(ServiceRequestError::Unknown)
-                                },
-                                None => {
-                                    match decrypt_service_data_jwe(&service_request, &self.r2ps_server_config.server_private_key) {
-                                        Ok(decrypted_payload) => {
-                                            match process_service_request(&service_request, &decrypted_payload, &r2ps_request.device_id, &self) {
-                                                Ok(response) => {
-                                                    match encrypt_with_ec_pem(&response, &client_metadata.client_public_key) {
-                                                        Ok(jwe) => {
-                                                            match jws_with_jwk(&jwe, service_request.nonce) {
-                                                                Ok(jws) => {
-                                                                    info!("JWKS {:?}", jws);
-                                                                    Ok(R2PsResponse{
-                                                                        request_id: r2ps_request.request_id,
-                                                                        wallet_id: r2ps_request.wallet_id,
-                                                                        device_id: r2ps_request.device_id,
-                                                                        http_status: 200,
-                                                                        payload: jws,
-                                                                    })
-                                                                },
-                                                                Err(err) => {
-                                                                    error!("error {:?}", err);
-                                                                    Err(ServiceRequestError::Unknown)
-                                                                }
-                                                            }
-                                                        }
-                                                        Err(e) => {
-                                                            error!("error {:?}", e);
-                                                            Err(ServiceRequestError::Unknown)
-                                                        }
-                                                    }
-                                                }
-                                                Err(error) => Err(error)
-                                            }
-                                        }
-                                        Err(e) => Err(ServiceRequestError::Unknown)
-                                    }
-                                }
-                            },
-                            false => Err(ServiceRequestError::UnsupportedContext)
-                        }
-                    },
-                    Err(error) => Err(ServiceRequestError::JwsError)
-                }
-            }
-            None => Err(ServiceRequestError::Unknown) // TODO kolla mer i detalj
-        };
+        let client_metadata = self
+            .client_repository_spi_port
+            .client_metadata(r2ps_request.device_id.as_str())
+            .ok_or(R2psRequestError::UnknownClient)?;
 
+        let service_request = decode_r2ps_request_jws(&r2ps_request, &client_metadata.client_public_key)
+            .map_err(|_| R2psRequestError::JwsError)?;
 
-        match r2ps_response {
-            Ok(r) => {
-                let request_id = r.request_id.clone();
-                info!("request id: {} {:?}", request_id, r);
-                match self.r2ps_response_spi_port.send(r) {
-                    Ok(_) => Ok(request_id),
-                    Err(_err) => Err(R2psRequestError::ConnectionError), // TODO map error
-                }
-            },
-            Err(error) => Err(R2psRequestError::ConnectionError)
+        debug!("DECODED JWS {:?}", service_request);
+
+        if service_request.context != "hsm" {
+            return Err(R2psRequestError::UnsupportedContext);
         }
 
+        if let Some(pake_session_id) = &service_request.pake_session_id {
+            // TODO: identifies session key for request
+            debug!("pake_session_id: {:?}", pake_session_id);
+            return Err(R2psRequestError::NotImplemented);
+        }
+
+        let decrypted_payload = decrypt_service_data_jwe(
+            &service_request,
+            &self.r2ps_server_config.server_private_key,
+        ).map_err(|_| R2psRequestError::DecryptionError)?;
+
+        let response = process_service_request(
+            &service_request,
+            &decrypted_payload,
+            &r2ps_request.device_id,
+            self,
+        ).map_err(|e| R2psRequestError::ServiceError(e))?;
 
 
+        let jwe = encrypt_with_ec_pem(&response, &client_metadata.client_public_key)
+            .map_err(|_| R2psRequestError::EncryptionError)?;
+
+        let jws = jws_with_jwk(&jwe, service_request.nonce)
+            .map_err(|_| R2psRequestError::JwsError)?;
+
+        debug!("JWKS {:?}", jws);
+
+        let r2ps_response = R2PsResponse {
+            request_id: r2ps_request.request_id.clone(),
+            wallet_id: r2ps_request.wallet_id.clone(),
+            device_id: r2ps_request.device_id.clone(),
+            http_status: 200,
+            payload: jws,
+        };
+
+        self.r2ps_response_spi_port
+            .send(r2ps_response)
+            .map(|_| r2ps_request.request_id.clone())
+            .map_err(|_| R2psRequestError::ConnectionError)
 
     }
-
 
 }
 
@@ -220,19 +197,45 @@ fn authenticate(decrypted_payload: &Vec<u8>, device_id: &str, r2ps_service: &R2p
                     let password_file = ServerRegistration::<DefaultCipherSuite>::deserialize(&r2ps_service.client_repository_spi_port.client_metadata(device_id).unwrap().password_file.unwrap().to_bytes()).unwrap();
                     let mut server_rng = OsRng;
 
+                    let context = "RPS-Ops".as_bytes();
+                    let client= "a25d8884-c77b-43ab-bf9d-1279c08d640d".as_bytes();
+                    let server = "https://cloud-wallet.digg.se/rhsm".as_bytes();
+                    let credential_request = CredentialRequest::deserialize(&rb).unwrap();
+
+                    let mut hasher = Sha256::new();
+                    hasher.update(context);
+                    let result = hasher.finalize();
+                    info!("######## OPAQUE context: {} {:?}", hex::encode(result), context);
+
+                    let mut hasher = Sha256::new();
+                    hasher.update(client);
+                    let result = hasher.finalize();
+                    info!("######## OPAQUE client: {} {:?}", hex::encode(result), client);
+
+                    let mut hasher = Sha256::new();
+                    hasher.update(server);
+                    let result = hasher.finalize();
+                    info!("######## OPAQUE server: {} {:?}", hex::encode(result), server);
+
+                    // let mut hasher = Sha256::new();
+                    // hasher.update(&credential_request);
+                    // let result = hasher.finalize();
+                    // info!("######## OPAQUE cr: {} {:?} {:?}", hex::encode(result), result, &rb);
+
                     let server_login_parameters = ServerLoginParameters{
-                        context: Some("hsm".as_bytes()),
+                        context: Some(context),
                         identifiers: Identifiers {
-                            client: Some("a25d8884-c77b-43ab-bf9d-1279c08d860d".as_bytes()),
-                            server: Some("https://cloud-wallet.digg.se/rhsm".as_bytes()),
+                            client: Some(client),
+                            //client: Some("wallet-hsm-key-1".as_bytes()),
+                            server: Some(server),
                         },
                     };
                     match ServerLogin::start(
                         &mut server_rng,
                         &r2ps_service.opaque_server_setup,
                         Some(password_file),
-                        CredentialRequest::deserialize(&rb).unwrap(),
-                        device_id.as_bytes(),
+                        credential_request,
+                        "a25d8884-c77b-43ab-bf9d-1279c08d640d".as_bytes(),
                         server_login_parameters,
                     ) {
                         Ok(server_login_start_result) => {
@@ -314,7 +317,7 @@ fn pin_registration(decrypted_payload: &Vec<u8>, device_id: &str, r2ps_service: 
                     match ServerRegistration::<DefaultCipherSuite>::start(
                         &r2ps_service.opaque_server_setup,
                         reg_req,
-                        device_id.as_bytes()
+                        "a25d8884-c77b-43ab-bf9d-1279c08d640d".as_bytes(),
                     ) {
                         Ok(d) => {
                             info!("START {:?}", d.message);
