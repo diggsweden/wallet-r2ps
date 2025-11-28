@@ -141,7 +141,7 @@ impl R2psRequestUseCase for R2psService {
         if let Some(pake_session_id) = &service_request.pake_session_id {
             // TODO: identifies session key for request
             debug!("pake_session_id: {:?}", pake_session_id);
-            return Err(R2psRequestError::NotImplemented);
+            //return Err(R2psRequestError::NotImplemented);
         }
 
         let decrypted_payload = decrypt_service_data_jwe(
@@ -194,11 +194,16 @@ fn authenticate(decrypted_payload: &Vec<u8>, device_id: &str, r2ps_service: &R2p
 
             match pake_payload.state {
                 PakeState::Evaluate => {
-                    let password_file = ServerRegistration::<DefaultCipherSuite>::deserialize(&r2ps_service.client_repository_spi_port.client_metadata(device_id).unwrap().password_file.unwrap().to_bytes()).unwrap();
+                    let serialized = r2ps_service.client_repository_spi_port.client_metadata(device_id);
+                    let password_file_serialized = serialized.and_then(|meta_data| {meta_data.password_file.clone()}).unwrap();
+                    //let password_file_serialized =
+                      //  ServerRegistration::<DefaultCipherSuite>::deserialize(&r2ps_service.client_repository_spi_port.client_metadata(device_id).unwrap().password_file.unwrap().to_bytes()).unwrap();
+                    let password_file = ServerRegistration::<DefaultCipherSuite>::deserialize(&password_file_serialized).unwrap();
+                    info!("password file: {:?}", password_file);
                     let mut server_rng = OsRng;
 
                     let context = "RPS-Ops".as_bytes();
-                    let client= "a25d8884-c77b-43ab-bf9d-1279c08d640d".as_bytes();
+                    let client= device_id.as_bytes();
                     let server = "https://cloud-wallet.digg.se/rhsm".as_bytes();
                     let credential_request = CredentialRequest::deserialize(&rb).unwrap();
 
@@ -235,7 +240,7 @@ fn authenticate(decrypted_payload: &Vec<u8>, device_id: &str, r2ps_service: &R2p
                         &r2ps_service.opaque_server_setup,
                         Some(password_file),
                         credential_request,
-                        "a25d8884-c77b-43ab-bf9d-1279c08d640d".as_bytes(),
+                        device_id.as_bytes(),
                         server_login_parameters,
                     ) {
                         Ok(server_login_start_result) => {
@@ -276,7 +281,7 @@ fn authenticate(decrypted_payload: &Vec<u8>, device_id: &str, r2ps_service: &R2p
                         task: None,
                         response_data: Some(general_purpose::STANDARD.encode(msg.to_vec())),
                         message: None,
-                        session_expiration_time: None,
+                        session_expiration_time: Some(Utc::now().timestamp()),
                     };
                     match serde_json::to_vec(&pake_response) {
                         Ok(payload_vec) => Ok(payload_vec),
@@ -317,7 +322,7 @@ fn pin_registration(decrypted_payload: &Vec<u8>, device_id: &str, r2ps_service: 
                     match ServerRegistration::<DefaultCipherSuite>::start(
                         &r2ps_service.opaque_server_setup,
                         reg_req,
-                        "a25d8884-c77b-43ab-bf9d-1279c08d640d".as_bytes(),
+                        device_id.as_bytes(),
                     ) {
                         Ok(d) => {
                             info!("START {:?}", d.message);
@@ -365,8 +370,10 @@ fn pin_registration(decrypted_payload: &Vec<u8>, device_id: &str, r2ps_service: 
                             client_id: client_metadata.client_id,
                             wallet_id: client_metadata.wallet_id,
                             client_public_key: client_metadata.client_public_key,
-                            password_file: Some(password_file.serialize().to_vec())
+                            password_file: Some(password_file.serialize()),
                         });
+                        info!("Store metadata: {:?}", password_file);
+
                     },
                     _ => {}
                 }
