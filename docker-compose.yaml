@@ -2,9 +2,27 @@ name: r2ps-dev
 
 services:
 
+  r2ps-demo-client:
+    image: rhsm-client
+    ports:
+      - "9000:8080"
+      - "9002:8000"
+    restart: on-failure
+    volumes:
+      - ./r2ps-demo-client/resources:/resources
+      - ./r2ps-demo-client/demo:/demo
+    environment:
+      SPRING_CONFIG_ADDITIONAL_LOCATION: /config/
+      SPRING_PROFILES_ACTIVE: demo
+      RPS_OPS_CLIENT_SERVER_URL: http://r2ps-rest-api:8088
+      SERVER_PORT: 8080
+      SERVER_SSL_ENABLED: "false"
+      TZ: "Europe/Stockholm"
+      JAVA_TOOL_OPTIONS: "-Djava.net.preferIPv4Stack=true -XX:UseSVE=0"
+    networks:
+      - wallet-network
+
   r2ps-rest-api:
-    profiles:
-      - dev
     build:
       context: .
       dockerfile: ./r2ps-rest-api/Containerfile
@@ -28,7 +46,7 @@ services:
 
   r2ps-worker:
     profiles:
-      - dev
+      - old-java
     build:
       context: .
       dockerfile: ./r2ps-worker/Containerfile
@@ -67,6 +85,8 @@ services:
     build:
       context: ./rust-r2ps-worker
       dockerfile: Containerfile
+    env_file:
+      - ./rust-r2ps-worker/.env
     environment:
       RUST_LOG: info
       BOOTSTRAP_SERVERS: "kafka:29092"

@@ -1,0 +1,22 @@
+server:
+  ssl:
+    enabled: true
+    key-store: /demo/tls.jks
+    key-store-type: JKS
+    key-store-password: 'secret'
+    key-password: 'secret'
+    key-alias: 'tls'
+  port: 8443
+
+rps-ops-client:
+  server-url: http://localhost:8088/
+  contexts:
+    wallet:
+      key: wallet-1-gen
+      server-certificate-location: /resources/dev/server/bff-gen.crt
+      server-identity: https://cloud-wallet.digg.se/bff
+    hsm:
+      key: wallet-1-hsm
+      server-certificate-location: /resources/dev/server/server-key.crt
+      server-identity: https://cloud-wallet.digg.se/rhsm
+

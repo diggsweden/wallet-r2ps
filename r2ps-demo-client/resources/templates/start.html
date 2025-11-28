@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml" xmlns:th="http://www.thymeleaf.org">
+<head>
+  <meta charset="UTF-8">
+
+  <!-- Styles -->
+  <script src="webjars/jquery/3.7.1/jquery.min.js"></script>
+  <script src="webjars/popper.js/1.16.1-lts/dist/umd/popper.min.js"></script>
+  <script src="webjars/bootstrap/5.3.3/js/bootstrap.min.js"></script>
+  <script src="webjars/highlightjs/11.5.0/highlight.min.js"></script>
+  <script src="js/main.js"></script>
+  <!-- Styles -->
+  <link rel="stylesheet" href="css/bootstrap.min.css"/>
+  <link rel="stylesheet" href="css/main.css"/>
+  <link rel="stylesheet" href="webjars/font-awesome/6.5.2/css/all.min.css"/>
+  <link rel="stylesheet" href="webjars/highlightjs/11.5.0/styles/atom-one-light.min.css">
+  <link rel="stylesheet" href="webjars/bootstrap-icons/1.13.1/font/bootstrap-icons.min.css">
+  <title>Remote HSM Wallet Client</title>
+</head>
+
+<body>
+<div class="main-container">
+  <div class="content-wrapper">
+    <div class="header-section">
+      <div class="logo-area">
+        <i class="bi bi-shield-lock fs-1 text-primary me-3"></i>
+        <div>
+          <h1 class="app-title">Remote HSM Wallet Client</h1>
+          <p class="app-subtitle">Secure Digital Wallet Services</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="content-section">
+      <div class="welcome-message">
+        <h5 class="text-muted mb-4">Welcome to the Remote HSM Wallet demo application</h5>
+      </div>
+
+      <div class="auth-container">
+        <div class="d-flex flex-column gap-4 p-4">
+          <button type="button" class="btn btn-primary btn-lg auth-btn" data-bs-toggle="modal" data-bs-target="#loginModal">
+            <i class="bi bi-box-arrow-in-right me-2"></i>
+            Login
+          </button>
+
+          <button type="button" class="btn btn-outline-primary btn-lg auth-btn" data-bs-toggle="modal" data-bs-target="#registerModal">
+            <i class="bi bi-person-plus me-2"></i>
+            Register
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Login Modal -->
+<div class="modal fade" id="loginModal" tabindex="-1" aria-labelledby="loginModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="loginModalLabel">Login</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <form action="login" method="post">
+          <div class="mb-3">
+            <label for="password" class="form-label">PIN</label>
+            <input type="password" class="form-control" id="password" name="pin" required>
+          </div>
+          <div class="d-grid">
+            <button type="submit" class="btn btn-primary">Login</button>
+          </div>
+        </form>
+        <div class="text-center mt-3">
+          <p>Don't have an account? <a href="#" data-bs-toggle="modal" data-bs-target="#registerModal">Register here</a></p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Registration Modal -->
+<div class="modal fade" id="registerModal" tabindex="-1" aria-labelledby="registerModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="registerModalLabel">Register</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <form action="register" method="post">
+          <div class="mb-3">
+            <label for="registerPassword" class="form-label">PIN</label>
+            <input type="password" class="form-control" id="registerPassword" name="pin" required>
+          </div>
+          <div class="mb-3">
+            <label for="confirmPin" class="form-label">Confirm PIN</label>
+            <input type="password" class="form-control" id="confirmPin" name="confirmPin" required>
+          </div>
+          <div class="d-grid">
+            <button type="submit" class="btn btn-primary">Register</button>
+          </div>
+        </form>
+        <div class="text-center mt-3">
+          <p>Already have an account? <a href="#" data-bs-toggle="modal" data-bs-target="#loginModal">Login here</a></p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // For login modal
+        document.getElementById('loginModal').addEventListener('shown.bs.modal', function () {
+            document.getElementById('password').focus();
+        });
+
+        // For register modal
+        document.getElementById('registerModal').addEventListener('shown.bs.modal', function () {
+            document.getElementById('registerPassword').focus();
+        });
+    });
+</script>
+
+<!-- Notification Modal -->
+<div class="modal fade" id="notificationModal" tabindex="-1" aria-labelledby="notificationModalLabel" aria-hidden="true"
+     th:if="${message != null or errorMessage != null}">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content" th:classappend="${errorMessage != null ? 'border-danger' : 'border-success'}">
+      <div class="modal-header border-0"
+           th:classappend="${errorMessage != null ? 'bg-danger-subtle' : 'bg-success-subtle'}">
+        <h5 class="modal-title" id="notificationModalLabel">
+          <i class="bi" th:classappend="${errorMessage != null ? 'bi-exclamation-circle-fill text-danger' : 'bi-check-circle-fill text-success'}"></i>
+          <span th:text="${errorMessage != null ? 'Error' : 'Success'}">Notification</span>
+        </h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body text-center">
+        <p class="mb-0" th:utext="${errorMessage != null ? errorMessage : message}"></p>
+      </div>
+      <div class="modal-footer border-0">
+        <button type="button" class="btn"
+                th:classappend="${errorMessage != null ? 'btn-outline-danger' : 'btn-outline-success'}"
+                data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Message or error message modal load script -->
+<script th:if="${message != null or errorMessage != null}">
+    document.addEventListener('DOMContentLoaded', function() {
+        var notificationModal = new bootstrap.Modal(document.getElementById('notificationModal'));
+        notificationModal.show();
+
+        // Optional: Auto-hide after 5 seconds
+        setTimeout(function() {
+            notificationModal.hide();
+        }, 5000);
+    });
+</script>
+
+
+</body>
+</html>

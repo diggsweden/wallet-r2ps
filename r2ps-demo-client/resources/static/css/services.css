@@ -1,0 +1,120 @@
+.main-container {
+    min-height: 100vh;
+    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+    padding: 2rem;
+}
+
+.content-wrapper {
+    max-width: 90%;
+    margin: 0 auto;
+    background: white;
+    border-radius: 1.5rem;
+    box-shadow: 0 1rem 3rem rgba(0, 0, 0, 0.075);
+    overflow: auto;
+}
+
+.header-section {
+    padding: 2.5rem;
+    background: linear-gradient(to right, #f8f9fa, #ffffff);
+    border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+}
+
+.logo-area {
+    display: flex;
+    align-items: center;
+}
+
+.app-title {
+    font-size: 2rem;
+    font-weight: 600;
+    color: #212529;
+    margin: 0;
+}
+
+.app-subtitle {
+    color: #6c757d;
+    margin: 0.5rem 0 0;
+    font-size: 1rem;
+}
+
+.content-section {
+    padding: 2.5rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.welcome-message {
+    text-align: center;
+    /* margin-bottom: 2rem; */
+}
+
+.auth-container {
+    width: 100%;
+    max-width: 400px;
+    background: #f8f9fa;
+    border-radius: 1rem;
+/*    margin: 1rem auto;*/
+}
+
+.auth-btn {
+    padding: 1rem 2rem;
+    transition: all 0.3s ease;
+    border-radius: 0.75rem;
+    font-weight: 500;
+    letter-spacing: 0.5px;
+}
+
+.auth-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 0.5rem 1rem rgba(13, 110, 253, 0.15);
+}
+
+.btn-outline-primary:hover {
+    background-color: rgba(13, 110, 253, 0.1);
+    color: #0d6efd;
+    border-color: #0d6efd;
+}
+
+@media (max-width: 768px) {
+    .main-container {
+        padding: 1rem;
+    }
+
+    .header-section {
+        padding: 1.5rem;
+    }
+
+    .app-title {
+        font-size: 1.5rem;
+    }
+
+    .content-section {
+        padding: 1.5rem;
+    }
+}
+
+
+
+.modal-content {
+    border-width: 3px;
+}
+
+.modal-header .bi {
+    font-size: 1.5rem;
+    margin-right: 0.5rem;
+}
+
+/* Optional: Add fade-out animation */
+.modal.fade .modal-dialog {
+    transition: transform .2s ease-out;
+}
+
+.modal.show .modal-dialog {
+    transform: none;
+}
+
+textarea.auto-grow {
+    overflow: hidden;
+    resize: none; /* if you don't want manual resizing */
+}

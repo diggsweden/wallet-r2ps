@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml" xmlns:th="http://www.thymeleaf.org">
+<head>
+  <meta charset="UTF-8">
+
+  <!-- Styles -->
+  <script src="webjars/jquery/3.7.1/jquery.min.js"></script>
+  <script src="webjars/popper.js/1.16.1-lts/dist/umd/popper.min.js"></script>
+  <script src="webjars/bootstrap/5.3.3/js/bootstrap.min.js"></script>
+  <script src="webjars/highlightjs/11.5.0/highlight.min.js"></script>
+  <script src="js/main.js"></script>
+  <!-- Styles -->
+  <link rel="stylesheet" href="css/bootstrap.min.css"/>
+  <link rel="stylesheet" href="css/main.css"/>
+  <link rel="stylesheet" href="webjars/font-awesome/6.5.2/css/all.min.css"/>
+  <link rel="stylesheet" href="webjars/highlightjs/11.5.0/styles/atom-one-light.min.css">
+  <title>Remote HSM Wallet Client</title>
+</head>
+
+<body>
+<div class="container">
+  <div class="card">
+    <div class="card-header">
+      <h1>Remote HSM Wallet Client</h1>
+    </div>
+    <div class="card-body">
+      <h5>Actions</h5>
+      <table class="table table-striped table-sm">
+        <thead>
+        <tr>
+          <th>Action</th>
+          <th>Description</th>
+        </tr>
+        </thead>
+        <tbody>
+        <tr>
+          <td><a class="btn btn-sm btn-primary" href="register-pin-hsm">Register PIN</a></td>
+          <td>Register PIN (1234) for HSM context</td>
+        </tr>
+        <tr>
+          <td><a class="btn btn-primary btn-sm" href="login-hsm">Login</a></td>
+          <td>Login HSM</td>
+        </tr>
+        <tr>
+          <td><a class="btn btn-sm btn-primary" href="register-pin-wallet">Register PIN</a></td>
+          <td>Register PIN (1234) for Wallet context</td>
+        </tr>
+        <tr>
+          <td><a class="btn btn-primary btn-sm" href="login-wallet">Login</a></td>
+          <td>Login Wallet</td>
+        </tr>
+        </tbody>
+
+      </table>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>
