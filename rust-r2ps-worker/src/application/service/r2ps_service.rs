@@ -258,7 +258,7 @@ fn authenticate(decrypted_payload: &Vec<u8>, device_id: &str, r2ps_service: &R2p
                     )
                     .unwrap();
 
-                    info!("SESSION KEY: {:?}", result.session_key);
+                    info!("SESSION KEY: {}", hex::encode(&result.session_key));
 
                     let msg = br#"{"msg":"OK"}"#.to_vec();
                     let pake_response = PakeResponsePayload {
@@ -346,8 +346,9 @@ fn pin_registration(decrypted_payload: &Vec<u8>, device_id: &str, r2ps_service: 
                 let password_file = ServerRegistration::<DefaultCipherSuite>::finish(
                     reg_req,
                 );
+                let password_file_serialized = password_file.serialize();
 
-                info!("password file: {:?}", password_file.serialize());
+                info!("password file: {:?}", hex::encode(password_file_serialized));
 
                 match r2ps_service.client_repository_spi_port.client_metadata(device_id) {
                     Some(client_metadata) => {
@@ -355,7 +356,7 @@ fn pin_registration(decrypted_payload: &Vec<u8>, device_id: &str, r2ps_service: 
                             client_id: client_metadata.client_id,
                             wallet_id: client_metadata.wallet_id,
                             client_public_key: client_metadata.client_public_key,
-                            password_file: Some(password_file.serialize()),
+                            password_file: Some(password_file_serialized),
                         });
                         info!("Store metadata: {:?}", password_file);
 
@@ -482,7 +483,7 @@ fn decrypt_service_data_jwe(service_request: &ServiceRequest, server_private_key
                                         Ok(decrypter) => {
                                             match josekit::jwe::deserialize_compact(&decoded_string, &decrypter) {
                                                 Ok((payload, header)) => {
-                                                    info!("decrypted JWS payload: {:?}", payload);
+                                                    info!("decrypted JWS payload: {}", hex::encode(&payload));
                                                     match String::from_utf8(payload.clone()) {
                                                         Ok(decrypted_text) => println!("================>Decrypted text: {}", decrypted_text),
                                                         Err(error) => println!("Error decrypting JWS payload: {:?}", error),
