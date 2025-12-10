@@ -192,6 +192,22 @@ fn authenticate(decrypted_payload: &Vec<u8>, device_id: &str, r2ps_service: &R2p
                 .decode(pake_payload.request_data)
                 .expect("Failed to decode base64");
 
+            let context = "RPS-Ops".as_bytes();
+            let client = device_id.as_bytes();
+            let server = "https://cloud-wallet.digg.se/rhsm".as_bytes();
+
+            info!("######## OPAQUE context: '{}' hex: {}", String::from_utf8_lossy(context), hex::encode(context));
+            info!("######## OPAQUE client: '{}' hex: {}", String::from_utf8_lossy(client), hex::encode(client));
+            info!("######## OPAQUE server: '{}' hex: {}", String::from_utf8_lossy(server), hex::encode(server));
+
+            let server_login_parameters = ServerLoginParameters{
+                context: Some(context),
+                identifiers: Identifiers {
+                    client: Some(client),
+                    server: Some(server),
+                },
+            };
+
             match pake_payload.state {
                 PakeState::Evaluate => {
                     let serialized = r2ps_service.client_repository_spi_port.client_metadata(device_id);
@@ -202,39 +218,8 @@ fn authenticate(decrypted_payload: &Vec<u8>, device_id: &str, r2ps_service: &R2p
                     info!("password file: {:?}", password_file);
                     let mut server_rng = OsRng;
 
-                    let context = "RPS-Ops".as_bytes();
-                    let client= device_id.as_bytes();
-                    let server = "https://cloud-wallet.digg.se/rhsm".as_bytes();
                     let credential_request = CredentialRequest::deserialize(&rb).unwrap();
 
-                    let mut hasher = Sha256::new();
-                    hasher.update(context);
-                    let result = hasher.finalize();
-                    info!("######## OPAQUE context: {} {:?}", hex::encode(result), context);
-
-                    let mut hasher = Sha256::new();
-                    hasher.update(client);
-                    let result = hasher.finalize();
-                    info!("######## OPAQUE client: {} {:?}", hex::encode(result), client);
-
-                    let mut hasher = Sha256::new();
-                    hasher.update(server);
-                    let result = hasher.finalize();
-                    info!("######## OPAQUE server: {} {:?}", hex::encode(result), server);
-
-                    // let mut hasher = Sha256::new();
-                    // hasher.update(&credential_request);
-                    // let result = hasher.finalize();
-                    // info!("######## OPAQUE cr: {} {:?} {:?}", hex::encode(result), result, &rb);
-
-                    let server_login_parameters = ServerLoginParameters{
-                        context: Some(context),
-                        identifiers: Identifiers {
-                            client: Some(client),
-                            //client: Some("wallet-hsm-key-1".as_bytes()),
-                            server: Some(server),
-                        },
-                    };
                     match ServerLogin::start(
                         &mut server_rng,
                         &r2ps_service.opaque_server_setup,
@@ -269,7 +254,7 @@ fn authenticate(decrypted_payload: &Vec<u8>, device_id: &str, r2ps_service: &R2p
                     let server_login = session.take().unwrap();
                     let result = server_login.finish(
                         CredentialFinalization::deserialize(&rb).unwrap(),
-                        ServerLoginParameters::default(),
+                        server_login_parameters,
                     )
                     .unwrap();
 
