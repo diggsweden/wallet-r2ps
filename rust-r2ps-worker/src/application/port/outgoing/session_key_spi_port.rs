@@ -5,7 +5,7 @@ use crate::domain::{ClientMetadata, DefaultCipherSuite};
 pub trait SessionKeySpiPort {
     fn store(&self, pake_session_id: &str, session_key: &SessionKey) -> Result<(), ClientRepositoryError>;
     fn get(&self, pake_session_id: &str) -> Option<SessionKey>;
-
+    fn end_session(&self, pake_session_id: &str) -> Result<(), ClientRepositoryError>;
     fn store_pending_auth(&self, client_id: &str, server_login_start_result: &Arc<LoginSession>);
     fn get_pending_auth(&self, client_id: &str) -> Option<Arc<LoginSession>>;
 }
@@ -15,7 +15,7 @@ pub enum ClientRepositoryError {
     Unknown
 }
 
-pub type SessionKey = String;
+pub type SessionKey = Vec<u8>;
 
 pub type LoginState = ServerLoginStartResult<DefaultCipherSuite>;
 

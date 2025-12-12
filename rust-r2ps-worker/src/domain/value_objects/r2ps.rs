@@ -24,7 +24,7 @@ pub struct R2PsResponse {
     pub payload: String,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ServiceRequest {
     pub client_id: String,
     pub kid: String,
@@ -63,6 +63,33 @@ pub enum ServiceTypeId {
     Info,
 }
 
+pub enum EncryptOption {
+    User,
+    Device,
+}
+
+impl ServiceTypeId {
+    pub fn encrypt_option(&self) -> EncryptOption {
+        match self {
+            ServiceTypeId::Authenticate => EncryptOption::Device,
+            ServiceTypeId::PinRegistration => EncryptOption::Device,
+            ServiceTypeId::PinChange => EncryptOption::User,
+            ServiceTypeId::HsmEcdsa => EncryptOption::User,
+            ServiceTypeId::HsmEcdh => EncryptOption::User,
+            ServiceTypeId::HsmEcKeygen => EncryptOption::User,
+            ServiceTypeId::HsmEcDeleteKey => EncryptOption::User,
+            ServiceTypeId::HsmListKeys => EncryptOption::User,
+            ServiceTypeId::SessionEnd  => EncryptOption::Device,
+            ServiceTypeId::SessionContextEnd => EncryptOption::Device,
+            ServiceTypeId::Store => EncryptOption::User,
+            ServiceTypeId::Retrieve => EncryptOption::User,
+            ServiceTypeId::Log => EncryptOption::User,
+            ServiceTypeId::GetLog => EncryptOption::User,
+            ServiceTypeId::Info => EncryptOption::User,
+        }
+    }
+}
+
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PakeResponsePayload {
@@ -83,6 +110,49 @@ pub struct PakeResponsePayload {
 
     #[serde(rename = "session_expiration_time")]
     pub session_expiration_time: Option<i64>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub enum Curve {
+    #[serde(rename = "P-256")]
+    P256,
+    #[serde(rename = "P-384")]
+    P384,
+    #[serde(rename = "P-521")]
+    P521,
+}
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct CreateKeyServiceData {
+    pub curve: Curve,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct CreateKeyServiceDataResponse {
+    pub created_key: Curve,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ListKeysResponse {
+    pub key_info: Vec<KeyInfo>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct KeyInfo {
+    pub kid: String,
+    pub curve_name: Curve,
+    pub creation_time: Option<i64>,
+    pub public_key: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ListKeysRequest {
+// TODO finns någon filteringspayload i Stefans kod....
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct SignRequest {
+    pub kid: String,
+    pub tbs_hash: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

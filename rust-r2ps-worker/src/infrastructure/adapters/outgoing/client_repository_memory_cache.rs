@@ -7,6 +7,7 @@ use tracing::error;
 use crate::application::client_repository_spi_port::{ClientRepositoryError, ClientRepositorySpiPort};
 use crate::application::{load_pem_from_bas64_env, LoadPemError};
 use crate::domain::ClientMetadata;
+use crate::infrastructure::hsm_wrapper::HsmKey;
 
 pub struct ClientRepositoryMemoryCache {
     cache: Cache<String, ClientMetadata>
@@ -29,6 +30,7 @@ impl ClientRepositoryMemoryCache {
                     wallet_id: "a25d8884-c77b-43ab-bf9d-1279c08d860d".to_string(),
                     client_public_key,
                     password_file: None,
+                    keys: Vec::new(),
                 });
             }
             Err(e) => {
@@ -54,5 +56,24 @@ impl ClientRepositorySpiPort for ClientRepositoryMemoryCache {
     fn store_metadata(&self, client_metadata: ClientMetadata) -> Result<(), ClientRepositoryError> {
         self.cache.insert(client_metadata.client_id.clone(), client_metadata);
         Ok(())
+    }
+
+    fn add_key(&self, client_id: &str, key: &HsmKey) -> Result<(), ClientRepositoryError> {
+        // TODO race condition - just for demo
+        match self.client_metadata(client_id){
+            None => Ok(()),
+            Some(metadata) => {
+                let new_metadata = ClientMetadata{
+                    keys: {
+                        let mut new_keys = metadata.keys.clone();
+                        new_keys.push(key.clone());
+                        new_keys
+                    },
+                    ..metadata
+                };
+                self.store_metadata(new_metadata)?;
+                Ok(())
+            }
+        }
     }
 }

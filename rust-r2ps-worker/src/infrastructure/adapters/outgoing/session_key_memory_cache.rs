@@ -3,7 +3,7 @@ use std::time::Duration;
 use base64::Engine;
 use base64::prelude::BASE64_STANDARD;
 use dotenv_codegen::dotenv;
-use tracing::error;
+use tracing::{error, info};
 use crate::application::client_repository_spi_port::{ClientRepositoryError, ClientRepositorySpiPort};
 use crate::application::{load_pem_from_bas64_env, LoadPemError};
 use crate::application::session_key_spi_port::{LoginSession, LoginState, SessionKey, SessionKeySpiPort};
@@ -41,14 +41,28 @@ impl SessionKeyMemoryCache {
 impl SessionKeySpiPort for SessionKeyMemoryCache {
 
     fn store(&self, pake_session_id: &str, session_key: &SessionKey) -> Result<(), crate::application::session_key_spi_port::ClientRepositoryError> {
+        info!("storing session key session_id: {} {:02X?}", pake_session_id, session_key);
         self.cache.insert(pake_session_id.to_string(), session_key.clone() );
         Ok(())
     }
 
     fn get(&self, pake_session_id: &str) -> Option<SessionKey> {
+        info!("get session key session_id: {}", pake_session_id);
+
         match self.cache.get(pake_session_id) {
-            Some(session_key) => Some(session_key),
+            Some(session_key) => {
+                info!("get session key session_id: {} {:02X?}", pake_session_id, session_key);
+
+                Some(session_key)
+            },
             None => None
+        }
+    }
+
+    fn end_session(&self, pake_session_id: &str) -> Result<(), crate::application::session_key_spi_port::ClientRepositoryError> {
+        match self.cache.remove(pake_session_id) {
+            None => Ok(()),
+            Some(_) => Ok(())
         }
     }
 

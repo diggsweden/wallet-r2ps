@@ -44,6 +44,10 @@ impl R2psRequestKafkaMessageReceiver {
                 .set("broker.address.family", &broker_address_family)
                 .set("group.id", &group_id)
                 .set("group.instance.id", &group_instance_id)
+                // Cooperative-sticky combines two concepts: sticky assignment
+                // (minimizing partition movement) and cooperative
+                // rebalancing (incremental, non-blocking rebalances).
+                .set("partition.assignment.strategy", "cooperative-sticky")
                 .set("enable.auto.commit", "true")
                 .set("auto.offset.reset", "earliest")
                 .set("fetch.wait.max.ms", "500")
