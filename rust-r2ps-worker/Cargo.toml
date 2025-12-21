@@ -2,6 +2,24 @@
 name = "rust-r2ps-worker"
 version = "0.1.0"
 edition = "2024"
+default-run = "rust-r2ps-worker"
+
+[lib]
+name = "rust_r2ps_worker"
+path = "src/lib.rs"
+
+[[bin]]
+name = "generate_openapi"
+path = "src/generate_openapi.rs"
+
+[[bin]]
+name = "setup_demo_data"
+path = "src/setup_demo_data.rs"
+
+
+[[bin]]
+name = "rust-r2ps-worker"
+path = "src/main.rs"
 
 [dependencies]
 rdkafka = { version = "0.38.0", features = ["cmake-build"] }
@@ -39,6 +57,8 @@ argon2 = { version = "0.5", features = ["std"] }
 hmac = "0.12"
 generic-array = "0.14"
 chrono = "0.4.42"
-uuid = { version = "1.18.1", features = ["v4"] }
+uuid = { version = "1.18.1", features = ["v4", "serde"] }
 digest = "0.10.7"
 hex = "0.4.3"
+utoipa = { version = "5", features = ["uuid"] }
+ring = "0.17.14"
