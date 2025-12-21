@@ -1,10 +1,8 @@
 use std::env;
 use base64::Engine;
 use base64::prelude::BASE64_STANDARD;
-use dotenv_codegen::dotenv;
 use pem::Pem;
 use tracing::error;
-use crate::domain::ClientMetadata;
 
 
 pub fn load_pem_from_bas64_env(env_var_name: &str) -> Result<Pem, LoadPemError> {

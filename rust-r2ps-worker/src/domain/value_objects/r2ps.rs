@@ -1,8 +1,8 @@
 use std::time::Duration;
-use josekit::jwk::Jwk;
 use pem::Pem;
 use serde::{Deserialize, Serialize};
 use strum_macros::Display;
+use utoipa::ToSchema;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -112,7 +112,7 @@ pub struct PakeResponsePayload {
     pub session_expiration_time: Option<i64>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, ToSchema, Debug, Clone)]
 pub enum Curve {
     #[serde(rename = "P-256")]
     P256,
@@ -254,9 +254,21 @@ pub struct R2psServerConfig {
 pub enum ServiceRequestError {
     JwsError,
     JweError,
+    InvalidPakeRequestPayload,
+    InvalidRegistrationRequest,
+    ServerRegistrationStartFailed,
+    ServerLoginStartFailed,
+    ServerLoginFinishFailed,
+    SerializeResponseError,
     InvalidServiceRequestFormat,
+    InvalidSerializedPasswordFile,
+    InvalidAuthenticateRequest,
+    UnknownKey,
+    UnknownSession,
+    UnknownClient,
     InvalidClientPublicKey,
     UnsupportedContext,
+    InternalServerError,
     Unknown,
 }
 

@@ -1,10 +1,10 @@
 use std::env;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc};
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use cryptoki::context::{CInitializeArgs, Pkcs11};
 use cryptoki::error::Error;
-use cryptoki::mechanism::{aead, Mechanism};
+use cryptoki::mechanism::{Mechanism};
 use cryptoki::object::{Attribute, AttributeType, KeyType, ObjectClass, ObjectHandle};
 use cryptoki::session::{Session, UserType};
 use cryptoki::slot::Slot;
@@ -13,12 +13,11 @@ use der::asn1::OctetStringRef;
 use der::Decode;
 use digest::Digest;
 use elliptic_curve::pkcs8::EncodePublicKey;
-use jsonwebtoken::DecodingKey;
 use p256::ecdsa::VerifyingKey;
 use sha2::Sha256;
 use tracing::{info, warn};
 use uuid::Uuid;
-use crate::application::hsm_spi_port::{EcKeyPairRecord, HsmSpiPort, KeyGenParams, KeyProviderInfo};
+use crate::application::hsm_spi_port::{HsmSpiPort};
 use crate::domain::Curve;
 
 pub struct HsmWrapper {
@@ -108,7 +107,7 @@ impl HsmWrapper {
         Ok(result)
     }
 
-    fn init_token_and_pin(&self, user_pin: &str) -> Result<(), Box<dyn std::error::Error>> {
+    fn init_token_and_pin(&self) -> Result<(), Box<dyn std::error::Error>> {
         let session = self.pkcs11.open_rw_session(self.slot)?;
         session.login(UserType::So, self.so_pin.as_ref())?;
         match self.user_pin {
@@ -278,8 +277,6 @@ impl HsmKey {
 
 
 fn kid_from_pem(pem_bytes: &[u8]) -> String {
-    // Parse the public key
-    let key = DecodingKey::from_rsa_pem(pem_bytes).unwrap();
 
     // SHA-256 thumbprint of the DER-encoded public key
     let mut hasher = Sha256::new();

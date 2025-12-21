@@ -1,11 +1,7 @@
-use base64::Engine;
-use base64::prelude::BASE64_STANDARD;
-use dotenv_codegen::dotenv;
 use foyer::{Cache, CacheBuilder, EvictionConfig, LruConfig};
-use pem::Pem;
 use tracing::error;
 use crate::application::client_repository_spi_port::{ClientRepositoryError, ClientRepositorySpiPort};
-use crate::application::{load_pem_from_bas64_env, LoadPemError};
+use crate::application::{load_pem_from_bas64_env};
 use crate::domain::ClientMetadata;
 use crate::infrastructure::hsm_wrapper::HsmKey;
 

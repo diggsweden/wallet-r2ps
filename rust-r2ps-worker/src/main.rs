@@ -1,5 +1,5 @@
 
-use tracing::{info, instrument, warn};
+use tracing::{instrument};
 use tracing_subscriber::{fmt, EnvFilter};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
@@ -7,7 +7,6 @@ use rust_r2ps_worker::run;
 
 #[instrument(name="main", skip_all)]
 fn main() {
-
     // init tracing
     tracing_subscriber::registry()
         .with(

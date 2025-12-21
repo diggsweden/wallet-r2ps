@@ -1,6 +1,5 @@
-use std::io::Read;
 use crate::application::client_repository_spi_port::ClientRepositorySpiPort;
-use crate::application::session_key_spi_port::{LoginSession, SessionKeySpiPort};
+use crate::application::session_key_spi_port::{SessionKeySpiPort};
 use crate::application::{load_pem_from_bas64_env, R2psRequestId, R2psRequestUseCase, R2psResponseSpiPort};
 use crate::domain::value_objects::r2ps::{Claims, PakeRequestPayload, PakeResponsePayload, ServiceRequest};
 use crate::domain::{ClientMetadata, CreateKeyServiceData, CreateKeyServiceDataResponse, DefaultCipherSuite, EncryptOption, KeyInfo, ListKeysResponse, PakeState, R2PsResponse, R2psRequest, R2psRequestError, R2psServerConfig, ServiceRequestError, ServiceTypeId, SignRequest};
@@ -9,29 +8,26 @@ use base64::engine::general_purpose;
 use base64::prelude::BASE64_STANDARD;
 use base64::Engine;
 use josekit::jwe::{JweHeader, ECDH_ES};
-use josekit::jwk::{Jwk};
 use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
-use opaque_ke::{CredentialFinalization, CredentialRequest, Identifiers, RegistrationRequest, RegistrationUpload, ServerLogin, ServerLoginParameters, ServerLoginStartResult, ServerRegistration, ServerRegistrationLen, ServerSetup};
+use opaque_ke::{CredentialFinalization, CredentialRequest, Identifiers, RegistrationRequest, RegistrationUpload, ServerLogin, ServerLoginParameters, ServerRegistration, ServerSetup};
 use pem::Pem;
 use std::sync::Arc;
 use std::time::Instant;
-use std::vec;
 use base64::engine::general_purpose::STANDARD;
 use chrono::Utc;
-use der::Encode;
-use opaque_ke::keypair::{KeyPair, OprfSeed, PrivateKey, PublicKey};
+use opaque_ke::keypair::{KeyPair, PrivateKey, PublicKey};
 use p256::NistP256;
 use rdkafka::message::ToBytes;
-use tracing::{debug, error, info, instrument, warn};
+use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 use p256::pkcs8::DecodePrivateKey;
 use sha2::{Sha256, Digest};
 use josekit::jwe;
 use josekit::jwe::alg::direct::DirectJweAlgorithm;
-use p256::ecdsa::Signature;
 use p256::elliptic_curve::sec1::ToEncodedPoint;
+use crate::application::device_permit_list_spi_port::DevicePermitListSpiPort;
 use crate::application::hsm_spi_port::HsmSpiPort;
-use crate::infrastructure::hsm_wrapper::HsmKey;
+use crate::application::pending_auth_spi_port::{LoginSession, PendingAuthSpiPort};
 
 #[derive(Clone)]
 pub struct R2psService {
@@ -41,6 +37,8 @@ pub struct R2psService {
     client_repository_spi_port: Arc<dyn ClientRepositorySpiPort + Send + Sync>,
     r2ps_server_config: R2psServerConfig,
     session_key_spi_port: Arc<dyn SessionKeySpiPort + Send + Sync>,
+    pending_auth_spi_port: Arc<dyn PendingAuthSpiPort + Send + Sync>,
+    device_permit_list_spi_port: Arc<dyn DevicePermitListSpiPort + Send + Sync>,
 }
 
 impl R2psService {
@@ -49,6 +47,8 @@ impl R2psService {
         client_repository_spi_port: Arc<dyn ClientRepositorySpiPort + Send + Sync>,
         session_key_spi_port: Arc<dyn SessionKeySpiPort + Send + Sync>,
         hsm_spi_port: Arc<dyn HsmSpiPort + Send + Sync>,
+        pending_auth_spi_port: Arc<dyn PendingAuthSpiPort + Send + Sync>,
+        device_permit_list_spi_port: Arc<dyn DevicePermitListSpiPort + Send + Sync>,
     ) -> Self {
 
 
@@ -107,7 +107,9 @@ impl R2psService {
                     r2ps_server_config: R2psServerConfig {
                         server_public_key,
                         server_private_key
-                    }
+                    },
+                    pending_auth_spi_port,
+                    device_permit_list_spi_port,
                 }
             }
             _ => {
@@ -176,224 +178,296 @@ impl R2psService {
 
     pub (crate) fn authenticate(&self, decrypted_payload: &Vec<u8>, device_id: &str, r2ps_service: &R2psService, pake_session_id: &String) -> Result<Vec<u8>, ServiceRequestError> {
         let start = Instant::now();
-        match PakeRequestPayload::deserialize(&decrypted_payload) {
-            Ok(pake_payload) => {
-                info!("deserialized pake payload req={}", pake_payload.request_data);
-                let rb: Vec<u8> = general_purpose::STANDARD
-                    .decode(pake_payload.request_data)
-                    .expect("Failed to decode base64");
 
-                match pake_payload.state {
-                    PakeState::Evaluate => {
-                        let serialized = r2ps_service.client_repository_spi_port.client_metadata(device_id);
-                        let password_file_serialized = serialized.and_then(|meta_data| {meta_data.password_file.clone()}).unwrap();
-                        //let password_file_serialized =
-                        //  ServerRegistration::<DefaultCipherSuite>::deserialize(&r2ps_service.client_repository_spi_port.client_metadata(device_id).unwrap().password_file.unwrap().to_bytes()).unwrap();
-                        let password_file = ServerRegistration::<DefaultCipherSuite>::deserialize(&password_file_serialized).unwrap();
-                        info!("password file: {:?}", password_file);
-                        let mut server_rng = OsRng;
+        let pake_payload = PakeRequestPayload::deserialize(&decrypted_payload)
+            .map_err(|e| {
+                warn!("error decoding pake request: {:?}", e);
+                ServiceRequestError::InvalidPakeRequestPayload
+            })?;
 
-                        let context = "RPS-Ops".as_bytes();
-                        let client= device_id.as_bytes();
-                        let server = "https://cloud-wallet.digg.se/rhsm".as_bytes();
-                        let credential_request = CredentialRequest::deserialize(&rb).unwrap();
+        info!("deserialized pake payload authenticate request data: {}", pake_payload.request_data);
 
-                        info!("######## OPAQUE context: '{}' hex: {}", String::from_utf8_lossy(context), hex::encode(context));
-                        info!("######## OPAQUE client: '{}' hex: {}", String::from_utf8_lossy(client), hex::encode(client));
-                        info!("######## OPAQUE server: '{}' hex: {}", String::from_utf8_lossy(server), hex::encode(server));
+        // Handle Java jackson double base64 encoding....TODO remove later
 
-                        let server_login_parameters = ServerLoginParameters{
-                            context: Some(context),
-                            identifiers: Identifiers {
-                                client: Some(client),
-                                server: Some(server),
-                            },
-                        };
+        let decoded_request_data: Vec<u8> = general_purpose::STANDARD
+            .decode(pake_payload.request_data).map_err(|e| {
+            warn!("error base64 decoding pake authenticate request: {:?}", e);
+            ServiceRequestError::InvalidPakeRequestPayload
+        })?;
 
-                        match ServerLogin::start(
-                            &mut server_rng,
-                            &r2ps_service.opaque_server_setup,
-                            Some(password_file),
-                            credential_request,
-                            device_id.as_bytes(),
-                            server_login_parameters,
-                        ) {
-                            Ok(server_login_start_result) => {
-                                info!("server_login_start_result = {:?}", server_login_start_result);
-                                let credential_response_bytes = server_login_start_result.message.serialize();
-                                let session = Arc::new(LoginSession::new(server_login_start_result.state));
-                                r2ps_service.session_key_spi_port.store_pending_auth(&pake_session_id, &session);
-                                let pake_response = PakeResponsePayload {
-                                    pake_session_id: Some(pake_session_id.to_string()),
-                                    task: None,
-                                    response_data: Some(general_purpose::STANDARD.encode(credential_response_bytes.to_vec())),
-                                    message: None,
-                                    session_expiration_time: None,
-                                };
+        match pake_payload.state {
+            PakeState::Evaluate => {
+                let client_metadata = r2ps_service.client_repository_spi_port.client_metadata(device_id);
+                let password_file_serialized = client_metadata.and_then(|meta_data| {meta_data.password_file.clone()})
+                    .ok_or_else(|| ServiceRequestError::UnknownClient)?;
 
-                                let elapsed = start.elapsed();
-                                info!("AUTH evaluate time: {} ns", elapsed.as_nanos());
+                let password_file = ServerRegistration::<DefaultCipherSuite>::deserialize(&password_file_serialized)
+                    .map_err(|e| {
+                        warn!("error decoding pake request: {:?}", e);
+                        ServiceRequestError::InvalidSerializedPasswordFile
+                    })?;
 
-                                match serde_json::to_vec(&pake_response) {
-                                    Ok(payload_vec) => Ok(payload_vec),
-                                    Err(e) => Err(ServiceRequestError::Unknown)
-                                }
-                            },
-                            Err(e) => Err(ServiceRequestError::Unknown)
-                        }
+                let credential_request = CredentialRequest::deserialize(&decoded_request_data)
+                    .map_err(|e| {
+                        warn!("error decoding pake request: {:?}", e);
+                        ServiceRequestError::InvalidAuthenticateRequest
+                    })?;
+
+                let mut server_rng = OsRng;
+                let context = "RPS-Ops".as_bytes();
+                let client= device_id.as_bytes();
+                let server = "https://cloud-wallet.digg.se/rhsm".as_bytes();
+
+                info!("OPAQUE context: '{}' hex: {}", String::from_utf8_lossy(context), hex::encode(context));
+                info!("OPAQUE client: '{}' hex: {}", String::from_utf8_lossy(client), hex::encode(client));
+                info!("OPAQUE server: '{}' hex: {}", String::from_utf8_lossy(server), hex::encode(server));
+
+                let server_login_parameters = ServerLoginParameters{
+                    context: Some(context),
+                    identifiers: Identifiers {
+                        client: Some(client),
+                        server: Some(server),
+                    },
+                };
+
+                let server_login_start_result = ServerLogin::start(
+                    &mut server_rng,
+                    &r2ps_service.opaque_server_setup,
+                    Some(password_file),
+                    credential_request,
+                    device_id.as_bytes(),
+                    server_login_parameters,
+                ).map_err(|e| {
+                        warn!("error decoding pake request: {:?}", e);
+                        ServiceRequestError::ServerLoginStartFailed
+                    })?;
+
+                let credential_response_bytes = server_login_start_result.message.serialize();
+                let session = Arc::new(LoginSession::new(server_login_start_result.state));
+                self.pending_auth_spi_port.store_pending_auth(&pake_session_id, &session);
+                let pake_response = PakeResponsePayload {
+                    pake_session_id: Some(pake_session_id.to_string()),
+                    task: None,
+                    response_data: Some(general_purpose::STANDARD.encode(credential_response_bytes.to_vec())),
+                    message: None,
+                    session_expiration_time: None,
+                };
+
+                let elapsed = start.elapsed();
+                info!("AUTH evaluate time: {} ns", elapsed.as_nanos());
+
+                match serde_json::to_vec(&pake_response) {
+                    Ok(payload_vec) => Ok(payload_vec),
+                    Err(e) => Err(ServiceRequestError::Unknown)
+                }
+
+            }
+            PakeState::Finalize => {
+                let session =  self.pending_auth_spi_port.get_pending_auth(&pake_session_id)
+                    .ok_or(ServiceRequestError::InvalidAuthenticateRequest)?;
+
+                let context = "RPS-Ops".as_bytes();
+                let client= device_id.as_bytes();
+                let server = "https://cloud-wallet.digg.se/rhsm".as_bytes();
+                let server_login_parameters = ServerLoginParameters{
+                    context: Some(context),
+                    identifiers: Identifiers {
+                        client: Some(client),
+                        server: Some(server),
+                    },
+                };
+                let server_login = session.take().ok_or(ServiceRequestError::InvalidAuthenticateRequest)?;
+                let result = server_login.finish(
+                    CredentialFinalization::deserialize(&decoded_request_data).map_err(|e|ServiceRequestError::InvalidAuthenticateRequest)?,
+                    server_login_parameters,
+                )
+                    .map_err(|e| {
+                        warn!("could not finish auth request request: {:?}", e);
+                        ServiceRequestError::ServerLoginFinishFailed
+                    })?;
+
+                info!("SESSION KEY: {:X}", result.session_key);
+
+                self.session_key_spi_port.store(&pake_session_id, &result.session_key.to_vec()).map_err(|e| ServiceRequestError::InternalServerError)?;
+
+                let msg = br#"{"msg":"OK"}"#.to_vec();
+                let pake_response = PakeResponsePayload {
+                    pake_session_id: Some(pake_session_id.to_string()),
+                    task: None,
+                    response_data: Some(general_purpose::STANDARD.encode(msg.to_vec())),
+                    message: None,
+                    session_expiration_time: Some(Utc::now().timestamp_millis()),
+                };
+
+                let elapsed = start.elapsed();
+                info!("AUTH finalize time: {} ns", elapsed.as_nanos());
+
+                serde_json::to_vec(&pake_response).map_err(|e| {
+                    error!("Could not serialize authenticate response: {:?}", e);
+                    ServiceRequestError::SerializeResponseError
+                })
+            }
+        }
+
+
+    }
+
+
+    pub (crate) fn pin_registration(&self, decrypted_payload: &Vec<u8>, device_id: &str, r2ps_service: &R2psService) -> Result<Vec<u8>, ServiceRequestError> {
+
+        let pake_payload= PakeRequestPayload::deserialize(&decrypted_payload)
+            .map_err(|e| {
+                warn!("error decoding pake registration request: {:?}", e);
+                ServiceRequestError::InvalidPakeRequestPayload
+            })?;
+
+        info!("deserialized pake payload req={}", pake_payload.request_data);
+
+        // Handle Java jackson double base64 encoding....TODO remove later
+        let decoded_request_data: Vec<u8> = general_purpose::STANDARD
+            .decode(pake_payload.request_data).map_err(|e| {
+            warn!("error base64 decoding pake registration request: {:?}", e);
+            ServiceRequestError::InvalidPakeRequestPayload
+        })?;
+
+
+        match pake_payload.state {
+            PakeState::Evaluate => {
+                let registration_request = RegistrationRequest::deserialize(&decoded_request_data).map_err(|e| {
+                    warn!("invalid registration request evaluate: {:?}", e);
+                    ServiceRequestError::InvalidRegistrationRequest
+                })?;
+
+                let server_registration_start_result = ServerRegistration::<DefaultCipherSuite>::start(
+                    &r2ps_service.opaque_server_setup,
+                    registration_request,
+                    device_id.as_bytes(),
+                ).map_err(|e| {
+                    warn!("invalid registration request evaluate: {:?}", e);
+                    ServiceRequestError::ServerRegistrationStartFailed
+                })?;
+
+                info!("server_registration_start_result: {:?}", server_registration_start_result.message);
+
+                let response_data = server_registration_start_result.message.serialize().to_vec();
+                let pake_response = PakeResponsePayload {
+                    pake_session_id: None,
+                    task: None,
+                    response_data: Some(general_purpose::STANDARD.encode(response_data.to_vec())),
+                    message: None,
+                    session_expiration_time: None,
+                };
+
+                serde_json::to_vec(&pake_response).map_err(|e| {
+                    warn!("Could not serialize pake response payload: {:?}", e);
+                    ServiceRequestError::SerializeResponseError
+                })
+            }
+            PakeState::Finalize => {
+                let registration_request: RegistrationUpload<DefaultCipherSuite> = RegistrationUpload::deserialize(&decoded_request_data).map_err(|e| {
+                    warn!("invalid registration request finalize: {:?}", e);
+                    ServiceRequestError::InvalidRegistrationRequest
+                })?;
+
+                let password_file = ServerRegistration::<DefaultCipherSuite>::finish(
+                    registration_request,
+                );
+                let password_file_serialized = password_file.serialize();
+                info!("password file: {:?}", hex::encode(password_file_serialized));
+
+                match r2ps_service.client_repository_spi_port.client_metadata(device_id) {
+                    Some(client_metadata) => {
+                        let _ = r2ps_service.client_repository_spi_port.store_metadata(ClientMetadata {
+                            client_id: client_metadata.client_id,
+                            wallet_id: client_metadata.wallet_id,
+                            client_public_key: client_metadata.client_public_key,
+                            password_file: Some(password_file_serialized),
+                            keys: Vec::new(), // TODO this deletes all keys when wallet is registered
+                        });
+                        info!("Store metadata: {:?}", password_file);
                     }
-                    PakeState::Finalize => {
-                        let mut session = r2ps_service.session_key_spi_port.get_pending_auth(&pake_session_id).ok_or(ServiceRequestError::Unknown)?;
-
-                        let context = "RPS-Ops".as_bytes();
-                        let client= device_id.as_bytes();
-                        let server = "https://cloud-wallet.digg.se/rhsm".as_bytes();
-                        let server_login_parameters = ServerLoginParameters{
-                            context: Some(context),
-                            identifiers: Identifiers {
-                                client: Some(client),
-                                server: Some(server),
-                            },
-                        };
-                        let server_login = session.take().unwrap();
-                        let result = server_login.finish(
-                            CredentialFinalization::deserialize(&rb).unwrap(),
-                            server_login_parameters,
-                        )
-                            .unwrap();
-
-                        info!("SESSION KEY: {:X}", result.session_key);
-                        self.session_key_spi_port.store(&pake_session_id, &result.session_key.to_vec()).unwrap();
-                        let msg = br#"{"msg":"OK"}"#.to_vec();
-                        let pake_response = PakeResponsePayload {
-                            pake_session_id: Some(pake_session_id.to_string()),
-                            task: None,
-                            response_data: Some(general_purpose::STANDARD.encode(msg.to_vec())),
-                            message: None,
-                            session_expiration_time: Some(Utc::now().timestamp_millis()),
-                        };
-
-                        let elapsed = start.elapsed();
-                        info!("AUTH finalize time: {} ns", elapsed.as_nanos());
-
-                        match serde_json::to_vec(&pake_response) {
-                            Ok(payload_vec) => Ok(payload_vec),
-                            Err(e) => Err(ServiceRequestError::Unknown)
-                        }
+                    None => {
+                        // TODO register new?
                     }
                 }
 
-            },
-            Err(e) => {
-                info!("deserialize {:?}", e);
-                Err(ServiceRequestError::Unknown)
+                let msg = br#"{"msg":"OK"}"#.to_vec();
+                let pake_response = PakeResponsePayload {
+                    pake_session_id: None,
+                    task: None,
+                    response_data: Some(general_purpose::STANDARD.encode(msg.to_vec())),
+                    message: None,
+                    session_expiration_time: None,
+                };
+
+                match serde_json::to_vec(&pake_response) {
+                    Ok(payload_vec) => Ok(payload_vec),
+                    Err(e) => Err(ServiceRequestError::Unknown)
+                }
             }
         }
     }
 
-    pub (crate) fn pin_registration(&self, decrypted_payload: &Vec<u8>, device_id: &str, r2ps_service: &R2psService) -> Result<Vec<u8>, ServiceRequestError> {
-        match PakeRequestPayload::deserialize(&decrypted_payload) {
-            Ok(pake_payload) => {
-                info!("deserialized pake payload req={}", pake_payload.request_data);
-                let rb: Vec<u8> = general_purpose::STANDARD
-                    .decode(pake_payload.request_data)
-                    .expect("Failed to decode base64");
+    pub fn hsm_ecdsa_sign(&self, decrypted_payload: &Vec<u8>, device_id: &str) -> Result<Vec<u8>, ServiceRequestError> {
+        let payload = serde_json::from_slice::<SignRequest>(&decrypted_payload)
+            .map_err(|e|ServiceRequestError::InvalidServiceRequestFormat)?;
+        let metadata =  self.client_repository_spi_port.client_metadata(device_id)
+             .ok_or(ServiceRequestError::UnknownClient)?;
 
+        let hsm_key = metadata.keys.iter().find(|key|key.kid.eq(&payload.kid)).ok_or(ServiceRequestError::UnknownKey)?;
 
-                match pake_payload.state {
-                    PakeState::Evaluate => {
-                        let reg_req: RegistrationRequest<DefaultCipherSuite> = match RegistrationRequest::deserialize(&rb) {
-                            Ok(reg_req) => {
-                                info!("deserialized registration request: {:?}", reg_req);
-                                reg_req
-                            },
-                            Err(err) => {
-                                panic!("error decoding pake request bytes {:?}", err);
-                            }
-                        };
-                        match ServerRegistration::<DefaultCipherSuite>::start(
-                            &r2ps_service.opaque_server_setup,
-                            reg_req,
-                            device_id.as_bytes(),
-                        ) {
-                            Ok(d) => {
-                                info!("START {:?}", d.message);
-                                let msg = d.message.serialize().to_vec();
-                                let pake_response = PakeResponsePayload {
-                                    pake_session_id: None,
-                                    task: None,
-                                    response_data: Some(general_purpose::STANDARD.encode(msg.to_vec())),
-                                    message: None,
-                                    session_expiration_time: None,
-                                };
+        let raw_sig_bytes = self.hsm_spi_port.sign(&hsm_key.wrapped_private_key, &payload.tbs_hash.into_bytes()).map_err(|_| ServiceRequestError::Unknown)?;
+        let signature = p256::ecdsa::Signature::from_slice(&raw_sig_bytes).map_err(|_| ServiceRequestError::Unknown)?;
+        let asn1_signature: Vec<u8> = signature.to_der().as_bytes().to_vec();
+        info!("Hsm Ecdsa asn1_signature: {:?}", asn1_signature);
+        Ok(asn1_signature)
+    }
 
-                                match serde_json::to_vec(&pake_response) {
-                                    Ok(payload_vec) => Ok(payload_vec),
-                                    Err(e) => Err(ServiceRequestError::Unknown)
-                                }
-                            },
-                            Err(e) => {
-                                error!("ERROR {:?}", e);
-                                Err(ServiceRequestError::Unknown)
-                            }
-                        }
-                    }
-                    ,
-                    PakeState::Finalize => {
-                        let reg_req: RegistrationUpload<DefaultCipherSuite> = match RegistrationUpload::deserialize(&rb) {
-                            Ok(reg_req) => {
-                                info!("deserialized registration upload: {:?}", reg_req);
-                                reg_req
-                            },
-                            Err(err) => {
-                                panic!("error decoding pake registration upload bytes {:?}", err);
-                            }
-                        };
+    pub fn hsm_key_gen(&self, decrypted_payload: &Vec<u8>, device_id: &str) -> Result<Vec<u8>, ServiceRequestError> {
+        let payload = serde_json::from_slice::<CreateKeyServiceData>(&decrypted_payload)
+        .map_err(|e|ServiceRequestError::InvalidServiceRequestFormat)?;
 
-                        let password_file = ServerRegistration::<DefaultCipherSuite>::finish(
-                            reg_req,
-                        );
-                        let password_file_serialized = password_file.serialize();
-                        info!("password file: {:?}", hex::encode(password_file_serialized));
+        let key = self.hsm_spi_port.generate_key("foobar", &payload.curve).map_err(|_| ServiceRequestError::Unknown)?;
 
-                        match r2ps_service.client_repository_spi_port.client_metadata(device_id) {
-                            Some(client_metadata) => {
-                                let _ = r2ps_service.client_repository_spi_port.store_metadata(ClientMetadata {
-                                    client_id: client_metadata.client_id,
-                                    wallet_id: client_metadata.wallet_id,
-                                    client_public_key: client_metadata.client_public_key,
-                                    password_file: Some(password_file_serialized),
-                                    keys: Vec::new(), // TODO this deletes all keys when wallet is registered
-                                });
-                                info!("Store metadata: {:?}", password_file);
+        // TODO ändra protokollet så att t.ex. id och publik nyckel returneras???
+        self.client_repository_spi_port.add_key(&device_id, &key).map_err(|_| ServiceRequestError::Unknown)?;
 
-                            },
-                            _ => {}
-                        }
+        serde_json::to_vec(&CreateKeyServiceDataResponse { created_key: payload.curve })
+            .map_err(|_| ServiceRequestError::SerializeResponseError)
+    }
 
-                        let msg = br#"{"msg":"OK"}"#.to_vec();
-                        let pake_response = PakeResponsePayload {
-                            pake_session_id: None,
-                            task: None,
-                            response_data: Some(general_purpose::STANDARD.encode(msg.to_vec())),
-                            message: None,
-                            session_expiration_time: None,
-                        };
+    pub fn hsm_list_wallet_keys(&self, decrypted_payload: &Vec<u8>, device_id: &str) -> Result<Vec<u8>, ServiceRequestError> {
 
-                        match serde_json::to_vec(&pake_response) {
-                            Ok(payload_vec) => Ok(payload_vec),
-                            Err(e) => Err(ServiceRequestError::Unknown)
-                        }
-
-
-                    }
-                }
-            },
-            Err(e) => {
-                info!("deserialize {:?}", e);
-                Err(ServiceRequestError::Unknown)
+        let keys_response = match self.client_repository_spi_port.client_metadata(device_id) {
+            None => {
+                println!("No metadata");
+                Ok(ListKeysResponse{key_info: Vec::new()})
             }
-        }
+            Some(metadata) => {
+                Ok(ListKeysResponse{key_info: metadata.keys.iter().map(|key| KeyInfo{kid: key.kid.clone(), public_key: key.public_key_pem.clone().lines()
+                    .filter(|line| !line.starts_with("-----"))
+                    .collect::<Vec<_>>()
+                    .join(""), curve_name: key.curve_name.clone(), creation_time: Some(key.creation_time.timestamp_millis())}).collect() })
+            }
+
+        }?;
+
+        serde_json::to_vec(&keys_response).map_err(|_| ServiceRequestError::SerializeResponseError)
+    }
+
+    pub fn end_session(&self, pake_session_id: &str) -> Result<Vec<u8>, ServiceRequestError> {
+        self.session_key_spi_port.end_session(&pake_session_id.to_string()).map_err(|_| ServiceRequestError::UnknownSession)?;
+
+        let msg = br#"{"msg":"OK"}"#.to_vec();
+        let pake_response = PakeResponsePayload {
+            pake_session_id: Some(pake_session_id.to_string()),
+            task: None,
+            response_data: Some(general_purpose::STANDARD.encode(msg.to_vec())),
+            message: None,
+            session_expiration_time: Some(Utc::now().timestamp_millis()),
+        };
+
+        serde_json::to_vec(&pake_response).map_err(|_| ServiceRequestError::SerializeResponseError)
     }
 
     pub (crate) fn process_service_request(&self, service_request: &ServiceRequest, decrypted_payload: &Vec<u8>, device_id: &str, r2ps_service: &R2psService) -> Result<Vec<u8>, ServiceRequestError> {
@@ -406,93 +480,12 @@ impl R2psService {
             ServiceTypeId::Authenticate => self.authenticate(decrypted_payload, device_id, &r2ps_service, &pake_session_id),
             ServiceTypeId::PinRegistration => self.pin_registration(decrypted_payload, device_id, &r2ps_service),
             ServiceTypeId::PinChange => Err(ServiceRequestError::Unknown),
-            ServiceTypeId::HsmEcdsa => {
-                println!("HsmEcdsa Payload size: {}", decrypted_payload.len());
-                println!("HsmEcdsa Payload as string: {:?}", String::from_utf8_lossy(&decrypted_payload));
-                println!("HsmEcdsa Payload as bytes: {:?}", decrypted_payload);
-
-                let asn1_signature = match serde_json::from_slice::<SignRequest>(&decrypted_payload) {
-                    Ok(payload) => {
-                        match self.client_repository_spi_port.client_metadata(device_id) {
-                            None =>  Err(ServiceRequestError::Unknown),
-                            Some(metadata) => {
-                                match metadata.keys.iter().find(|key|key.kid.eq(&payload.kid)) {
-                                    None => Err(ServiceRequestError::Unknown),
-                                    Some(hsm_key) => {
-                                       let raw_sig_bytes = self.hsm_spi_port.sign(&hsm_key.wrapped_private_key, &payload.tbs_hash.into_bytes()).map_err(|_| ServiceRequestError::Unknown);
-                                       let signature = p256::ecdsa::Signature::from_slice(&raw_sig_bytes.unwrap()).map_err(|_| ServiceRequestError::Unknown)?;
-                                       let result: Vec<u8> = signature.to_der().as_bytes().to_vec();
-                                        Ok(result)
-                                    }
-                                }
-                            }
-                        }
-                    },
-                    Err(e) => Err(ServiceRequestError::Unknown),
-                };
-                info!("HsmEcdsa sign result: {:?}", asn1_signature);
-                asn1_signature
-            },
+            ServiceTypeId::HsmEcdsa => self.hsm_ecdsa_sign(decrypted_payload, device_id),
             ServiceTypeId::HsmEcdh => Err(ServiceRequestError::Unknown),
-            ServiceTypeId::HsmEcKeygen =>  {
-                println!("Payload size: {}", decrypted_payload.len());
-                println!("Payload as string: {:?}", String::from_utf8_lossy(&decrypted_payload));
-                println!("Payload as bytes: {:?}", decrypted_payload);
-
-                match serde_json::from_slice::<CreateKeyServiceData>(&decrypted_payload) {
-                    Ok(payload) => {
-                        let key = self.hsm_spi_port.generate_key("foobar", &payload.curve).map_err(|_| ServiceRequestError::Unknown)?;
-                        self.client_repository_spi_port.add_key(&device_id, &key).map_err(|_| ServiceRequestError::Unknown)?;
-                        match serde_json::to_vec(&CreateKeyServiceDataResponse { created_key: payload.curve }) {
-                            Ok(payload_vec) => Ok(payload_vec),
-                            Err(e) => Err(ServiceRequestError::Unknown)
-                        }
-                    },
-                    Err(e) => Err(ServiceRequestError::Unknown),
-                }
-            },
+            ServiceTypeId::HsmEcKeygen =>  self.hsm_key_gen(decrypted_payload, device_id),
             ServiceTypeId::HsmEcDeleteKey => Err(ServiceRequestError::Unknown),
-            ServiceTypeId::HsmListKeys => {
-                println!("Payload size: {}", decrypted_payload.len());
-                println!("Payload as string: {:?}", String::from_utf8_lossy(&decrypted_payload));
-                println!("Payload as bytes: {:?}", decrypted_payload);
-                let keys_response = match self.client_repository_spi_port.client_metadata(device_id) {
-                    None => {
-                        println!("No metadata");
-                        Ok(ListKeysResponse{key_info: Vec::new()})
-                    }
-                    Some(metadata) => {
-                        for key in metadata.keys.clone() {
-                            println!("LIST KEY: {:?}", key);
-                        }
-                        Ok(ListKeysResponse{key_info: metadata.keys.iter().map(|key| KeyInfo{kid: key.kid.clone(), public_key: key.public_key_pem.clone().lines()
-                            .filter(|line| !line.starts_with("-----"))
-                            .collect::<Vec<_>>()
-                            .join(""), curve_name: key.curve_name.clone(), creation_time: Some(key.creation_time.timestamp_millis())}).collect() })
-
-                    }
-
-                }?;
-                match serde_json::to_vec(&keys_response) {
-                    Ok(payload_vec) => Ok(payload_vec),
-                    Err(e) => Err(ServiceRequestError::Unknown)
-                }
-            },
-            ServiceTypeId::SessionEnd => {
-                self.session_key_spi_port.end_session(&pake_session_id.to_string()).map_err(|_| ServiceRequestError::Unknown)?;
-                let msg = br#"{"msg":"OK"}"#.to_vec();
-                let pake_response = PakeResponsePayload {
-                    pake_session_id: Some(pake_session_id.to_string()),
-                    task: None,
-                    response_data: Some(general_purpose::STANDARD.encode(msg.to_vec())),
-                    message: None,
-                    session_expiration_time: Some(Utc::now().timestamp_millis()),
-                };
-                match serde_json::to_vec(&pake_response) {
-                    Ok(payload_vec) => Ok(payload_vec),
-                    Err(e) => Err(ServiceRequestError::Unknown)
-                }
-            },
+            ServiceTypeId::HsmListKeys => self.hsm_list_wallet_keys(decrypted_payload, device_id),
+            ServiceTypeId::SessionEnd => self.end_session(&pake_session_id),
             ServiceTypeId::SessionContextEnd => Err(ServiceRequestError::Unknown),
             ServiceTypeId::Store => Err(ServiceRequestError::Unknown),
             ServiceTypeId::Retrieve => Err(ServiceRequestError::Unknown),
@@ -529,8 +522,6 @@ impl R2psService {
 
 
 }
-
-
 
 impl R2psRequestUseCase for R2psService {
 

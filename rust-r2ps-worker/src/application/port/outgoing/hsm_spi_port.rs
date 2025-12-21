@@ -1,11 +1,3 @@
-use std::env;
-use cryptoki::{
-    context::Pkcs11,
-    object::{Attribute, ObjectHandle},
-    mechanism::Mechanism,
-    session::Session,
-
-};
 use cryptoki::error::Error;
 use crate::domain::Curve;
 use crate::infrastructure::hsm_wrapper::HsmKey;
