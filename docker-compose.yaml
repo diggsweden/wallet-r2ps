@@ -11,6 +11,7 @@ services:
     volumes:
       - ./r2ps-demo-client/resources:/resources
       - ./r2ps-demo-client/demo:/demo
+    env_file: .env
     environment:
       SPRING_CONFIG_ADDITIONAL_LOCATION: /config/
       SPRING_PROFILES_ACTIVE: demo
@@ -18,7 +19,6 @@ services:
       SERVER_PORT: 8080
       SERVER_SSL_ENABLED: "false"
       TZ: "Europe/Stockholm"
-      JAVA_TOOL_OPTIONS: "-Djava.net.preferIPv4Stack=true -XX:UseSVE=0"
     networks:
       - wallet-network
 
@@ -208,7 +208,7 @@ services:
     entrypoint: ["/bin/sh", "-e", "/tmp/init-kafka-topics.sh"]
     volumes:
       - ./config/init-kafka-topics.sh:/tmp/init-kafka-topics.sh
-    
+
     networks:
       - wallet-network
   # Optional: Kafka UI for management

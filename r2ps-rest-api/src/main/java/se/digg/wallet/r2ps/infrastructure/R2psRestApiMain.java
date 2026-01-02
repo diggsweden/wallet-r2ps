@@ -1,4 +1,4 @@
-package se.digg.wallet.r2ps;
+package se.digg.wallet.r2ps.infrastructure;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
