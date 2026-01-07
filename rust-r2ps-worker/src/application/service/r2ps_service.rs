@@ -34,7 +34,6 @@ use p256::elliptic_curve::sec1::ToEncodedPoint;
 use p256::pkcs8::DecodePrivateKey;
 use pem::Pem;
 use rdkafka::message::ToBytes;
-use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use std::time::Instant;
 use tracing::{debug, error, info, warn};
@@ -61,68 +60,25 @@ impl R2psService {
         pending_auth_spi_port: Arc<dyn PendingAuthSpiPort + Send + Sync>,
         device_permit_list_spi_port: Arc<dyn DevicePermitListSpiPort + Send + Sync>,
     ) -> Self {
-        match (
-            load_pem_from_bas64_env("SERVER_PUBLIC_KEY"),
-            load_pem_from_bas64_env("SERVER_PRIVATE_KEY"),
-        ) {
-            (Ok(server_public_key), Ok(server_private_key)) => {
-                let mut rng = OsRng;
+        let server_public_key =
+            load_pem_from_bas64_env("SERVER_PUBLIC_KEY").expect("Failed to load SERVER_PUBLIC_KEY");
+        let server_private_key = load_pem_from_bas64_env("SERVER_PRIVATE_KEY")
+            .expect("Failed to load SERVER_PRIVATE_KEY");
+        let server_setup =
+            create_server_setup(&server_private_key).expect("Failed to create opaque server setup");
 
-                // 1. Parse P-256 private key from PEM
-                let secret_key =
-                    p256::SecretKey::from_pkcs8_pem(&pem::encode(&server_private_key)).unwrap();
-
-                // 2. Get raw private key bytes
-                let private_bytes = secret_key.to_bytes();
-
-                // 3. Get public key in UNCOMPRESSED SEC1 format (65 bytes: 0x04 || x || y)
-                let public_key_point = secret_key.public_key();
-                let public_encoded = public_key_point.as_affine().to_encoded_point(true); // false = uncompressed
-                let public_bytes = public_encoded.as_bytes();
-
-                println!("Private key length: {}", private_bytes.len());
-                println!("Public key length: {}", public_bytes.len());
-                println!("Public key first byte: 0x{:02x}", public_bytes[0]);
-
-                // 4. Create opaque-ke key types
-                let opaque_private_key = PrivateKey::<NistP256>::deserialize(&private_bytes)
-                    .map_err(|e| format!("Failed to deserialize private key: {:?}", e))
-                    .unwrap();
-                let opaque_public_key = PublicKey::<NistP256>::deserialize(public_bytes)
-                    .map_err(|e| format!("Failed to deserialize public key: {:?}", e))
-                    .unwrap();
-
-                // 5. Create KeyPair
-                let keypair = KeyPair::new(opaque_private_key, opaque_public_key);
-
-                let mut hasher = Sha256::new();
-                hasher.update(keypair.public().serialize().to_vec());
-                let result = hasher.finalize();
-
-                // 6. Create OPRF seed - needs to be Output<Sha256> (32 bytes)
-                //let seed_hash: Output<Sha256> = Sha256::digest("a27366b536549dc6630f719bbcbaa16cbf70253d273640d7690f6e2e4ef6a5c7".as_bytes());
-                // let oprf_seed = OprfSeed::<Sha256>::new();
-
-                let server_setup =
-                    ServerSetup::<DefaultCipherSuite>::new_with_key_pair(&mut rng, keypair);
-
-                Self {
-                    r2ps_response_spi_port,
-                    client_repository_spi_port,
-                    session_key_spi_port,
-                    hsm_spi_port,
-                    opaque_server_setup: server_setup,
-                    r2ps_server_config: R2psServerConfig {
-                        server_public_key,
-                        server_private_key,
-                    },
-                    pending_auth_spi_port,
-                    device_permit_list_spi_port,
-                }
-            }
-            _ => {
-                panic!("Invalid config")
-            }
+        Self {
+            r2ps_response_spi_port,
+            client_repository_spi_port,
+            session_key_spi_port,
+            hsm_spi_port,
+            opaque_server_setup: server_setup,
+            r2ps_server_config: R2psServerConfig {
+                server_public_key,
+                server_private_key,
+            },
+            pending_auth_spi_port,
+            device_permit_list_spi_port,
         }
         // TODO
         //let mut registered_users =
@@ -305,7 +261,7 @@ impl R2psService {
 
                 match serde_json::to_vec(&pake_response) {
                     Ok(payload_vec) => Ok(payload_vec),
-                    Err(e) => Err(ServiceRequestError::Unknown),
+                    Err(_) => Err(ServiceRequestError::Unknown),
                 }
             }
             PakeState::Finalize => {
@@ -330,7 +286,7 @@ impl R2psService {
                 let result = server_login
                     .finish(
                         CredentialFinalization::deserialize(&decoded_request_data)
-                            .map_err(|e| ServiceRequestError::InvalidAuthenticateRequest)?,
+                            .map_err(|_| ServiceRequestError::InvalidAuthenticateRequest)?,
                         server_login_parameters,
                     )
                     .map_err(|e| {
@@ -341,8 +297,8 @@ impl R2psService {
                 info!("SESSION KEY: {:X}", result.session_key);
 
                 self.session_key_spi_port
-                    .store(&pake_session_id, &result.session_key.to_vec())
-                    .map_err(|e| ServiceRequestError::InternalServerError)?;
+                    .store(&pake_session_id, result.session_key.to_vec())
+                    .map_err(|_| ServiceRequestError::InternalServerError)?;
 
                 let msg = br#"{"msg":"OK"}"#.to_vec();
                 let pake_response = PakeResponsePayload {
@@ -473,7 +429,7 @@ impl R2psService {
 
                 match serde_json::to_vec(&pake_response) {
                     Ok(payload_vec) => Ok(payload_vec),
-                    Err(e) => Err(ServiceRequestError::Unknown),
+                    Err(_) => Err(ServiceRequestError::Unknown),
                 }
             }
         }
@@ -485,7 +441,7 @@ impl R2psService {
         device_id: &str,
     ) -> Result<Vec<u8>, ServiceRequestError> {
         let payload = serde_json::from_slice::<SignRequest>(&decrypted_payload)
-            .map_err(|e| ServiceRequestError::InvalidServiceRequestFormat)?;
+            .map_err(|_| ServiceRequestError::InvalidServiceRequestFormat)?;
         let metadata = self
             .client_repository_spi_port
             .client_metadata(device_id)
@@ -514,7 +470,7 @@ impl R2psService {
         device_id: &str,
     ) -> Result<Vec<u8>, ServiceRequestError> {
         let payload = serde_json::from_slice::<CreateKeyServiceData>(&decrypted_payload)
-            .map_err(|e| ServiceRequestError::InvalidServiceRequestFormat)?;
+            .map_err(|_| ServiceRequestError::InvalidServiceRequestFormat)?;
 
         let key = self
             .hsm_spi_port
@@ -532,19 +488,15 @@ impl R2psService {
         .map_err(|_| ServiceRequestError::SerializeResponseError)
     }
 
-    pub fn hsm_list_wallet_keys(
-        &self,
-        decrypted_payload: &Vec<u8>,
-        device_id: &str,
-    ) -> Result<Vec<u8>, ServiceRequestError> {
+    pub fn hsm_list_wallet_keys(&self, device_id: &str) -> Result<Vec<u8>, ServiceRequestError> {
         let keys_response = match self.client_repository_spi_port.client_metadata(device_id) {
             None => {
                 println!("No metadata");
-                Ok(ListKeysResponse {
+                ListKeysResponse {
                     key_info: Vec::new(),
-                })
+                }
             }
-            Some(metadata) => Ok(ListKeysResponse {
+            Some(metadata) => ListKeysResponse {
                 key_info: metadata
                     .keys
                     .iter()
@@ -561,9 +513,8 @@ impl R2psService {
                         creation_time: Some(key.creation_time.timestamp_millis()),
                     })
                     .collect(),
-            }),
-        }?;
-
+            },
+        };
         serde_json::to_vec(&keys_response).map_err(|_| ServiceRequestError::SerializeResponseError)
     }
 
@@ -611,7 +562,7 @@ impl R2psService {
             ServiceTypeId::HsmEcdh => Err(ServiceRequestError::Unknown),
             ServiceTypeId::HsmEcKeygen => self.hsm_key_gen(decrypted_payload, device_id),
             ServiceTypeId::HsmEcDeleteKey => Err(ServiceRequestError::Unknown),
-            ServiceTypeId::HsmListKeys => self.hsm_list_wallet_keys(decrypted_payload, device_id),
+            ServiceTypeId::HsmListKeys => self.hsm_list_wallet_keys(device_id),
             ServiceTypeId::SessionEnd => self.end_session(&pake_session_id),
             ServiceTypeId::SessionContextEnd => Err(ServiceRequestError::Unknown),
             ServiceTypeId::Store => Err(ServiceRequestError::Unknown),
@@ -686,7 +637,10 @@ impl R2psRequestUseCase for R2psService {
                 &service_request,
                 &self.r2ps_server_config.server_private_key,
             )
-            .map_err(|_| R2psRequestError::DecryptionError)?,
+            .map_err(|e| {
+                error!("Could not decrypt service data: {:?}", e);
+                R2psRequestError::DecryptionError
+            })?,
         };
 
         let response = self
@@ -737,6 +691,30 @@ impl R2psRequestUseCase for R2psService {
     }
 }
 
+fn create_server_setup(
+    server_private_key_pem: &Pem,
+) -> Result<ServerSetup<DefaultCipherSuite>, String> {
+    let secret_key = p256::SecretKey::from_pkcs8_pem(&pem::encode(server_private_key_pem))
+        .map_err(|e| format!("Failed to parse P-256 private key: {:?}", e))?;
+
+    let keypair = KeyPair::new(
+        PrivateKey::<NistP256>::deserialize(&secret_key.to_bytes())
+            .map_err(|e| format!("Failed to deserialize private key: {:?}", e))?,
+        PublicKey::<NistP256>::deserialize(
+            secret_key
+                .public_key()
+                .as_affine()
+                .to_encoded_point(true)
+                .as_bytes(),
+        )
+        .map_err(|e| format!("Failed to deserialize public key: {:?}", e))?,
+    );
+
+    Ok(ServerSetup::<DefaultCipherSuite>::new_with_key_pair(
+        &mut OsRng, keypair,
+    ))
+}
+
 fn encrypt_with_ec_pem(
     payload: &Vec<u8>,
     client_public_key: &Pem,
@@ -761,56 +739,29 @@ fn encrypt_with_ec_pem(
     }
 }
 
-fn decrypt_service_data_jwe(
+// todo remove logging of sensitive info
+pub fn decrypt_service_data_jwe(
     service_request: &ServiceRequest,
     server_private_key: &Pem,
 ) -> Result<Vec<u8>, ServiceRequestError> {
-    match &service_request.service_data {
-        Some(service_data) => {
-            info!("SERVICE DATA ******* {} ", service_data);
-            match BASE64_STANDARD.decode(&service_data) {
-                Ok(data) => match String::from_utf8(data) {
-                    Ok(decoded_string) => {
-                        let private_key_pem_string = pem::encode(&server_private_key);
-                        let parts: Vec<&str> = decoded_string.split('.').collect();
-                        match parts.len() {
-                            5 => match ECDH_ES.decrypter_from_pem(&private_key_pem_string) {
-                                Ok(decrypter) => {
-                                    match josekit::jwe::deserialize_compact(
-                                        &decoded_string,
-                                        &decrypter,
-                                    ) {
-                                        Ok((payload, header)) => {
-                                            info!(
-                                                "decrypted JWS payload: {}",
-                                                hex::encode(&payload)
-                                            );
-                                            match String::from_utf8(payload.clone()) {
-                                                Ok(decrypted_text) => {
-                                                    info!("Decrypted text: {}", decrypted_text)
-                                                }
-                                                Err(error) => warn!(
-                                                    "Error decrypting JWS payload: {:?}",
-                                                    error
-                                                ),
-                                            };
-                                            Ok(payload.to_vec())
-                                        }
-                                        Err(error) => Err(ServiceRequestError::Unknown),
-                                    }
-                                }
-                                Err(error) => Err(ServiceRequestError::Unknown),
-                            },
-                            _ => Err(ServiceRequestError::JweError),
-                        }
-                    }
-                    Err(error) => Err(ServiceRequestError::Unknown),
-                },
-                Err(error) => Err(ServiceRequestError::Unknown),
-            }
-        }
-        None => Err(ServiceRequestError::Unknown),
+    let service_data = service_request
+        .service_data
+        .as_ref()
+        .ok_or(ServiceRequestError::InvalidServiceRequestFormat)?;
+
+    info!("SERVICE DATA ******* {} ", service_data);
+
+    let decoded_string = String::from_utf8(BASE64_STANDARD.decode(service_data)?)?;
+    let decrypter = ECDH_ES.decrypter_from_pem(&pem::encode(server_private_key))?;
+    let (payload, _) = jwe::deserialize_compact(&decoded_string, &decrypter)?;
+
+    info!("decrypted JWS payload: {}", hex::encode(&payload));
+
+    if let Ok(text) = String::from_utf8(payload.clone()) {
+        info!("decrypted JWS payload: {}", text);
     }
+
+    Ok(payload)
 }
 
 fn encrypt_with_ec_jwk(
