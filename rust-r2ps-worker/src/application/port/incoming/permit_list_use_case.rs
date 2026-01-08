@@ -7,12 +7,16 @@ use uuid::Uuid;
 /// The key can be added to permit list (allow/deny)
 ///
 pub trait PermitListUseCase<DeviceRegistrationError> {
-    fn register_device(&self, server_wallet_id: &ServerWalletId, device_id: &DeviceId, registration: &PermitListDto) -> Result<(), DeviceRegistrationError>;
+    fn register_device(
+        &self,
+        server_wallet_id: &ServerWalletId,
+        device_id: &DeviceId,
+        registration: &PermitListDto,
+    ) -> Result<(), DeviceRegistrationError>;
 }
 
 pub type DeviceId = Uuid;
 pub type ServerWalletId = Uuid;
-
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct PermitListDto {
@@ -34,7 +38,6 @@ pub struct DeviceKey {
     #[schema(value_type = Object)] // Jwk has not implemented ToSchema
     pub device_public_key: Jwk,
 }
-
 
 /*
 

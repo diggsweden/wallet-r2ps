@@ -1,21 +1,20 @@
-use std::collections::HashMap;
-use std::time::Duration;
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use josekit::jwk::Jwk;
 use pem::Pem;
-use rdkafka::{ClientConfig, ClientContext, Message};
 use rdkafka::message::DeliveryResult;
 use rdkafka::producer::{BaseProducer, BaseRecord, Producer, ProducerContext};
+use rdkafka::{ClientConfig, ClientContext, Message};
 use ring::signature::{Ed25519KeyPair, KeyPair};
-use tracing::{error, info, instrument, warn};
-use tracing_subscriber::{fmt, EnvFilter};
-use tracing_subscriber::layer::SubscriberExt;
-use tracing_subscriber::util::SubscriberInitExt;
-use uuid::Uuid;
 use rust_r2ps_worker::application::permit_list_use_case::{DeviceKey, PermitListDto, PermitStatus};
 use rust_r2ps_worker::infrastructure::KafkaConfig;
-
+use std::collections::HashMap;
+use std::time::Duration;
+use tracing::{error, info, instrument, warn};
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::{EnvFilter, fmt};
+use uuid::Uuid;
 
 struct ProducerCallbackContext;
 
@@ -24,7 +23,11 @@ impl ClientContext for ProducerCallbackContext {}
 impl ProducerContext for ProducerCallbackContext {
     type DeliveryOpaque = ();
 
-    fn delivery(&self, delivery_result: &DeliveryResult<'_>, _delivery_opaque: Self::DeliveryOpaque) {
+    fn delivery(
+        &self,
+        delivery_result: &DeliveryResult<'_>,
+        _delivery_opaque: Self::DeliveryOpaque,
+    ) {
         match delivery_result {
             Ok(message) => {
                 info!(
@@ -46,26 +49,22 @@ impl ProducerContext for ProducerCallbackContext {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-
     let config = KafkaConfig::init().unwrap();
 
     // init tracing
     tracing_subscriber::registry()
         .with(
             fmt::layer()
-                .with_thread_ids(true)      // Include thread IDs
-                .with_thread_names(true)    // Include thread names
-                .with_target(false)         // Hide target (module path)
-                .with_level(true)
-            // Show log levels
+                .with_thread_ids(true) // Include thread IDs
+                .with_thread_names(true) // Include thread names
+                .with_target(false) // Hide target (module path)
+                .with_level(true), // Show log levels
         )
         .with(
             // Filter based on RUST_LOG env var, default to info
-            EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| EnvFilter::new("info"))
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
         )
         .init();
-
 
     info!("bootstrap.servers {}", &config.bootstrap_servers);
 
@@ -79,7 +78,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let rng = ring::rand::SystemRandom::new();
 
-    for  device_no in 1..10 {
+    for device_no in 1..10 {
         let device_id = Uuid::new_v4();
         let server_wallet_id = Uuid::new_v4();
 
@@ -112,18 +111,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("=== Public Key (JWK) ===");
         println!("{}", serde_json::to_string_pretty(&jwk)?);
 
-
         let permit_device = PermitListDto {
             device_id,
             server_wallet_id,
-            device_keys: PermitStatus::Allow(
-                DeviceKey {
-                    device_public_key: jwk,
-                }
-            ),
+            device_keys: PermitStatus::Allow(DeviceKey {
+                device_public_key: jwk,
+            }),
         };
 
-        info!("Demo client data: {:?} {}", permit_device, private_pem_string);
+        info!(
+            "Demo client data: {:?} {}",
+            permit_device, private_pem_string
+        );
 
         match serde_json::to_string(&permit_device) {
             Ok(json) => {
@@ -156,7 +155,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-
 fn create_ed25519_spki(public_key: &[u8]) -> Vec<u8> {
     // SPKI structure for Ed25519:
     // SEQUENCE {
@@ -168,9 +166,9 @@ fn create_ed25519_spki(public_key: &[u8]) -> Vec<u8> {
 
     // Ed25519 OID: 1.3.101.112 -> 06 03 2B 65 70
     let algorithm_identifier: &[u8] = &[
-        0x30, 0x05,             // SEQUENCE, length 5
-        0x06, 0x03,             // OBJECT IDENTIFIER, length 3
-        0x2B, 0x65, 0x70,       // 1.3.101.112 (Ed25519)
+        0x30, 0x05, // SEQUENCE, length 5
+        0x06, 0x03, // OBJECT IDENTIFIER, length 3
+        0x2B, 0x65, 0x70, // 1.3.101.112 (Ed25519)
     ];
 
     // BIT STRING wrapper for public key (32 bytes for Ed25519)
@@ -196,17 +194,26 @@ fn ed25519_public_key_to_jwk(public_key: &[u8]) -> Result<Jwk, Box<dyn std::erro
     let mut params: HashMap<String, serde_json::Value> = HashMap::new();
 
     // Key type: OKP (Octet Key Pair) for EdDSA keys
-    params.insert("kty".to_string(), serde_json::Value::String("OKP".to_string()));
+    params.insert(
+        "kty".to_string(),
+        serde_json::Value::String("OKP".to_string()),
+    );
 
     // Curve: Ed25519
-    params.insert("crv".to_string(), serde_json::Value::String("Ed25519".to_string()));
+    params.insert(
+        "crv".to_string(),
+        serde_json::Value::String("Ed25519".to_string()),
+    );
 
     // x: the public key (base64url encoded)
     let x = URL_SAFE_NO_PAD.encode(public_key);
     params.insert("x".to_string(), serde_json::Value::String(x));
 
     // Optional: key use (signature)
-    params.insert("use".to_string(), serde_json::Value::String("sig".to_string()));
+    params.insert(
+        "use".to_string(),
+        serde_json::Value::String("sig".to_string()),
+    );
 
     // Convert to JWK
     let jwk_json = serde_json::to_string(&params)?;

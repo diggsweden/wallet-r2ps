@@ -1,10 +1,10 @@
-use std::time::Duration;
-use rdkafka::ClientConfig;
-use rdkafka::producer::{BaseProducer, BaseRecord};
-use tracing::{error, info};
 use crate::application::{R2psResponseError, R2psResponseSpiPort};
 use crate::domain::R2PsResponse;
 use crate::infrastructure::KafkaConfig;
+use rdkafka::ClientConfig;
+use rdkafka::producer::{BaseProducer, BaseRecord};
+use std::time::Duration;
+use tracing::{error, info};
 
 pub struct R2psResponseKafkaMessageSender {
     producer: BaseProducer,
@@ -19,9 +19,7 @@ impl R2psResponseKafkaMessageSender {
             .create()
             .expect("Producer creation failed");
 
-        R2psResponseKafkaMessageSender {
-            producer,
-        }
+        R2psResponseKafkaMessageSender { producer }
     }
 }
 
@@ -46,8 +44,7 @@ impl R2psResponseSpiPort for R2psResponseKafkaMessageSender {
                         Err(R2psResponseError::ConnectionError)
                     }
                 }
-
-            },
+            }
             Err(e) => {
                 error!("Failed to serialize output message: {:?}", e);
                 Err(R2psResponseError::ConnectionError)
@@ -58,6 +55,5 @@ impl R2psResponseSpiPort for R2psResponseKafkaMessageSender {
         self.producer.poll(Duration::from_millis(100));
 
         response
-
     }
 }

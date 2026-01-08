@@ -1,6 +1,6 @@
-use std::time::Duration;
 use pem::Pem;
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 use strum_macros::Display;
 use utoipa::ToSchema;
 
@@ -79,7 +79,7 @@ impl ServiceTypeId {
             ServiceTypeId::HsmEcKeygen => EncryptOption::User,
             ServiceTypeId::HsmEcDeleteKey => EncryptOption::User,
             ServiceTypeId::HsmListKeys => EncryptOption::User,
-            ServiceTypeId::SessionEnd  => EncryptOption::Device,
+            ServiceTypeId::SessionEnd => EncryptOption::Device,
             ServiceTypeId::SessionContextEnd => EncryptOption::Device,
             ServiceTypeId::Store => EncryptOption::User,
             ServiceTypeId::Retrieve => EncryptOption::User,
@@ -89,7 +89,6 @@ impl ServiceTypeId {
         }
     }
 }
-
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PakeResponsePayload {
@@ -146,7 +145,7 @@ pub struct KeyInfo {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ListKeysRequest {
-// TODO finns någon filteringspayload i Stefans kod....
+    // TODO finns någon filteringspayload i Stefans kod....
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -281,5 +280,5 @@ pub enum R2psRequestError {
     EncryptionError,
     UnsupportedContext,
     NotImplemented,
-    ServiceError(ServiceRequestError)
+    ServiceError(ServiceRequestError),
 }

@@ -1,5 +1,5 @@
-pub mod config;
 mod adapters;
+pub mod config;
 
-pub use config::kafka::{KafkaConfig};
 pub use adapters::*;
+pub use config::kafka::KafkaConfig;

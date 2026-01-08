@@ -1,24 +1,24 @@
-use std::env;
-use std::sync::{Arc};
+use crate::application::hsm_spi_port::HsmSpiPort;
+use crate::domain::Curve;
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use cryptoki::context::{CInitializeArgs, Pkcs11};
 use cryptoki::error::Error;
-use cryptoki::mechanism::{Mechanism};
+use cryptoki::mechanism::Mechanism;
 use cryptoki::object::{Attribute, AttributeType, KeyType, ObjectClass, ObjectHandle};
 use cryptoki::session::{Session, UserType};
 use cryptoki::slot::Slot;
 use cryptoki::types::AuthPin;
-use der::asn1::OctetStringRef;
 use der::Decode;
+use der::asn1::OctetStringRef;
 use digest::Digest;
 use elliptic_curve::pkcs8::EncodePublicKey;
 use p256::ecdsa::VerifyingKey;
 use sha2::Sha256;
+use std::env;
+use std::sync::Arc;
 use tracing::{info, warn};
 use uuid::Uuid;
-use crate::application::hsm_spi_port::{HsmSpiPort};
-use crate::domain::Curve;
 
 pub struct HsmWrapper {
     pkcs11: Arc<Pkcs11>,
@@ -37,7 +37,6 @@ pub struct HsmKey {
     pub creation_time: chrono::DateTime<chrono::Utc>,
 }
 
-
 #[derive(Debug)]
 pub struct Pkcs11Config {
     pub lib_path: String,
@@ -48,15 +47,18 @@ pub struct Pkcs11Config {
 }
 
 impl Pkcs11Config {
-        pub fn new_from_env() -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn new_from_env() -> Result<Self, Box<dyn std::error::Error>> {
         let lib_path = env::var("PKCS11LIB").map_err(|_| "PKCS11LIB env var not set")?;
         let slot_index_str = env::var("PKCS11_SLOT").map_err(|_| "PKCS11SLOT env var not set")?;
         let slot_index: usize = slot_index_str.parse()?;
         let so_pin: Option<String> = env::var("SO_PIN").ok();
         let user_pin = env::var("USER_PIN").ok();
-        let wrap_key_alias = env::var("WRAPPER_KEY_ALIAS").ok().or_else(||Some("aes-wrapping-key".to_string())).unwrap();
+        let wrap_key_alias = env::var("WRAPPER_KEY_ALIAS")
+            .ok()
+            .or_else(|| Some("aes-wrapping-key".to_string()))
+            .unwrap();
 
-        Ok(Pkcs11Config{
+        Ok(Pkcs11Config {
             lib_path,
             slot_index,
             so_pin,
@@ -92,7 +94,6 @@ impl HsmWrapper {
 
         session.login(UserType::User, Some(&user_pin.clone().unwrap()))?;
 
-
         let result = HsmWrapper {
             pkcs11,
             slot,
@@ -120,41 +121,36 @@ impl HsmWrapper {
     }
 
     pub fn ec_key_templates(&self, label: &str, curve: &Curve) -> (Vec<Attribute>, Vec<Attribute>) {
-
         let ec_params = match curve {
-            &Curve::P256 => vec![
-                0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07
-            ],
-            &Curve::P384 => vec![
-                0x06, 0x05, 0x2b, 0x81, 0x04, 0x00, 0x22
-            ],
-            &Curve::P521 => vec![
-                0x06, 0x05, 0x2b, 0x81, 0x04, 0x00, 0x23
-            ]
+            &Curve::P256 => vec![0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07],
+            &Curve::P384 => vec![0x06, 0x05, 0x2b, 0x81, 0x04, 0x00, 0x22],
+            &Curve::P521 => vec![0x06, 0x05, 0x2b, 0x81, 0x04, 0x00, 0x23],
         };
 
-        (vec![
-            Attribute::Private(true),
-            Attribute::Token(false),
-            Attribute::Sensitive(true),
-            Attribute::Extractable(true),
-            Attribute::Sign(true),
-            Attribute::Label(format!("{}-private", label).into()),
-        ],
-        vec![
-            Attribute::Private(false),
-            Attribute::Token(false),
-            Attribute::EcParams(ec_params),
-            Attribute::Verify(true),
-            Attribute::Label(format!("{}-public", label).into()),
-        ])
+        (
+            vec![
+                Attribute::Private(true),
+                Attribute::Token(false),
+                Attribute::Sensitive(true),
+                Attribute::Extractable(true),
+                Attribute::Sign(true),
+                Attribute::Label(format!("{}-private", label).into()),
+            ],
+            vec![
+                Attribute::Private(false),
+                Attribute::Token(false),
+                Attribute::EcParams(ec_params),
+                Attribute::Verify(true),
+                Attribute::Label(format!("{}-public", label).into()),
+            ],
+        )
     }
 
     pub fn aes_wrapping_key(&self, session: &Session) -> Result<ObjectHandle, Error> {
         let aes_template = vec![
             Attribute::Token(true),
             Attribute::Private(true),
-            Attribute::ValueLen(32.into()),  // 256-bit
+            Attribute::ValueLen(32.into()), // 256-bit
             Attribute::Encrypt(true),
             Attribute::Decrypt(true),
             Attribute::Wrap(true),
@@ -167,31 +163,43 @@ impl HsmWrapper {
             None => {
                 warn!("No wrapping key found... generate new aes wrapping key");
                 session.generate_key(&Mechanism::AesKeyGen, &aes_template)
-            },
+            }
         }
     }
 
-    pub fn wrap_private_key(&self, session: &Session, ec_private_key: ObjectHandle) -> Result<Vec<u8>, Error> {
+    pub fn wrap_private_key(
+        &self,
+        session: &Session,
+        ec_private_key: ObjectHandle,
+    ) -> Result<Vec<u8>, Error> {
         let mechanism = Mechanism::AesKeyWrapPad;
         let wrapping_key = self.aes_wrapping_key(&session)?;
 
         session.wrap_key(&mechanism, wrapping_key, ec_private_key)
     }
 
-    pub fn unwrap_private_key(&self, session: &Session, wrapped_private_key: Vec<u8>) -> Result<ObjectHandle, Error> {
+    pub fn unwrap_private_key(
+        &self,
+        session: &Session,
+        wrapped_private_key: Vec<u8>,
+    ) -> Result<ObjectHandle, Error> {
         let mechanism = Mechanism::AesKeyWrapPad;
         let wrap_key = self.aes_wrapping_key(&session)?;
 
-        session.unwrap_key(&mechanism, wrap_key, &wrapped_private_key, &vec![
-            Attribute::Class(ObjectClass::PRIVATE_KEY),
-            Attribute::KeyType(KeyType::EC),
-
-            Attribute::Private(true),
-            Attribute::Token(false),
-            Attribute::Sensitive(true),
-            Attribute::Extractable(true),
-            Attribute::Sign(true),
-        ])
+        session.unwrap_key(
+            &mechanism,
+            wrap_key,
+            &wrapped_private_key,
+            &vec![
+                Attribute::Class(ObjectClass::PRIVATE_KEY),
+                Attribute::KeyType(KeyType::EC),
+                Attribute::Private(true),
+                Attribute::Token(false),
+                Attribute::Sensitive(true),
+                Attribute::Extractable(true),
+                Attribute::Sign(true),
+            ],
+        )
     }
 
     pub fn get_ec_public_key(
@@ -199,18 +207,17 @@ impl HsmWrapper {
         session: &Session,
         public_key: ObjectHandle,
     ) -> Result<String, Box<dyn std::error::Error>> {
-        let attrs = session.get_attributes(
-            public_key,
-            &[AttributeType::EcPoint],
-        )?;
+        let attrs = session.get_attributes(public_key, &[AttributeType::EcPoint])?;
 
         for attr in attrs {
             if let Attribute::EcPoint(point) = attr {
-                let octet_string = OctetStringRef::from_der(&point)
-                    .map_err(|e| e.to_string())?;
+                let octet_string = OctetStringRef::from_der(&point).map_err(|e| e.to_string())?;
 
-                let verifying_key = VerifyingKey::from_sec1_bytes(octet_string.as_bytes()).map_err(|e| e.to_string())?;
-                let pem = verifying_key.to_public_key_pem(Default::default()).map_err(|e| e.to_string())?;
+                let verifying_key = VerifyingKey::from_sec1_bytes(octet_string.as_bytes())
+                    .map_err(|e| e.to_string())?;
+                let pem = verifying_key
+                    .to_public_key_pem(Default::default())
+                    .map_err(|e| e.to_string())?;
 
                 return Ok(pem);
             }
@@ -218,13 +225,14 @@ impl HsmWrapper {
 
         Err("EC point not found".into())
     }
-
 }
 
-
 impl HsmSpiPort for HsmWrapper {
-
-    fn generate_key(&self, label: &str, curve: &Curve) -> Result<HsmKey, Box<dyn std::error::Error>> {
+    fn generate_key(
+        &self,
+        label: &str,
+        curve: &Curve,
+    ) -> Result<HsmKey, Box<dyn std::error::Error>> {
         let session = self.pkcs11.open_ro_session(self.slot)?;
         session.login(UserType::User, self.user_pin.as_ref())?;
 
@@ -240,11 +248,20 @@ impl HsmSpiPort for HsmWrapper {
         let public_key_pem = self.get_ec_public_key(&session, ec_public_key)?;
 
         session.close();
-        println!("Successfully generated EC key pair with label: {} {}", ec_public_key, wrapped_private_key.len());
+        println!(
+            "Successfully generated EC key pair with label: {} {}",
+            ec_public_key,
+            wrapped_private_key.len()
+        );
 
-        Ok(HsmKey {wrapped_private_key, public_key_pem: public_key_pem.clone(), kid: Uuid::new_v4().to_string(), curve_name: Curve::P256, creation_time: chrono::Utc::now() })
+        Ok(HsmKey {
+            wrapped_private_key,
+            public_key_pem: public_key_pem.clone(),
+            kid: Uuid::new_v4().to_string(),
+            curve_name: Curve::P256,
+            creation_time: chrono::Utc::now(),
+        })
     }
-
 
     fn sign(&self, wrapped_key: &Vec<u8>, sign_payload: &Vec<u8>) -> Result<Vec<u8>, Error> {
         let session = self.pkcs11.open_rw_session(self.slot)?;
@@ -262,7 +279,6 @@ impl Drop for HsmWrapper {
     }
 }
 
-
 impl HsmKey {
     pub fn new(wrapped_private_key: Vec<u8>, public_key_pem: String) -> Result<HsmKey, Error> {
         Ok(HsmKey {
@@ -275,9 +291,7 @@ impl HsmKey {
     }
 }
 
-
 fn kid_from_pem(pem_bytes: &[u8]) -> String {
-
     // SHA-256 thumbprint of the DER-encoded public key
     let mut hasher = Sha256::new();
     hasher.update(pem_bytes); // or the actual DER bytes
