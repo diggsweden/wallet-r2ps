@@ -39,4 +39,4 @@ COPY --from=builder /app/r2ps-rest-api/target/*.jar app.jar
 EXPOSE 8080
 
 # Run the application
-ENTRYPOINT ["java", "-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:8000", "-jar", "app.jar"]
+ENTRYPOINT ["java", "-jar", "app.jar"]
