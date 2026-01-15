@@ -22,14 +22,13 @@ impl SessionKeySpiPort for SessionKeyMemoryCache {
     fn store(
         &self,
         pake_session_id: &str,
-        session_key: &SessionKey,
+        session_key: SessionKey,
     ) -> Result<(), crate::application::session_key_spi_port::ClientRepositoryError> {
         info!(
             "storing session key session_id: {} {:02X?}",
             pake_session_id, session_key
         );
-        self.cache
-            .insert(pake_session_id.to_string(), session_key.clone());
+        self.cache.insert(pake_session_id.to_string(), session_key);
         Ok(())
     }
 

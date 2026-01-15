@@ -1,5 +1,8 @@
+use base64::DecodeError;
+use josekit::JoseError;
 use pem::Pem;
 use serde::{Deserialize, Serialize};
+use std::string::FromUtf8Error;
 use std::time::Duration;
 use strum_macros::Display;
 use utoipa::ToSchema;
@@ -36,7 +39,7 @@ pub struct ServiceRequest {
     pub version: Option<String>,
     pub nonce: Option<String>,
     pub iat: Option<i64>,
-    pub enc: Option<String>,
+    pub enc: Option<EncryptOption>,
     #[serde(rename = "data")]
     pub service_data: Option<String>,
 }
@@ -63,6 +66,8 @@ pub enum ServiceTypeId {
     Info,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum EncryptOption {
     User,
     Device,
@@ -291,6 +296,24 @@ pub enum ServiceRequestError {
     UnsupportedContext,
     InternalServerError,
     Unknown,
+}
+
+impl From<DecodeError> for ServiceRequestError {
+    fn from(_: DecodeError) -> Self {
+        ServiceRequestError::JweError
+    }
+}
+
+impl From<FromUtf8Error> for ServiceRequestError {
+    fn from(_: FromUtf8Error) -> Self {
+        ServiceRequestError::JweError
+    }
+}
+
+impl From<JoseError> for ServiceRequestError {
+    fn from(_: JoseError) -> Self {
+        ServiceRequestError::JweError
+    }
 }
 
 #[derive(Debug)]
