@@ -499,7 +499,7 @@ impl R2psService {
 
         let raw_sig_bytes = self
             .hsm_spi_port
-            .sign(&hsm_key.wrapped_private_key, &payload.tbs_hash.into_bytes())
+            .sign(&hsm_key.wrapped_private_key, &payload.tbs_hash)
             .map_err(|_| ServiceRequestError::Unknown)?;
         let signature = p256::ecdsa::Signature::from_slice(&raw_sig_bytes)
             .map_err(|_| ServiceRequestError::Unknown)?;
@@ -835,6 +835,7 @@ fn jws_with_jwk(data: &str, nonce: Option<String>) -> Result<String, ServiceRequ
         ver: "1.0".to_string(),
         nonce: nonce.unwrap().to_string(),
         iat: now.timestamp(),
+        //todo this could be "user" or "device", but it seems to work regardless. Remove?
         enc: "device".to_string(),
         data: STANDARD.encode(data),
     };

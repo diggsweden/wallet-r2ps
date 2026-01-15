@@ -148,10 +148,32 @@ pub struct ListKeysRequest {
     // TODO finns någon filteringspayload i Stefans kod....
 }
 
+mod base64_serde {
+    use base64::Engine;
+    use base64::engine::general_purpose::STANDARD;
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S>(bytes: &Vec<u8>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&STANDARD.encode(bytes))
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        STANDARD.decode(&s).map_err(serde::de::Error::custom)
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct SignRequest {
     pub kid: String,
-    pub tbs_hash: String,
+    #[serde(with = "base64_serde")]
+    pub tbs_hash: Vec<u8>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
