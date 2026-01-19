@@ -1,5 +1,5 @@
 use crate::domain::DefaultCipherSuite;
-use crate::infrastructure::hsm_wrapper::HsmKey;
+use crate::domain::HsmKey;
 use generic_array::GenericArray;
 use opaque_ke::ServerRegistrationLen;
 use pem::Pem;

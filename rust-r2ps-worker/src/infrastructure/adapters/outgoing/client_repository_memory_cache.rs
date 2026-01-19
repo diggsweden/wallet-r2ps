@@ -3,7 +3,7 @@ use crate::application::client_repository_spi_port::{
 };
 use crate::application::load_pem_from_bas64_env;
 use crate::domain::ClientMetadata;
-use crate::infrastructure::hsm_wrapper::HsmKey;
+use crate::domain::HsmKey;
 use foyer::{Cache, CacheBuilder, EvictionConfig, LruConfig};
 use tracing::error;
 
@@ -66,7 +66,7 @@ impl ClientRepositorySpiPort for ClientRepositoryMemoryCache {
         client_metadata
             .keys
             .iter()
-            .find(|key| key.kid.eq(&kid))
+            .find(|&key| key.kid().eq(kid))
             .cloned()
             .ok_or(ClientRepositoryError::KeyNotFound)
     }
@@ -85,7 +85,7 @@ impl ClientRepositorySpiPort for ClientRepositoryMemoryCache {
         let mut metadata = self
             .client_metadata(client_id)
             .ok_or(ClientRepositoryError::ClientNotFound)?;
-        metadata.keys.retain(|key| key.kid != kid);
+        metadata.keys.retain(|key| key.kid() != kid);
         self.store_metadata(metadata)?;
         Ok(())
     }

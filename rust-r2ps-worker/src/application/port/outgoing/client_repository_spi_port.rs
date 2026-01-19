@@ -1,5 +1,5 @@
+use crate::domain::HsmKey;
 use crate::domain::{ClientMetadata, ServiceRequestError};
-use crate::infrastructure::hsm_wrapper::HsmKey;
 
 pub trait ClientRepositorySpiPort {
     fn client_metadata(&self, client_id: &str) -> Option<ClientMetadata>;

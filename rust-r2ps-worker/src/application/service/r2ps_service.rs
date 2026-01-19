@@ -132,18 +132,12 @@ impl R2psService {
                                 josekit::jwe::deserialize_compact(&decoded_string, &decrypter)?;
                             Ok(payload)
                         }
-                        Err(_) => Err(Box::new(std::io::Error::other(
-                            "No session key",
-                        ))),
+                        Err(_) => Err(Box::new(std::io::Error::other("No session key"))),
                     }
                 }
-                Err(_) => Err(Box::new(std::io::Error::other(
-                    "No session key",
-                ))),
+                Err(_) => Err(Box::new(std::io::Error::other("No session key"))),
             },
-            None => Err(Box::new(std::io::Error::other(
-                "No session key",
-            ))),
+            None => Err(Box::new(std::io::Error::other("No session key"))),
         }
     }
 
@@ -247,9 +241,7 @@ impl R2psService {
                 let pake_response = PakeResponsePayload {
                     pake_session_id: Some(pake_session_id.to_string()),
                     task: None,
-                    response_data: Some(
-                        STANDARD.encode(credential_response_bytes),
-                    ),
+                    response_data: Some(STANDARD.encode(credential_response_bytes)),
                     message: None,
                     session_expiration_time: None,
                 };
@@ -477,16 +469,16 @@ impl R2psService {
         let payload = serde_json::from_slice::<CreateKeyServiceData>(decrypted_payload)
             .map_err(|_| ServiceRequestError::InvalidServiceRequestFormat)?;
 
-        let key = self
+        let hsm_key = self
             .hsm_spi_port
             .generate_key("foobar", &payload.curve)
             .map_err(|_| ServiceRequestError::Unknown)?;
 
-        // TODO ändra protokollet så att t.ex. id och publik nyckel returneras???
-        self.client_repository_spi_port.add_key(device_id, &key)?;
+        self.client_repository_spi_port
+            .add_key(device_id, &hsm_key)?;
 
         serde_json::to_vec(&CreateKeyServiceDataResponse {
-            created_key: payload.curve,
+            public_key: hsm_key.public_key_jwk,
         })
         .map_err(|_| ServiceRequestError::SerializeResponseError)
     }
@@ -504,15 +496,7 @@ impl R2psService {
                     .keys
                     .iter()
                     .map(|key| KeyInfo {
-                        kid: key.kid.clone(),
-                        public_key: key
-                            .public_key_pem
-                            .clone()
-                            .lines()
-                            .filter(|line| !line.starts_with("-----"))
-                            .collect::<Vec<_>>()
-                            .join(""),
-                        curve_name: key.curve_name.clone(),
+                        public_key: key.public_key_jwk.clone(),
                         creation_time: Some(key.creation_time.timestamp_millis()),
                     })
                     .collect(),
@@ -551,12 +535,9 @@ impl R2psService {
         };
         info!("SERVICE TYPE REQUEST {:?}", service_request.service_type);
         match service_request.service_type {
-            ServiceTypeId::Authenticate => self.authenticate(
-                decrypted_payload,
-                device_id,
-                r2ps_service,
-                &pake_session_id,
-            ),
+            ServiceTypeId::Authenticate => {
+                self.authenticate(decrypted_payload, device_id, r2ps_service, &pake_session_id)
+            }
             ServiceTypeId::PinRegistration => {
                 self.pin_registration(decrypted_payload, device_id, r2ps_service)
             }
@@ -769,22 +750,6 @@ pub fn decrypt_service_data_jwe(
     }
 
     Ok(payload)
-}
-
-fn encrypt_with_ec_jwk(
-    payload: &PakeResponsePayload,
-    ec_public_jwk: &josekit::jwk::Jwk,
-) -> Result<String, Box<dyn std::error::Error>> {
-    let payload_bytes = serde_json::to_vec(payload)?;
-
-    let mut header = JweHeader::new();
-    header.set_algorithm("ECDH-ES");
-    header.set_content_encryption("A256GCM");
-
-    let encrypter = ECDH_ES.encrypter_from_jwk(ec_public_jwk)?;
-    let jwe = josekit::jwe::serialize_compact(&payload_bytes, &header, &encrypter)?;
-
-    Ok(jwe)
 }
 
 impl EncryptOption {

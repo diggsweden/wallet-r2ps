@@ -56,7 +56,7 @@ der = "0.7.10"
 argon2 = { version = "0.5", features = ["std"] }
 hmac = "0.12"
 generic-array = "0.14"
-chrono = "0.4.42"
+chrono = { version = "0.4.42", features = ["serde"] }
 uuid = { version = "1.18.1", features = ["v4", "serde"] }
 digest = "0.10.7"
 hex = "0.4.3"

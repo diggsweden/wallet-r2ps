@@ -1,5 +1,5 @@
 use crate::domain::Curve;
-use crate::infrastructure::hsm_wrapper::HsmKey;
+use crate::domain::HsmKey;
 use cryptoki::error::Error;
 
 pub struct KeyGenParams {
@@ -21,5 +21,6 @@ pub trait HsmSpiPort {
         label: &str,
         curve: &Curve,
     ) -> Result<HsmKey, Box<dyn std::error::Error>>;
+
     fn sign(&self, wrapped_key: &[u8], sign_payload: &[u8]) -> Result<Vec<u8>, Error>;
 }

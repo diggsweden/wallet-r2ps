@@ -1,3 +1,4 @@
+use crate::domain::EcPublicJwk;
 use base64::DecodeError;
 use josekit::JoseError;
 use pem::Pem;
@@ -116,13 +117,16 @@ pub struct PakeResponsePayload {
     pub session_expiration_time: Option<i64>,
 }
 
-#[derive(Serialize, Deserialize, ToSchema, Debug, Clone)]
+#[derive(Serialize, Deserialize, ToSchema, Debug, Clone, Display)]
 pub enum Curve {
     #[serde(rename = "P-256")]
+    #[strum(serialize = "P-256")]
     P256,
     #[serde(rename = "P-384")]
+    #[strum(serialize = "P-384")]
     P384,
     #[serde(rename = "P-521")]
+    #[strum(serialize = "P-521")]
     P521,
 }
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -132,7 +136,7 @@ pub struct CreateKeyServiceData {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct CreateKeyServiceDataResponse {
-    pub created_key: Curve,
+    pub public_key: EcPublicJwk,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -147,10 +151,8 @@ pub struct ListKeysResponse {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct KeyInfo {
-    pub kid: String,
-    pub curve_name: Curve,
     pub creation_time: Option<i64>,
-    pub public_key: String,
+    pub public_key: EcPublicJwk,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
