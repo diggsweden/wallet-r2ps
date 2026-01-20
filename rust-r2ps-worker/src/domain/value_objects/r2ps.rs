@@ -331,4 +331,5 @@ pub enum R2psRequestError {
     UnsupportedContext,
     NotImplemented,
     ServiceError(ServiceRequestError),
+    UnknownSession
 }
