@@ -2,7 +2,7 @@ use crate::application::client_repository_spi_port::ClientRepositorySpiPort;
 use crate::application::device_permit_list_spi_port::DevicePermitListSpiPort;
 use crate::application::hsm_spi_port::HsmSpiPort;
 use crate::application::pending_auth_spi_port::{LoginSession, PendingAuthSpiPort};
-use crate::application::session_key_spi_port::SessionKeySpiPort;
+use crate::application::session_key_spi_port::{SessionKey, SessionKeySpiPort};
 use crate::application::{
     R2psRequestId, R2psRequestUseCase, R2psResponseSpiPort, load_pem_from_bas64_env,
 };
@@ -295,7 +295,7 @@ impl R2psService {
                 info!("SESSION KEY: {:X}", result.session_key);
 
                 self.session_key_spi_port
-                    .store(pake_session_id, result.session_key.to_vec())
+                    .store(pake_session_id, SessionKey::new(result.session_key.to_vec()))
                     .map_err(|_| ServiceRequestError::InternalServerError)?;
 
                 let msg = br#"{"msg":"OK"}"#.to_vec();

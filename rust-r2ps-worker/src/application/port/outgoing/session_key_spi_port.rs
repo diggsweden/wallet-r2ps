@@ -1,3 +1,5 @@
+use crate::application::helpers::ByteVector;
+
 pub trait SessionKeySpiPort {
     fn store(
         &self,
@@ -13,4 +15,4 @@ pub enum ClientRepositoryError {
     Unknown,
 }
 
-pub type SessionKey = Vec<u8>;
+pub type SessionKey = ByteVector;
