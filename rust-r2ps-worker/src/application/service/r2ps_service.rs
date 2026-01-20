@@ -623,8 +623,9 @@ impl R2psRequestUseCase for R2psService {
         let decrypted_payload = match service_request.service_type.encrypt_option() {
             EncryptOption::User => {
                 let session_key = session_key.clone().ok_or(R2psRequestError::UnknownSession)?;
+                let service_data = service_request.service_data.as_ref().ok_or(R2psRequestError::DecryptionError)?;
                 self.decrypt_jwe(
-                    &service_request.clone().service_data.unwrap(),
+                    &service_data,
                     &session_key,
                 )
                 .map_err(|_| R2psRequestError::DecryptionError)?
@@ -669,7 +670,7 @@ impl R2psRequestUseCase for R2psService {
         let jws = jws_with_jwk(
             &jwe,
             service_request.nonce,
-            service_request.service_type.encrypt_option(),
+            enc_option,
         )
         .map_err(|_| R2psRequestError::JwsError)?;
 
