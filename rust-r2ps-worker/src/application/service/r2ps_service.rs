@@ -1,11 +1,13 @@
 use crate::application::client_repository_spi_port::ClientRepositorySpiPort;
 use crate::application::device_permit_list_spi_port::DevicePermitListSpiPort;
+use crate::application::helpers::ByteVector;
 use crate::application::hsm_spi_port::HsmSpiPort;
 use crate::application::pending_auth_spi_port::{LoginSession, PendingAuthSpiPort};
 use crate::application::session_key_spi_port::{SessionKey, SessionKeySpiPort};
 use crate::application::{
     R2psRequestId, R2psRequestUseCase, R2psResponseSpiPort, load_pem_from_bas64_env,
 };
+use crate::define_byte_vector;
 use crate::domain::value_objects::r2ps::{
     Claims, PakeRequestPayload, PakeResponsePayload, ServiceRequest,
 };
@@ -39,6 +41,8 @@ use std::sync::Arc;
 use std::time::Instant;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
+
+define_byte_vector!(DecryptedData);
 
 #[derive(Clone)]
 pub struct R2psService {
@@ -112,11 +116,14 @@ impl R2psService {
         &self,
         encrypted_payload: &str,
         session_key: &SessionKey,
-    ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    ) -> Result<DecryptedData, Box<dyn std::error::Error>> {
         match BASE64_STANDARD.decode(encrypted_payload) {
             Ok(data) => {
-                info!("decoded service_data hex: {:02X?}", data);
-                match String::from_utf8(data) {
+                // Cast to ByteVector for better debug logging. Remove casting if/when logging is removed.
+                // TODO: Only log the bytes if it can't be decoded to UTF-8 (in which case it will be logged as UTF-8)
+                let vec = ByteVector::new(data);
+                info!("decoded service_data hex: {:02X?}", &vec);
+                match String::from_utf8(vec.to_vec()) {
                     Ok(decoded_string) => {
                         info!("decoded service_data utf8: {}", decoded_string);
                         debug!("decrypt with session key {:02X?}", session_key);
@@ -124,7 +131,7 @@ impl R2psService {
                             .decrypter_from_bytes(session_key.to_bytes())?;
                         let (payload, _header) =
                             josekit::jwe::deserialize_compact(&decoded_string, &decrypter)?;
-                        Ok(payload)
+                        Ok(DecryptedData::new(payload))
                     }
                     Err(_) => Err(Box::new(std::io::Error::other(
                         "Failed to decode UTF-8",
@@ -531,7 +538,7 @@ impl R2psService {
     pub(crate) fn process_service_request(
         &self,
         service_request: &ServiceRequest,
-        decrypted_payload: &[u8],
+        decrypted_payload: &DecryptedData,
         device_id: &str,
         r2ps_service: &R2psService,
     ) -> Result<Vec<u8>, ServiceRequestError> {
@@ -746,7 +753,7 @@ fn encrypt_with_ec_pem(
 pub fn decrypt_service_data_jwe(
     service_request: &ServiceRequest,
     server_private_key: &Pem,
-) -> Result<Vec<u8>, ServiceRequestError> {
+) -> Result<DecryptedData, ServiceRequestError> {
     let service_data = service_request
         .service_data
         .as_ref()
@@ -764,7 +771,7 @@ pub fn decrypt_service_data_jwe(
         info!("decrypted JWS payload: {}", text);
     }
 
-    Ok(payload)
+    Ok(DecryptedData::new(payload))
 }
 
 fn encrypt_with_ec_jwk(

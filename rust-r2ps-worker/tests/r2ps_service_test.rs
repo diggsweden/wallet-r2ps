@@ -54,7 +54,7 @@ fn test_decrypt_service_data_jwe_happy_path() -> Result<(), Box<dyn std::error::
         "decrypt_service_data_jwe failed: {:?}",
         result_new.err()
     );
-    assert_eq!(result_new.unwrap(), payload);
+    assert_eq!(result_new.unwrap().to_vec(), payload);
 
     Ok(())
 }
