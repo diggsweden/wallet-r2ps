@@ -53,10 +53,12 @@ impl SessionKeySpiPort for SessionKeyMemoryCache {
                 // Note: This is not an error because a pake_session_id is returned in Authenticate start,
                 //       but the session key is only stored after Authenticate finish.
                 debug!("session key not found for session_id: {}", pake_session_id);
-                // TODO: Remove this debug logging when we don't use an in-memory cache anymore
-                debug!("Cache entries count: {}", self.cache.entry_count());
-                for (key, _value) in self.cache.iter() {
-                    debug!("Cache contains session_id: {}", key);
+                // TODO: Remove this debug logging when we're done with initial development
+                {
+                    debug!("Cache entries count: {}", self.cache.entry_count());
+                    for (key, _value) in self.cache.iter() {
+                        debug!("Cache contains session_id: {}", key);
+                    }
                 }
                 None
             }
