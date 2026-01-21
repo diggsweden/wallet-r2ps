@@ -1,39 +1,50 @@
-use std::fmt;
-use std::ops::Deref;
+/// Macro to create distinct New Type wrappers around Vec<u8> with common behavior
+#[macro_export]
+macro_rules! define_byte_vector {
+    ($name:ident) => {
+        #[derive(Clone)]
+        pub struct $name(Vec<u8>);
 
-#[derive(Clone)]
-pub struct ByteVector(Vec<u8>);
+        impl $name {
+            pub fn new(x: Vec<u8>) -> Self {
+                $name(x)
+            }
 
-impl ByteVector {
-    pub fn new(x: Vec<u8>) -> ByteVector {
-        ByteVector(x)
-    }
+            pub fn to_vec(self) -> Vec<u8> {
+                self.0
+            }
+        }
+
+        impl std::ops::Deref for $name {
+            type Target = Vec<u8>;
+
+            fn deref(&self) -> &Vec<u8> {
+                &self.0
+            }
+        }
+
+        impl std::fmt::Debug for $name {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, "{}({})", stringify!($name), hex::encode(&self.0))
+            }
+        }
+
+        impl AsRef<[u8]> for $name {
+            fn as_ref(&self) -> &[u8] {
+                &self.0
+            }
+        }
+    };
 }
 
-impl Deref for ByteVector {
-    type Target = Vec<u8>;
-
-    fn deref(&self) -> &Vec<u8> {
-        &self.0
-    }
-}
-
-impl fmt::Debug for ByteVector {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "ByteVector({})", hex::encode(&self.0))
-    }
-}
-
-impl AsRef<[u8]> for ByteVector {
-    fn as_ref(&self) -> &[u8] {
-        &self.0
-    }
-}
+// Define generic ByteVector using the macro
+define_byte_vector!(ByteVector);
 
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+
+    use super::ByteVector;
 
     #[test]
     fn debug_works() {
