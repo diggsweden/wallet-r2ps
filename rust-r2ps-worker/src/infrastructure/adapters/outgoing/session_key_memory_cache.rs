@@ -1,8 +1,7 @@
 use crate::application::session_key_spi_port::{SessionKey, SessionKeySpiPort};
 use moka::sync::Cache;
-use ring::error;
 use std::time::Duration;
-use tracing::{debug, info, error};
+use tracing::{debug, info};
 
 pub struct SessionKeyMemoryCache {
     cache: Cache<String, SessionKey>,
@@ -51,7 +50,9 @@ impl SessionKeySpiPort for SessionKeyMemoryCache {
                 Some(session_key)
             }
             None => {
-                error!("session key not found for session_id: {}", pake_session_id);
+                // Note: This is not an error because a pake_session_id is returned in Authenticate start,
+                //       but the session key is only stored after Authenticate finish.
+                debug!("session key not found for session_id: {}", pake_session_id);
                 // TODO: Remove this debug logging when we don't use an in-memory cache anymore
                 debug!("Cache entries count: {}", self.cache.entry_count());
                 for (key, _value) in self.cache.iter() {
