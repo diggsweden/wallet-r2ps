@@ -11,11 +11,11 @@ use cryptoki::slot::Slot;
 use cryptoki::types::AuthPin;
 use der::Decode;
 use der::asn1::OctetStringRef;
+use digest::Digest;
 use p256::ecdsa::VerifyingKey;
 use std::env;
 use std::sync::Arc;
 use tracing::{info, warn};
-use uuid::Uuid;
 
 pub struct HsmWrapper {
     pkcs11: Arc<Pkcs11>,
@@ -214,46 +214,29 @@ impl HsmWrapper {
         let x = ec_point.x().ok_or("X coordinate not found")?;
         let y = ec_point.y().ok_or("Y coordinate not found")?;
 
+        let x_b64 = URL_SAFE_NO_PAD.encode(x);
+        let y_b64 = URL_SAFE_NO_PAD.encode(y);
+
+        let kid = Self::generate_kid(curve, &x_b64, &y_b64);
+
         Ok(EcPublicJwk {
-            kty: "EC".to_string(),
             crv: curve.to_string(),
-            x: URL_SAFE_NO_PAD.encode(x),
-            y: URL_SAFE_NO_PAD.encode(y),
-            kid: Uuid::new_v4().to_string(),
+            kty: "EC".to_string(),
+            x: x_b64,
+            y: y_b64,
+            kid,
         })
     }
-}
 
-#[cfg(test)]
-mod tests {
-    use crate::domain::Curve;
-    use crate::infrastructure::hsm_wrapper::HsmWrapper;
-    use p256::ecdsa::SigningKey;
-    use rand::rngs::OsRng;
-
-    // Verify that the EcPublicJwk generated is a valid JWK according to JOSE.
-    #[test]
-    pub fn test_ec_point_to_jwk() -> Result<(), Box<dyn std::error::Error>> {
-        let signing_key = SigningKey::random(&mut OsRng);
-        let verifying_key = signing_key.verifying_key();
-        let encoded_point = verifying_key.to_encoded_point(false);
-        let sec1_bytes = encoded_point.as_bytes();
-        let mut der_encoded = vec![0x04, sec1_bytes.len() as u8];
-        der_encoded.extend_from_slice(sec1_bytes);
-
-        let jwk = HsmWrapper::ec_point_to_jwk(&Curve::P256, &der_encoded)?;
-
-        let json_output = serde_json::to_string(&jwk)?;
-        let jose_jwk = josekit::jwk::Jwk::from_bytes(json_output.as_bytes())?;
-
-        assert_eq!(jose_jwk.key_type(), "EC");
-        assert_eq!(
-            jose_jwk.parameter("crv").unwrap().as_str().unwrap(),
-            "P-256"
+    fn generate_kid(curve: &Curve, x_b64: &String, y_b64: &String) -> String {
+        let thumbprint = format!(
+            r#"{{"crv":"{}","kty":"EC","x":"{}","y":"{}"}}"#,
+            curve, x_b64, y_b64
         );
-        assert_eq!(jose_jwk.parameter("x").unwrap().as_str().unwrap(), &jwk.x);
-        assert_eq!(jose_jwk.parameter("y").unwrap().as_str().unwrap(), &jwk.y);
-        Ok(())
+
+        let mut hasher = sha2::Sha256::new();
+        hasher.update(thumbprint.as_bytes());
+        URL_SAFE_NO_PAD.encode(hasher.finalize())
     }
 }
 
@@ -304,5 +287,38 @@ impl HsmSpiPort for HsmWrapper {
 impl Drop for HsmWrapper {
     fn drop(&mut self) {
         info!("HsmWrapper dropped. PKCS#11 context will finalize when all Arcs are dropped.");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::domain::Curve;
+    use crate::infrastructure::hsm_wrapper::HsmWrapper;
+    use p256::ecdsa::SigningKey;
+    use rand::rngs::OsRng;
+
+    // Verify that the EcPublicJwk generated is a valid JWK according to JOSE.
+    #[test]
+    pub fn test_ec_point_to_jwk() -> Result<(), Box<dyn std::error::Error>> {
+        let signing_key = SigningKey::random(&mut OsRng);
+        let verifying_key = signing_key.verifying_key();
+        let encoded_point = verifying_key.to_encoded_point(false);
+        let sec1_bytes = encoded_point.as_bytes();
+        let mut der_encoded = vec![0x04, sec1_bytes.len() as u8];
+        der_encoded.extend_from_slice(sec1_bytes);
+
+        let jwk = HsmWrapper::ec_point_to_jwk(&Curve::P256, &der_encoded)?;
+
+        let json_output = serde_json::to_string(&jwk)?;
+        let jose_jwk = josekit::jwk::Jwk::from_bytes(json_output.as_bytes())?;
+
+        assert_eq!(jose_jwk.key_type(), "EC");
+        assert_eq!(
+            jose_jwk.parameter("crv").unwrap().as_str().unwrap(),
+            "P-256"
+        );
+        assert_eq!(jose_jwk.parameter("x").unwrap().as_str().unwrap(), &jwk.x);
+        assert_eq!(jose_jwk.parameter("y").unwrap().as_str().unwrap(), &jwk.y);
+        Ok(())
     }
 }
