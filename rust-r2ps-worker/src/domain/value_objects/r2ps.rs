@@ -82,7 +82,7 @@ pub struct ServiceRequest {
     #[serde(rename = "ver")]
     pub version: Option<String>,
     pub nonce: Option<String>,
-    pub iat: Option<i64>,
+    pub iat: Option<String>,
     pub enc: Option<EncryptOption>,
     #[serde(rename = "data")]
     pub service_data: Option<String>,
@@ -190,7 +190,7 @@ pub struct PakeResponsePayload {
     pub message: Option<String>,
 
     #[serde(rename = "session_expiration_time")]
-    pub session_expiration_time: Option<i64>,
+    pub session_expiration_time: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, ToSchema, Debug, Clone, Display)]
@@ -227,7 +227,7 @@ pub struct ListKeysResponse {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct KeyInfo {
-    pub creation_time: Option<i64>,
+    pub creation_time: Option<String>,
     pub public_key: EcPublicJwk,
 }
 
@@ -268,7 +268,7 @@ pub struct SignRequest {
 pub struct Claims {
     pub ver: String,
     pub nonce: String,
-    pub iat: i64,
+    pub iat: String,
     pub enc: String,
     pub data: String,
 }

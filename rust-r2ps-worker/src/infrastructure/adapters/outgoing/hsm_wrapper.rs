@@ -270,7 +270,7 @@ impl HsmSpiPort for HsmWrapper {
             wrapped_private_key,
             public_key_jwk,
             curve_name: curve.clone(),
-            creation_time: chrono::Utc::now(),
+            creation_time: chrono::Utc::now().to_rfc3339(),
         })
     }
 

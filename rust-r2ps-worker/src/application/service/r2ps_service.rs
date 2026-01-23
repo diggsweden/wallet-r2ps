@@ -304,7 +304,9 @@ impl R2psService {
                     task: None,
                     response_data: Some(STANDARD.encode(&msg)),
                     message: None,
-                    session_expiration_time: Some(Utc::now().timestamp_millis()),
+                    session_expiration_time: Some(
+                        (Utc::now() + chrono::Duration::minutes(15)).to_rfc3339(),
+                    ),
                 };
 
                 let elapsed = start.elapsed();
@@ -529,7 +531,7 @@ impl R2psService {
                 .iter()
                 .map(|key| KeyInfo {
                     public_key: key.public_key_jwk.clone(),
-                    creation_time: Some(key.creation_time.timestamp_millis()),
+                    creation_time: Some(key.creation_time.clone()),
                 })
                 .collect(),
         };
@@ -561,7 +563,7 @@ impl R2psService {
             task: None,
             response_data: Some(STANDARD.encode(&msg)),
             message: None,
-            session_expiration_time: Some(Utc::now().timestamp_millis()),
+            session_expiration_time: Some(Utc::now().to_rfc3339()),
         };
 
         Ok(R2psResponse {
@@ -840,11 +842,10 @@ fn jws_with_jwk(
     nonce: Option<String>,
     enc: EncryptOption,
 ) -> Result<String, ServiceRequestError> {
-    let now = Utc::now(); // Get duration in ms since Unix epoch
     let claims = Claims {
         ver: "1.0".to_string(),
         nonce: nonce.unwrap().to_string(),
-        iat: now.timestamp(),
+        iat: Utc::now().to_rfc3339(),
         enc: enc.as_str().to_string(),
         data: STANDARD.encode(data),
     };
@@ -869,8 +870,6 @@ fn encode_state_jws(
     state: &DeviceHsmState,
     nonce: Option<String>,
 ) -> Result<String, ServiceRequestError> {
-    let now = Utc::now(); // Get duration in ms since Unix epoch
-
     let mut header = Header::new(Algorithm::ES256);
     header.typ = Some("JOSE".to_string());
 

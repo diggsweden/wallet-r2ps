@@ -12,6 +12,6 @@ public class InstantSerializer extends JsonSerializer<Instant> {
   public void serialize(final Instant instant, final JsonGenerator jsonGenerator,
       final SerializerProvider serializerProvider)
       throws IOException {
-    jsonGenerator.writeNumber(instant.getEpochSecond());
+    jsonGenerator.writeString(instant.toString());
   }
 }

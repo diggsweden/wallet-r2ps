@@ -6,7 +6,7 @@ pub struct HsmKey {
     pub wrapped_private_key: Vec<u8>,
     pub public_key_jwk: EcPublicJwk,
     pub curve_name: Curve,
-    pub creation_time: chrono::DateTime<chrono::Utc>,
+    pub creation_time: String,
 }
 
 impl HsmKey {
