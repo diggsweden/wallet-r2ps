@@ -5,7 +5,7 @@ pub mod session;
 use crate::application::hsm_spi_port::HsmSpiPort;
 use crate::application::pending_auth_spi_port::PendingAuthSpiPort;
 use crate::application::session_key_spi_port::SessionKeySpiPort;
-use crate::domain::{DefaultCipherSuite, OperationId, R2psResponse, ServiceRequestError};
+use crate::domain::{DefaultCipherSuite, OperationId, ServiceRequestError, SessionId};
 use opaque_ke::ServerSetup;
 use std::sync::Arc;
 use tracing::debug;
@@ -17,19 +17,43 @@ use authentication::{
 use hsm::{HsmDeleteKeyOperation, HsmEcdsaSignOperation, HsmKeygenOperation, HsmListKeysOperation};
 use session::SessionEndOperation;
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct OperationContext {
     pub request_id: String,
     pub wallet_id: String,
     pub device_id: String,
     pub state: crate::domain::DeviceHsmState,
     pub outer_request: crate::domain::value_objects::r2ps::OuterRequest,
-    pub inner_request_json: Option<crate::application::service::r2ps_service::DecryptedData>,
+    pub inner_request: crate::domain::value_objects::r2ps::InnerRequest,
+    pub session_id: Option<SessionId>,
+}
+
+pub struct OperationResult {
+    pub state: crate::domain::DeviceHsmState,
+    pub data: crate::domain::InnerResponseData,
+    pub session_id: Option<SessionId>,
+}
+
+impl OperationResult {
+    /// Creates an InnerResponse from this OperationResult with the serialized response data
+    pub fn to_inner_response(
+        &self,
+        serialized_data: String,
+        ttl: Option<std::time::Duration>,
+    ) -> crate::domain::value_objects::r2ps::InnerResponse {
+        use crate::domain::value_objects::r2ps::{InnerResponse, Status, to_iso8601_duration};
+
+        InnerResponse {
+            data: Some(serialized_data),
+            expires_in: ttl.map(to_iso8601_duration),
+            status: Status::Ok,
+        }
+    }
 }
 
 /// Trait for service operations that can be executed
 pub trait ServiceOperation {
-    fn execute(&self, context: OperationContext) -> Result<R2psResponse, ServiceRequestError>;
+    fn execute(&self, context: OperationContext) -> Result<OperationResult, ServiceRequestError>;
 }
 
 /// Contains all operation handlers
@@ -73,13 +97,16 @@ impl OperationDispatcher {
     }
 
     /// Dispatches the request to the appropriate operation handler
-    pub fn dispatch(&self, context: OperationContext) -> Result<R2psResponse, ServiceRequestError> {
+    pub fn dispatch(
+        &self,
+        context: OperationContext,
+    ) -> Result<OperationResult, ServiceRequestError> {
         debug!(
             "Requested Operation: {:?}",
-            context.outer_request.service_type
+            context.inner_request.request_type
         );
 
-        match context.outer_request.service_type {
+        match context.inner_request.request_type {
             OperationId::AuthenticateStart => self.authenticate_start_op.execute(context),
             OperationId::AuthenticateFinish => self.authenticate_finish_op.execute(context),
             OperationId::RegisterStart => self.register_start_op.execute(context),

@@ -7,8 +7,8 @@ import java.time.Instant;
 public abstract class ServiceExchange {
 
   /** Indicates the version of this service exchange protocol */
-  @JsonProperty("ver")
-  private String version;
+  @JsonProperty("version")
+  private Integer version;
 
   /** Payload nonce that is sent by the client and returned by the server */
   @JsonProperty("nonce")
@@ -27,14 +27,14 @@ public abstract class ServiceExchange {
   private String innerJwe;
 
   public ServiceExchange() {
-    this.version = "1.0";
+    this.version = 1;
   }
 
-  public String getVersion() {
+  public Integer getVersion() {
     return version;
   }
 
-  public void setVersion(final String version) {
+  public void setVersion(final Integer version) {
     this.version = version;
   }
 

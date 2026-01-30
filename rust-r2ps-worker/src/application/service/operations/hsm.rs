@@ -1,8 +1,8 @@
-use super::{OperationContext, ServiceOperation};
+use super::{OperationContext, OperationResult, ServiceOperation};
 use crate::application::hsm_spi_port::HsmSpiPort;
 use crate::domain::{
     CreateKeyServiceData, CreateKeyServiceDataResponse, DeleteKeyServiceData, DeviceHsmState,
-    KeyInfo, ListKeysResponse, OuterResponse, R2psResponse, ServiceRequestError, SignRequest,
+    InnerResponseData, KeyInfo, ListKeysResponse, ServiceRequestError, SignRequest,
 };
 use std::sync::Arc;
 use tracing::debug;
@@ -18,11 +18,12 @@ impl HsmEcdsaSignOperation {
 }
 
 impl ServiceOperation for HsmEcdsaSignOperation {
-    fn execute(&self, context: OperationContext) -> Result<R2psResponse, ServiceRequestError> {
+    fn execute(&self, context: OperationContext) -> Result<OperationResult, ServiceRequestError> {
         let data = context
-            .inner_request_json
+            .inner_request
+            .data
             .ok_or(ServiceRequestError::InvalidServiceRequestFormat)?;
-        let sign_request = serde_json::from_slice::<SignRequest>(data.as_ref())
+        let sign_request = serde_json::from_slice::<SignRequest>(data.as_bytes())
             .map_err(|_| ServiceRequestError::InvalidServiceRequestFormat)?;
 
         let hsm_key = context
@@ -44,9 +45,10 @@ impl ServiceOperation for HsmEcdsaSignOperation {
 
         debug!("Hsm Ecdsa asn1_signature: {:?}", asn1_signature);
 
-        Ok(R2psResponse {
+        Ok(OperationResult {
             state: context.state,
-            payload: OuterResponse::Asn1Signature(asn1_signature),
+            data: InnerResponseData::Asn1Signature(asn1_signature),
+            session_id: context.session_id,
         })
     }
 }
@@ -62,11 +64,12 @@ impl HsmKeygenOperation {
 }
 
 impl ServiceOperation for HsmKeygenOperation {
-    fn execute(&self, context: OperationContext) -> Result<R2psResponse, ServiceRequestError> {
+    fn execute(&self, context: OperationContext) -> Result<OperationResult, ServiceRequestError> {
         let data = context
-            .inner_request_json
+            .inner_request
+            .data
             .ok_or(ServiceRequestError::InvalidServiceRequestFormat)?;
-        let payload = serde_json::from_slice::<CreateKeyServiceData>(data.as_ref())
+        let payload = serde_json::from_slice::<CreateKeyServiceData>(data.as_bytes())
             .map_err(|_| ServiceRequestError::InvalidServiceRequestFormat)?;
 
         let hsm_key = self
@@ -85,11 +88,12 @@ impl ServiceOperation for HsmKeygenOperation {
             keys: new_keys,
         };
 
-        Ok(R2psResponse {
+        Ok(OperationResult {
             state: new_state,
-            payload: OuterResponse::CreateKey(CreateKeyServiceDataResponse {
+            data: InnerResponseData::CreateKey(CreateKeyServiceDataResponse {
                 public_key: hsm_key.public_key_jwk,
             }),
+            session_id: context.session_id,
         })
     }
 }
@@ -97,11 +101,12 @@ impl ServiceOperation for HsmKeygenOperation {
 pub struct HsmDeleteKeyOperation;
 
 impl ServiceOperation for HsmDeleteKeyOperation {
-    fn execute(&self, context: OperationContext) -> Result<R2psResponse, ServiceRequestError> {
+    fn execute(&self, context: OperationContext) -> Result<OperationResult, ServiceRequestError> {
         let data = context
-            .inner_request_json
+            .inner_request
+            .data
             .ok_or(ServiceRequestError::InvalidServiceRequestFormat)?;
-        let payload = serde_json::from_slice::<DeleteKeyServiceData>(data.as_ref())
+        let payload = serde_json::from_slice::<DeleteKeyServiceData>(data.as_bytes())
             .map_err(|_| ServiceRequestError::InvalidServiceRequestFormat)?;
 
         let new_state = DeviceHsmState {
@@ -117,9 +122,10 @@ impl ServiceOperation for HsmDeleteKeyOperation {
                 .collect(),
         };
 
-        Ok(R2psResponse {
+        Ok(OperationResult {
             state: new_state,
-            payload: OuterResponse::DeleteKey(DeleteKeyServiceData { kid: payload.kid }),
+            data: InnerResponseData::DeleteKey(DeleteKeyServiceData { kid: payload.kid }),
+            session_id: context.session_id,
         })
     }
 }
@@ -127,8 +133,8 @@ impl ServiceOperation for HsmDeleteKeyOperation {
 pub struct HsmListKeysOperation;
 
 impl ServiceOperation for HsmListKeysOperation {
-    fn execute(&self, context: OperationContext) -> Result<R2psResponse, ServiceRequestError> {
-        let list_keys = ListKeysResponse {
+    fn execute(&self, context: OperationContext) -> Result<OperationResult, ServiceRequestError> {
+        let payload = ListKeysResponse {
             key_info: context
                 .state
                 .keys
@@ -140,9 +146,10 @@ impl ServiceOperation for HsmListKeysOperation {
                 .collect(),
         };
 
-        Ok(R2psResponse {
+        Ok(OperationResult {
             state: context.state,
-            payload: OuterResponse::ListKeys(list_keys),
+            data: InnerResponseData::ListKeys(payload),
+            session_id: context.session_id,
         })
     }
 }
