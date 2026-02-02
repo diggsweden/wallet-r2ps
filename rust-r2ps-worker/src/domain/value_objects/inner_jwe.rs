@@ -73,14 +73,12 @@ impl InnerJwe {
         let decrypter = ECDH_ES.decrypter_from_pem(pem::encode(private_key))?;
         let (payload, header) = jwe::deserialize_compact(&self.0, &decrypter)?;
 
-        debug!("decrypted inner JWE header: {:#?}", header);
+        debug!("Inner JWE header: {:#?}", header);
 
         Ok(payload)
     }
 
     fn decrypt_with_aes(&self, session_key: &SessionKey) -> Result<Vec<u8>, ServiceRequestError> {
-        debug!("decrypt inner JWE with session key {:02X?}", session_key);
-
         let decrypter = DirectJweAlgorithm::Dir
             .decrypter_from_bytes(session_key.as_ref())
             .map_err(|e| {
@@ -93,7 +91,7 @@ impl InnerJwe {
             ServiceRequestError::JweError
         })?;
 
-        debug!("decrypted inner JWE header: {:#?}", header);
+        debug!("Inner JWE header: {:#?}", header);
 
         Ok(payload)
     }

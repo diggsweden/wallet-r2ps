@@ -19,8 +19,8 @@ public abstract class ServiceExchange {
   private Instant iat;
 
   /** Indicates if the serviceData is encrypted or holds plaintext data */
-  @JsonProperty("enc")
-  private EncryptOption encryptOption;
+  // @JsonProperty("enc")
+  // private EncryptOption encryptOption;
 
   /** JSON data or a JWE with encrypted JSON payload */
   @JsonProperty("inner_jwe")
@@ -54,12 +54,23 @@ public abstract class ServiceExchange {
     this.iat = iat;
   }
 
-  public EncryptOption getEncryptOption() {
-    return encryptOption;
+  // public EncryptOption getEncryptOption() {
+  //   return encryptOption;
+  // }
+
+  // public void setEncryptOption(final EncryptOption encryptOption) {
+  //   this.encryptOption = encryptOption;
+  // }
+
+  @JsonProperty("session_id")
+  private String sessionId;
+
+  public String getSessionId() {
+    return sessionId;
   }
 
-  public void setEncryptOption(final EncryptOption encryptOption) {
-    this.encryptOption = encryptOption;
+  public void setSessionId(final String sessionId) {
+    this.sessionId = sessionId;
   }
 
   public String getInnerJwe() {
