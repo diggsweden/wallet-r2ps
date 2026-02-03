@@ -21,6 +21,7 @@ impl HsmEcdsaSignOperation {
 }
 
 define_byte_vector!(SignatureVector);
+define_byte_vector!(MessageVector);
 
 impl ServiceOperation for HsmEcdsaSignOperation {
     fn execute(&self, context: OperationContext) -> Result<OperationResult, ServiceRequestError> {
@@ -35,13 +36,13 @@ impl ServiceOperation for HsmEcdsaSignOperation {
             .state
             .keys
             .iter()
-            .find(|key| key.public_key_jwk.kid.eq(&sign_request.kid))
+            .find(|key| key.public_key_jwk.kid.eq(&sign_request.hsm_kid))
             .cloned()
             .ok_or(ServiceRequestError::UnknownKey)?;
 
         let raw_sig_bytes = self
             .hsm_spi_port
-            .sign(&hsm_key, &sign_request.tbs_hash)
+            .sign(&hsm_key, &sign_request.message)
             .map_err(|_| ServiceRequestError::Unknown)?;
 
         let signature = p256::ecdsa::Signature::from_slice(&raw_sig_bytes)
@@ -125,13 +126,15 @@ impl ServiceOperation for HsmDeleteKeyOperation {
                 .state
                 .keys
                 .into_iter()
-                .filter(|key| key.public_key_jwk.kid != payload.kid)
+                .filter(|key| key.public_key_jwk.kid != payload.hsm_kid)
                 .collect(),
         };
 
         Ok(OperationResult {
             state: new_state,
-            data: InnerResponseData::DeleteKey(DeleteKeyServiceData { kid: payload.kid }),
+            data: InnerResponseData::DeleteKey(DeleteKeyServiceData {
+                hsm_kid: payload.hsm_kid,
+            }),
             session_id: context.session_id,
         })
     }
