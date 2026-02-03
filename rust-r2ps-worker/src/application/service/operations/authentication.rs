@@ -3,12 +3,10 @@ use crate::application::pending_auth_spi_port::{LoginSession, PendingAuthSpiPort
 use crate::application::session_key_spi_port::{SessionKey, SessionKeySpiPort};
 use crate::domain::value_objects::r2ps::{PakeRequest, PakeResponse};
 use crate::domain::{
-    DefaultCipherSuite, DeviceHsmState, InnerResponseData, PasswordFile, ServiceRequestError,
-    SessionId,
+    DefaultCipherSuite, DeviceHsmState, InnerResponseData, PakePayloadVector, PasswordFile,
+    ServiceRequestError, SessionId,
 };
 use argon2::password_hash::rand_core::OsRng;
-use base64::Engine;
-use base64::prelude::BASE64_STANDARD;
 use opaque_ke::{
     CredentialFinalization, CredentialRequest, Identifiers, RegistrationRequest,
     RegistrationUpload, ServerLogin, ServerLoginParameters, ServerRegistration, ServerSetup,
@@ -72,11 +70,11 @@ impl ServiceOperation for AuthenticateStartOperation {
         let pake_request = PakeRequest::from_inner_request(context.inner_request)?;
 
         debug!(
-            "deserialized pake payload authenticate request data: {}",
+            "deserialized pake payload authenticate request data: {:?}",
             pake_request.request_data
         );
 
-        let decoded_request_data = pake_request.decode_request_data()?;
+        let decoded_request_data = pake_request.request_data.as_ref();
 
         let password_file_serialized = context
             .state
@@ -112,7 +110,8 @@ impl ServiceOperation for AuthenticateStartOperation {
             ServiceRequestError::ServerLoginStartFailed
         })?;
 
-        let credential_response_bytes = server_login_start_result.message.serialize();
+        let payload_bytes = server_login_start_result.message.serialize();
+        let payload = PakePayloadVector::new(payload_bytes.to_vec());
 
         let session_id = SessionId::new();
 
@@ -123,7 +122,7 @@ impl ServiceOperation for AuthenticateStartOperation {
 
         let payload = PakeResponse {
             task: None,
-            data: Some(BASE64_STANDARD.encode(credential_response_bytes)),
+            data: Some(payload),
         };
 
         let elapsed = start.elapsed();
@@ -160,7 +159,7 @@ impl ServiceOperation for AuthenticateFinishOperation {
         let start = Instant::now();
         let pake_request = PakeRequest::from_inner_request(context.inner_request)?;
 
-        let decoded_request_data = pake_request.decode_request_data()?;
+        let decoded_request_data = pake_request.request_data.as_ref();
 
         // Get the pending auth session id which was created in the start phase and sent to the client,
         // which the client now returns back to us to finish the authentication.
@@ -233,11 +232,11 @@ impl ServiceOperation for RegisterStartOperation {
         let pake_payload = PakeRequest::from_inner_request(inner_request)?;
 
         debug!(
-            "deserialized pake payload req={}",
+            "deserialized pake payload req={:?}",
             pake_payload.request_data
         );
 
-        let decoded_request_data = pake_payload.decode_request_data()?;
+        let decoded_request_data = pake_payload.request_data.as_ref();
 
         let registration_request = RegistrationRequest::deserialize(&decoded_request_data)
             .map_err(|e| {
@@ -260,13 +259,12 @@ impl ServiceOperation for RegisterStartOperation {
             server_registration_start_result.message
         );
 
-        let response_data = server_registration_start_result
-            .message
-            .serialize()
-            .to_vec();
+        let payload_bytes = server_registration_start_result.message.serialize();
+        let payload = PakePayloadVector::new(payload_bytes.to_vec());
+
         let payload = PakeResponse {
             task: None,
-            data: Some(BASE64_STANDARD.encode(response_data)),
+            data: Some(payload),
         };
 
         Ok(OperationResult {
@@ -291,7 +289,7 @@ impl ServiceOperation for RegisterFinishOperation {
         let inner_request = context.inner_request;
         let pake_payload = PakeRequest::from_inner_request(inner_request)?;
 
-        let decoded_request_data = pake_payload.decode_request_data()?;
+        let decoded_request_data = pake_payload.request_data.as_ref();
 
         let registration_request: RegistrationUpload<DefaultCipherSuite> =
             RegistrationUpload::deserialize(&decoded_request_data).map_err(|e| {

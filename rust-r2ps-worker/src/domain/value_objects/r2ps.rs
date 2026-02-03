@@ -1,9 +1,8 @@
 use crate::application::service::operations::hsm::MessageVector;
 use crate::application::service::operations::hsm::SignatureVector;
+use crate::define_byte_vector;
 use crate::domain::EcPublicJwk;
 use base64::DecodeError;
-use base64::Engine;
-use base64::prelude::BASE64_STANDARD;
 use josekit::JoseError;
 use pem::Pem;
 use serde::{Deserialize, Serialize};
@@ -214,13 +213,15 @@ pub fn to_iso8601_duration(d: Duration) -> iso8601_duration::Duration {
     iso8601_duration::Duration::new(0.0, 0.0, 0.0, 0.0, 0.0, d.as_secs() as f32)
 }
 
+define_byte_vector!(PakePayloadVector);
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PakeResponse {
     /// The session task recognized by the server bound to this pake session ID
     pub task: Option<String>,
 
     /// PAKE response data as defined by the PAKE state incoming the request
-    pub data: Option<String>,
+    pub data: Option<PakePayloadVector>,
 }
 
 #[derive(Serialize, Deserialize, ToSchema, Debug, Clone, Display)]
@@ -295,7 +296,7 @@ pub struct PakeRequest {
 
     /// The PAKE request data as defined by the PAKE state
     #[serde(rename = "data")]
-    pub request_data: String,
+    pub request_data: PakePayloadVector,
 }
 
 // TODO: Move this to operations/authentication.rs?
@@ -308,14 +309,6 @@ impl PakeRequest {
 
         serde_json::from_slice(data.as_bytes()).map_err(|e| {
             warn!("error decoding pake request: {:?}", e);
-            ServiceRequestError::InvalidPakeRequest
-        })
-    }
-
-    /// Decodes the base64-encoded request_data field
-    pub fn decode_request_data(&self) -> Result<Vec<u8>, ServiceRequestError> {
-        BASE64_STANDARD.decode(&self.request_data).map_err(|e| {
-            warn!("error base64 decoding pake request data: {:?}", e);
             ServiceRequestError::InvalidPakeRequest
         })
     }
