@@ -6,8 +6,6 @@ use crate::domain::{
     InnerResponseData, KeyInfo, ListKeysResponse, ServiceRequestError, SignRequest,
     SignatureResponse,
 };
-use base64::Engine;
-use der::asn1;
 use std::sync::Arc;
 use tracing::debug;
 

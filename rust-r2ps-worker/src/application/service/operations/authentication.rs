@@ -12,7 +12,6 @@ use opaque_ke::{
     RegistrationUpload, ServerLogin, ServerLoginParameters, ServerRegistration, ServerSetup,
 };
 use std::sync::Arc;
-use std::time::Instant;
 use tracing::{debug, warn};
 
 /// Creates OPAQUE ServerLoginParameters with standardized context and identifiers
@@ -66,15 +65,12 @@ impl AuthenticateStartOperation {
 
 impl ServiceOperation for AuthenticateStartOperation {
     fn execute(&self, context: OperationContext) -> Result<OperationResult, ServiceRequestError> {
-        let start = Instant::now(); // TODO: Move to outer layer to get timings logged for every operation
         let pake_request = PakeRequest::from_inner_request(context.inner_request)?;
 
         debug!(
             "deserialized pake payload authenticate request data: {:?}",
             pake_request.request_data
         );
-
-        let decoded_request_data = pake_request.request_data.as_ref();
 
         let password_file_serialized = context
             .state
@@ -88,6 +84,8 @@ impl ServiceOperation for AuthenticateStartOperation {
             warn!("error decoding pake request: {:?}", e);
             ServiceRequestError::InvalidSerializedPasswordFile
         })?;
+
+        let decoded_request_data = pake_request.request_data.as_ref();
         let credential_request =
             CredentialRequest::deserialize(&decoded_request_data).map_err(|e| {
                 warn!("error decoding pake request: {:?}", e);
@@ -125,9 +123,6 @@ impl ServiceOperation for AuthenticateStartOperation {
             data: Some(payload),
         };
 
-        let elapsed = start.elapsed();
-        debug!("AUTH evaluate time: {} ns", elapsed.as_nanos());
-
         Ok(OperationResult {
             state: context.state,
             data: InnerResponseData::Pake(payload),
@@ -156,7 +151,6 @@ impl AuthenticateFinishOperation {
 
 impl ServiceOperation for AuthenticateFinishOperation {
     fn execute(&self, context: OperationContext) -> Result<OperationResult, ServiceRequestError> {
-        let start = Instant::now();
         let pake_request = PakeRequest::from_inner_request(context.inner_request)?;
 
         let decoded_request_data = pake_request.request_data.as_ref();
@@ -201,9 +195,6 @@ impl ServiceOperation for AuthenticateFinishOperation {
             task: None,
             data: None,
         };
-
-        let elapsed = start.elapsed();
-        debug!("AUTH finalize time: {} ns", elapsed.as_nanos());
 
         Ok(OperationResult {
             state: context.state,

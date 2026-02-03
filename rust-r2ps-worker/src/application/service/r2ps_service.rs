@@ -25,6 +25,7 @@ use p256::pkcs8::DecodePrivateKey;
 use pem::Pem;
 use std::env;
 use std::sync::Arc;
+use std::time::Instant;
 use tracing::{debug, error, info};
 
 define_byte_vector!(DecryptedData);
@@ -123,6 +124,8 @@ impl R2psService {
 
 impl R2psRequestUseCase for R2psService {
     fn execute(&self, r2ps_request_jws: R2psRequestJws) -> Result<R2psRequestId, R2psRequestError> {
+        let start = Instant::now();
+
         let state = decode_state_jws(
             r2ps_request_jws.state_jws,
             &self.r2ps_server_config.server_public_key,
@@ -248,15 +251,30 @@ impl R2psRequestUseCase for R2psService {
             service_response_jws: jws,
         };
 
-        info!(
-            "Responding to request id {} ({:?})",
-            r2ps_request_jws.request_id, request_type
+        let processing_elapsed = start.elapsed();
+        debug!(
+            "Request {:?} total processing time: {} ms",
+            request_type,
+            processing_elapsed.as_millis()
         );
 
-        self.r2ps_response_spi_port
+        let request_id = self
+            .r2ps_response_spi_port
             .send(r2ps_response_jws.clone())
             .map(|_| r2ps_response_jws.request_id.clone())
-            .map_err(|_| R2psRequestError::ConnectionError)
+            .map_err(|_| R2psRequestError::ConnectionError)?;
+
+        let finished_elapsed = start.elapsed();
+
+        info!(
+            "Responding to request id {} ({:?}, took {}/{} ms)",
+            r2ps_request_jws.request_id,
+            request_type,
+            processing_elapsed.as_millis(),
+            finished_elapsed.as_millis()
+        );
+
+        Ok(request_id)
     }
 }
 

@@ -8,6 +8,7 @@ use crate::application::session_key_spi_port::SessionKeySpiPort;
 use crate::domain::{DefaultCipherSuite, OperationId, ServiceRequestError, SessionId};
 use opaque_ke::ServerSetup;
 use std::sync::Arc;
+use std::time::Instant;
 use tracing::debug;
 
 use authentication::{
@@ -101,12 +102,12 @@ impl OperationDispatcher {
         &self,
         context: OperationContext,
     ) -> Result<OperationResult, ServiceRequestError> {
-        debug!(
-            "Requested Operation: {:?}",
-            context.inner_request.request_type
-        );
+        let start = Instant::now();
 
-        match context.inner_request.request_type {
+        let request_type = &context.inner_request.request_type.clone();
+        debug!("Requested Operation: {:?}", request_type);
+
+        let result = match request_type {
             OperationId::AuthenticateStart => self.authenticate_start_op.execute(context),
             OperationId::AuthenticateFinish => self.authenticate_finish_op.execute(context),
             OperationId::RegisterStart => self.register_start_op.execute(context),
@@ -123,6 +124,15 @@ impl OperationDispatcher {
             OperationId::Log => Err(ServiceRequestError::Unknown),
             OperationId::GetLog => Err(ServiceRequestError::Unknown),
             OperationId::Info => Err(ServiceRequestError::Unknown),
-        }
+        };
+
+        let elapsed = start.elapsed();
+        debug!(
+            "Request {:?} inner execute time: {} ms",
+            request_type,
+            elapsed.as_millis()
+        );
+
+        result
     }
 }
