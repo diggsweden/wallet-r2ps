@@ -1,4 +1,5 @@
 use crate::application::service::operations::hsm::MessageVector;
+use crate::application::service::operations::hsm::SignatureVector;
 use crate::domain::EcPublicJwk;
 use base64::DecodeError;
 use base64::Engine;
@@ -256,7 +257,7 @@ pub struct ListKeysResponse {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct SignatureResponse {
-    pub signature: String,
+    pub signature: SignatureVector,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -274,12 +275,6 @@ pub struct ListKeysRequest {
 pub struct SignRequest {
     pub hsm_kid: String,
     pub message: MessageVector,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum PakeProtocol {
-    Opaque,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -305,7 +300,7 @@ pub struct PakeRequest {
 
 // TODO: Move this to operations/authentication.rs?
 impl PakeRequest {
-    /// Creates a PakeRequestPayload from an InnerRequest
+    /// Creates a PakeRequest from an InnerRequest
     pub fn from_inner_request(inner_request: InnerRequest) -> Result<Self, ServiceRequestError> {
         let data = inner_request
             .data
@@ -313,7 +308,7 @@ impl PakeRequest {
 
         serde_json::from_slice(data.as_bytes()).map_err(|e| {
             warn!("error decoding pake request: {:?}", e);
-            ServiceRequestError::InvalidPakeRequestPayload
+            ServiceRequestError::InvalidPakeRequest
         })
     }
 
@@ -321,7 +316,7 @@ impl PakeRequest {
     pub fn decode_request_data(&self) -> Result<Vec<u8>, ServiceRequestError> {
         BASE64_STANDARD.decode(&self.request_data).map_err(|e| {
             warn!("error base64 decoding pake request data: {:?}", e);
-            ServiceRequestError::InvalidPakeRequestPayload
+            ServiceRequestError::InvalidPakeRequest
         })
     }
 }
@@ -337,7 +332,7 @@ pub struct R2psServerConfig {
 pub enum ServiceRequestError {
     JwsError,
     JweError,
-    InvalidPakeRequestPayload,
+    InvalidPakeRequest,
     InvalidRegistrationRequest,
     ServerRegistrationStartFailed,
     ServerLoginStartFailed,

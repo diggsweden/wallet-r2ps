@@ -7,14 +7,15 @@ use crate::domain::{
     SignatureResponse,
 };
 use base64::Engine;
+use der::asn1;
 use std::sync::Arc;
 use tracing::debug;
 
-pub struct HsmEcdsaSignOperation {
+pub struct HsmSignOperation {
     hsm_spi_port: Arc<dyn HsmSpiPort + Send + Sync>,
 }
 
-impl HsmEcdsaSignOperation {
+impl HsmSignOperation {
     pub fn new(hsm_spi_port: Arc<dyn HsmSpiPort + Send + Sync>) -> Self {
         Self { hsm_spi_port }
     }
@@ -23,7 +24,7 @@ impl HsmEcdsaSignOperation {
 define_byte_vector!(SignatureVector);
 define_byte_vector!(MessageVector);
 
-impl ServiceOperation for HsmEcdsaSignOperation {
+impl ServiceOperation for HsmSignOperation {
     fn execute(&self, context: OperationContext) -> Result<OperationResult, ServiceRequestError> {
         let data = context
             .inner_request
@@ -47,31 +48,29 @@ impl ServiceOperation for HsmEcdsaSignOperation {
 
         let signature = p256::ecdsa::Signature::from_slice(&raw_sig_bytes)
             .map_err(|_| ServiceRequestError::Unknown)?;
-        let asn1_signature = SignatureVector::new(signature.to_der().as_bytes().to_vec());
+        let signature = SignatureVector::new(signature.to_der().as_bytes().to_vec());
 
-        debug!("Hsm Ecdsa asn1_signature: {:?}", asn1_signature);
-
-        let sig_b64 = base64::prelude::BASE64_STANDARD.encode(asn1_signature.as_ref());
+        debug!("HSM ECDSA ASN.1 signature: {:?}", signature);
 
         Ok(OperationResult {
             state: context.state,
-            data: InnerResponseData::Asn1Signature(SignatureResponse { signature: sig_b64 }),
+            data: InnerResponseData::Asn1Signature(SignatureResponse { signature }),
             session_id: context.session_id,
         })
     }
 }
 
-pub struct HsmKeygenOperation {
+pub struct HsmGenerateKeyOperation {
     hsm_spi_port: Arc<dyn HsmSpiPort + Send + Sync>,
 }
 
-impl HsmKeygenOperation {
+impl HsmGenerateKeyOperation {
     pub fn new(hsm_spi_port: Arc<dyn HsmSpiPort + Send + Sync>) -> Self {
         Self { hsm_spi_port }
     }
 }
 
-impl ServiceOperation for HsmKeygenOperation {
+impl ServiceOperation for HsmGenerateKeyOperation {
     fn execute(&self, context: OperationContext) -> Result<OperationResult, ServiceRequestError> {
         let data = context
             .inner_request
@@ -89,11 +88,8 @@ impl ServiceOperation for HsmKeygenOperation {
         new_keys.push(hsm_key.clone());
 
         let new_state = DeviceHsmState {
-            client_id: context.state.client_id,
-            wallet_id: context.state.wallet_id,
-            client_public_key: context.state.client_public_key,
-            password_file: context.state.password_file,
             keys: new_keys,
+            ..context.state
         };
 
         Ok(OperationResult {
@@ -118,16 +114,13 @@ impl ServiceOperation for HsmDeleteKeyOperation {
             .map_err(|_| ServiceRequestError::InvalidServiceRequestFormat)?;
 
         let new_state = DeviceHsmState {
-            client_id: context.state.client_id,
-            wallet_id: context.state.wallet_id,
-            client_public_key: context.state.client_public_key,
-            password_file: context.state.password_file,
             keys: context
                 .state
                 .keys
                 .into_iter()
                 .filter(|key| key.public_key_jwk.kid != payload.hsm_kid)
                 .collect(),
+            ..context.state
         };
 
         Ok(OperationResult {

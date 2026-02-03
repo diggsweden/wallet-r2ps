@@ -14,7 +14,7 @@ use authentication::{
     AuthenticateFinishOperation, AuthenticateStartOperation, RegisterFinishOperation,
     RegisterStartOperation,
 };
-use hsm::{HsmDeleteKeyOperation, HsmEcdsaSignOperation, HsmKeygenOperation, HsmListKeysOperation};
+use hsm::{HsmDeleteKeyOperation, HsmGenerateKeyOperation, HsmListKeysOperation, HsmSignOperation};
 use session::SessionEndOperation;
 
 #[derive(Debug)]
@@ -62,8 +62,8 @@ pub struct OperationDispatcher {
     authenticate_finish_op: AuthenticateFinishOperation,
     register_start_op: RegisterStartOperation,
     register_finish_op: RegisterFinishOperation,
-    hsm_ecdsa_op: HsmEcdsaSignOperation,
-    hsm_keygen_op: HsmKeygenOperation,
+    hsm_ecdsa_op: HsmSignOperation,
+    hsm_keygen_op: HsmGenerateKeyOperation,
     hsm_delete_key_op: HsmDeleteKeyOperation,
     hsm_list_keys_op: HsmListKeysOperation,
     session_end_op: SessionEndOperation,
@@ -88,8 +88,8 @@ impl OperationDispatcher {
             ),
             register_start_op: RegisterStartOperation::new(server_setup.clone()),
             register_finish_op: RegisterFinishOperation::new(),
-            hsm_ecdsa_op: HsmEcdsaSignOperation::new(hsm_spi_port.clone()),
-            hsm_keygen_op: HsmKeygenOperation::new(hsm_spi_port.clone()),
+            hsm_ecdsa_op: HsmSignOperation::new(hsm_spi_port.clone()),
+            hsm_keygen_op: HsmGenerateKeyOperation::new(hsm_spi_port.clone()),
             hsm_delete_key_op: HsmDeleteKeyOperation,
             hsm_list_keys_op: HsmListKeysOperation,
             session_end_op: SessionEndOperation::new(session_key_spi_port.clone()),

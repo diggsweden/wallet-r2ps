@@ -307,11 +307,9 @@ impl ServiceOperation for RegisterFinishOperation {
         );
 
         let new_state = DeviceHsmState {
-            client_id: context.state.client_id,
-            wallet_id: context.state.wallet_id,
-            client_public_key: context.state.client_public_key,
             password_file: Some(PasswordFile(password_file_serialized)),
             keys: Vec::new(),
+            ..context.state
         };
 
         let payload = PakeResponse {
