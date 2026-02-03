@@ -1,9 +1,12 @@
 use super::{OperationContext, OperationResult, ServiceOperation};
 use crate::application::hsm_spi_port::HsmSpiPort;
+use crate::define_byte_vector;
 use crate::domain::{
     CreateKeyServiceData, CreateKeyServiceDataResponse, DeleteKeyServiceData, DeviceHsmState,
     InnerResponseData, KeyInfo, ListKeysResponse, ServiceRequestError, SignRequest,
+    SignatureResponse,
 };
+use base64::Engine;
 use std::sync::Arc;
 use tracing::debug;
 
@@ -16,6 +19,8 @@ impl HsmEcdsaSignOperation {
         Self { hsm_spi_port }
     }
 }
+
+define_byte_vector!(SignatureVector);
 
 impl ServiceOperation for HsmEcdsaSignOperation {
     fn execute(&self, context: OperationContext) -> Result<OperationResult, ServiceRequestError> {
@@ -41,13 +46,15 @@ impl ServiceOperation for HsmEcdsaSignOperation {
 
         let signature = p256::ecdsa::Signature::from_slice(&raw_sig_bytes)
             .map_err(|_| ServiceRequestError::Unknown)?;
-        let asn1_signature: Vec<u8> = signature.to_der().as_bytes().to_vec();
+        let asn1_signature = SignatureVector::new(signature.to_der().as_bytes().to_vec());
 
         debug!("Hsm Ecdsa asn1_signature: {:?}", asn1_signature);
 
+        let sig_b64 = base64::prelude::BASE64_STANDARD.encode(asn1_signature.as_ref());
+
         Ok(OperationResult {
             state: context.state,
-            data: InnerResponseData::Asn1Signature(asn1_signature),
+            data: InnerResponseData::Asn1Signature(SignatureResponse { signature: sig_b64 }),
             session_id: context.session_id,
         })
     }

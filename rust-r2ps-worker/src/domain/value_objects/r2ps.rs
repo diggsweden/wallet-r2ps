@@ -131,7 +131,7 @@ pub enum InnerResponseData {
     CreateKey(CreateKeyServiceDataResponse),
     DeleteKey(DeleteKeyServiceData),
     ListKeys(ListKeysResponse),
-    Asn1Signature(Vec<u8>),
+    Asn1Signature(SignatureResponse),
 }
 
 impl InnerResponseData {
@@ -141,7 +141,7 @@ impl InnerResponseData {
             Self::CreateKey(p) => serde_json::to_vec(p),
             Self::DeleteKey(p) => serde_json::to_vec(p),
             Self::ListKeys(p) => serde_json::to_vec(p),
-            Self::Asn1Signature(p) => return Ok(p.clone()),
+            Self::Asn1Signature(p) => serde_json::to_vec(p),
         }
         .map_err(|_| ServiceRequestError::Unknown)
     }
@@ -255,6 +255,11 @@ pub struct DeleteKeyServiceData {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ListKeysResponse {
     pub key_info: Vec<KeyInfo>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct SignatureResponse {
+    pub signature: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
