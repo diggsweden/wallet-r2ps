@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 pub struct PendingAuthMemoryCache {
-    start_auth: Cache<String, Arc<LoginSession>>,
+    start_auth: Cache<SessionId, Arc<LoginSession>>,
 }
 
 impl Default for PendingAuthMemoryCache {
@@ -28,10 +28,10 @@ impl PendingAuthMemoryCache {
 impl PendingAuthSpiPort for PendingAuthMemoryCache {
     fn store_pending_auth(&self, id: &SessionId, server_login_start_result: &Arc<LoginSession>) {
         self.start_auth
-            .insert(id.as_str().to_string(), server_login_start_result.clone());
+            .insert(id.clone(), server_login_start_result.clone());
     }
 
     fn get_pending_auth(&self, id: &SessionId) -> Option<Arc<LoginSession>> {
-        self.start_auth.remove(id.as_str())
+        self.start_auth.remove(id)
     }
 }
