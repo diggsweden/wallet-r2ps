@@ -106,25 +106,20 @@ pub struct OuterResponse {
     pub inner_jwe: Option<super::InnerJwe>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub enum InnerResponseData {
-    Pake(PakeResponse),
-    CreateKey(CreateKeyServiceDataResponse),
-    DeleteKey(DeleteKeyServiceData),
-    ListKeys(ListKeysResponse),
-    Asn1Signature(SignatureResponse),
+#[derive(Clone, Debug)]
+pub struct InnerResponseData {
+    data: serde_json::Value,
 }
 
 impl InnerResponseData {
+    pub fn new<T: Serialize>(data: T) -> Result<Self, ServiceRequestError> {
+        serde_json::to_value(data)
+            .map(|value| Self { data: value })
+            .map_err(|_| ServiceRequestError::Unknown)
+    }
+
     pub fn serialize(&self) -> Result<Vec<u8>, ServiceRequestError> {
-        match self {
-            Self::Pake(p) => serde_json::to_vec(p),
-            Self::CreateKey(p) => serde_json::to_vec(p),
-            Self::DeleteKey(p) => serde_json::to_vec(p),
-            Self::ListKeys(p) => serde_json::to_vec(p),
-            Self::Asn1Signature(p) => serde_json::to_vec(p),
-        }
-        .map_err(|_| ServiceRequestError::Unknown)
+        serde_json::to_vec(&self.data).map_err(|_| ServiceRequestError::Unknown)
     }
 }
 

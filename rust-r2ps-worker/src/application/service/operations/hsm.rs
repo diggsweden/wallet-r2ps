@@ -52,7 +52,7 @@ impl ServiceOperation for HsmSignOperation {
 
         Ok(OperationResult {
             state: context.state,
-            data: InnerResponseData::Asn1Signature(SignatureResponse { signature }),
+            data: InnerResponseData::new(SignatureResponse { signature })?,
             session_id: context.session_id,
         })
     }
@@ -92,9 +92,9 @@ impl ServiceOperation for HsmGenerateKeyOperation {
 
         Ok(OperationResult {
             state: new_state,
-            data: InnerResponseData::CreateKey(CreateKeyServiceDataResponse {
+            data: InnerResponseData::new(CreateKeyServiceDataResponse {
                 public_key: hsm_key.public_key_jwk,
-            }),
+            })?,
             session_id: context.session_id,
         })
     }
@@ -123,9 +123,9 @@ impl ServiceOperation for HsmDeleteKeyOperation {
 
         Ok(OperationResult {
             state: new_state,
-            data: InnerResponseData::DeleteKey(DeleteKeyServiceData {
+            data: InnerResponseData::new(DeleteKeyServiceData {
                 hsm_kid: payload.hsm_kid,
-            }),
+            })?,
             session_id: context.session_id,
         })
     }
@@ -149,7 +149,7 @@ impl ServiceOperation for HsmListKeysOperation {
 
         Ok(OperationResult {
             state: context.state,
-            data: InnerResponseData::ListKeys(payload),
+            data: InnerResponseData::new(payload)?,
             session_id: context.session_id,
         })
     }
