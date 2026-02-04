@@ -288,15 +288,12 @@ pub enum PakeState {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PakeRequest {
     /// Optional authorization data required for initial PIN registrations or PIN resets
-    #[serde(rename = "authorization", skip_serializing_if = "Option::is_none")]
     pub authorization: Option<String>,
 
-    #[serde(rename = "task", skip_serializing_if = "Option::is_none")]
     pub task: Option<String>,
 
-    /// The PAKE request data as defined by the PAKE state
     #[serde(rename = "data")]
-    pub request_data: PakePayloadVector,
+    pub data: PakePayloadVector,
 }
 
 // TODO: Move this to operations/authentication.rs?

@@ -89,10 +89,17 @@ impl R2psService {
             return Err(ServiceRequestError::JweError);
         };
 
-        // TODO: We could be more explicit about this and use device encryption if InnerJwe KID matches our server key.
-        let enc_option = match session_key {
-            Some(_) => EncryptOption::Session,
-            None => EncryptOption::Device,
+        let peeked_kid = jwe.peek_kid().map_err(|_| ServiceRequestError::JweError)?;
+        debug!("Peeked inner JWE kid: {:?}", peeked_kid);
+
+        // parse peeked_kid into EncryptOption
+        let enc_option = match peeked_kid.as_deref() {
+            Some("session") => EncryptOption::Session,
+            Some("device") => EncryptOption::Device,
+            _ => {
+                error!("Unknown encryption option in JWE kid: {:?}", peeked_kid);
+                return Err(ServiceRequestError::JweError);
+            }
         };
 
         debug!("Decrypting inner request using {:?} encryption", enc_option);
@@ -148,14 +155,6 @@ impl R2psRequestUseCase for R2psService {
         if outer_request.context != "hsm" {
             return Err(R2psRequestError::UnsupportedContext);
         }
-
-        let peeked_kid = match outer_request.inner_jwe.as_ref() {
-            Some(jwe) => jwe
-                .peek_kid()
-                .map_err(|_| R2psRequestError::InnerJweError)?,
-            None => None,
-        };
-        debug!("Peeked inner JWE kid: {:?}", peeked_kid);
 
         let session_id = outer_request.session_id.as_ref();
         let session_key = session_id
