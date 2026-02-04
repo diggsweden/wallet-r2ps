@@ -1,23 +1,18 @@
-use super::{OperationContext, ServiceOperation};
+use super::{OperationContext, OperationResult, ServiceOperation};
 use crate::application::pending_auth_spi_port::{LoginSession, PendingAuthSpiPort};
 use crate::application::session_key_spi_port::{SessionKey, SessionKeySpiPort};
-use crate::domain::value_objects::r2ps::{PakeRequestPayload, PakeResponsePayload};
+use crate::domain::value_objects::r2ps::{PakeRequest, PakeResponse};
 use crate::domain::{
-    DefaultCipherSuite, DeviceHsmState, OuterResponse, PasswordFile, R2psResponse,
-    ServiceRequestError, to_iso8601_duration,
+    DefaultCipherSuite, DeviceHsmState, InnerResponseData, PakePayloadVector, PasswordFile,
+    ServiceRequestError, SessionId,
 };
 use argon2::password_hash::rand_core::OsRng;
-use base64::Engine;
-use base64::engine::general_purpose;
-use base64::prelude::BASE64_STANDARD;
 use opaque_ke::{
     CredentialFinalization, CredentialRequest, Identifiers, RegistrationRequest,
     RegistrationUpload, ServerLogin, ServerLoginParameters, ServerRegistration, ServerSetup,
 };
 use std::sync::Arc;
-use std::time::Instant;
 use tracing::{debug, warn};
-use uuid::Uuid;
 
 /// Creates OPAQUE ServerLoginParameters with standardized context and identifiers
 fn create_server_login_parameters<'a: 'b, 'b>(device_id: &'a str) -> ServerLoginParameters<'a, 'b> {
@@ -69,27 +64,13 @@ impl AuthenticateStartOperation {
 }
 
 impl ServiceOperation for AuthenticateStartOperation {
-    fn execute(&self, context: OperationContext) -> Result<R2psResponse, ServiceRequestError> {
-        let start = Instant::now();
-        let data = context
-            .inner_request_json
-            .ok_or(ServiceRequestError::InvalidServiceRequestFormat)?;
-        let pake_payload = PakeRequestPayload::deserialize(data.to_vec()).map_err(|e| {
-            warn!("error decoding pake request: {:?}", e);
-            ServiceRequestError::InvalidPakeRequestPayload
-        })?;
+    fn execute(&self, context: OperationContext) -> Result<OperationResult, ServiceRequestError> {
+        let pake_request = PakeRequest::from_inner_request(context.inner_request)?;
 
         debug!(
-            "deserialized pake payload authenticate request data: {}",
-            pake_payload.request_data
+            "deserialized pake payload authenticate request data: {:?}",
+            pake_request.data
         );
-
-        let decoded_request_data: Vec<u8> = general_purpose::STANDARD
-            .decode(pake_payload.request_data)
-            .map_err(|e| {
-                warn!("error base64 decoding pake authenticate request: {:?}", e);
-                ServiceRequestError::InvalidPakeRequestPayload
-            })?;
 
         let password_file_serialized = context
             .state
@@ -103,6 +84,8 @@ impl ServiceOperation for AuthenticateStartOperation {
             warn!("error decoding pake request: {:?}", e);
             ServiceRequestError::InvalidSerializedPasswordFile
         })?;
+
+        let decoded_request_data = pake_request.data.as_ref();
         let credential_request =
             CredentialRequest::deserialize(&decoded_request_data).map_err(|e| {
                 warn!("error decoding pake request: {:?}", e);
@@ -125,32 +108,25 @@ impl ServiceOperation for AuthenticateStartOperation {
             ServiceRequestError::ServerLoginStartFailed
         })?;
 
-        let credential_response_bytes = server_login_start_result.message.serialize();
-        let pake_session_id = context
-            .outer_request
-            .pake_session_id
-            .clone()
-            .unwrap_or(Uuid::new_v4().to_string());
+        let payload_bytes = server_login_start_result.message.serialize();
+        let payload = PakePayloadVector::new(payload_bytes.to_vec());
+
+        let session_id = SessionId::new();
 
         self.pending_auth_spi_port.store_pending_auth(
-            pake_session_id.as_str(),
+            &session_id,
             &Arc::new(LoginSession::new(server_login_start_result.state)),
         );
 
-        let pake_response = PakeResponsePayload {
-            pake_session_id: Some(pake_session_id),
+        let payload = PakeResponse {
             task: None,
-            response_data: Some(BASE64_STANDARD.encode(credential_response_bytes)),
-            message: None,
-            expires_in: None,
+            data: Some(payload),
         };
 
-        let elapsed = start.elapsed();
-        debug!("AUTH evaluate time: {} ns", elapsed.as_nanos());
-
-        Ok(R2psResponse {
-            state: context.state.clone(),
-            payload: OuterResponse::Pake(pake_response),
+        Ok(OperationResult {
+            state: context.state,
+            data: InnerResponseData::new(payload)?,
+            session_id: Some(session_id),
         })
     }
 }
@@ -174,34 +150,22 @@ impl AuthenticateFinishOperation {
 }
 
 impl ServiceOperation for AuthenticateFinishOperation {
-    fn execute(&self, context: OperationContext) -> Result<R2psResponse, ServiceRequestError> {
-        let start = Instant::now();
-        let data = context
-            .inner_request_json
-            .ok_or(ServiceRequestError::InvalidServiceRequestFormat)?;
-        let pake_payload = PakeRequestPayload::deserialize(data.to_vec()).map_err(|e| {
-            warn!("error decoding pake request: {:?}", e);
-            ServiceRequestError::InvalidPakeRequestPayload
-        })?;
+    fn execute(&self, context: OperationContext) -> Result<OperationResult, ServiceRequestError> {
+        let pake_request = PakeRequest::from_inner_request(context.inner_request)?;
 
-        let decoded_request_data: Vec<u8> = general_purpose::STANDARD
-            .decode(pake_payload.request_data)
-            .map_err(|e| {
-                warn!("error base64 decoding pake authenticate request: {:?}", e);
-                ServiceRequestError::InvalidPakeRequestPayload
-            })?;
+        let decoded_request_data = pake_request.data.as_ref();
+
+        // Get the pending auth session id which was created in the start phase and sent to the client,
+        // which the client now returns back to us to finish the authentication.
+        let session_id = context
+            .session_id
+            .as_ref()
+            .ok_or(ServiceRequestError::UnknownSession)?;
 
         let session = self
             .pending_auth_spi_port
-            .get_pending_auth(
-                context
-                    .outer_request
-                    .pake_session_id
-                    .clone()
-                    .ok_or(ServiceRequestError::UnknownSession)?
-                    .as_str(),
-            )
-            .ok_or(ServiceRequestError::InvalidAuthenticateRequest)?;
+            .get_pending_auth(&session_id)
+            .ok_or(ServiceRequestError::UnknownSession)?;
 
         let server_login_parameters = create_server_login_parameters(&context.device_id);
 
@@ -219,37 +183,22 @@ impl ServiceOperation for AuthenticateFinishOperation {
                 ServiceRequestError::ServerLoginFinishFailed
             })?;
 
-        debug!("SESSION KEY: {:X}", result.session_key);
+        let session_key = SessionKey::new(result.session_key.to_vec());
+        debug!("Derived shared session key: {:?}", session_key);
 
-        let pake_session_id = context
-            .outer_request
-            .pake_session_id
-            .clone()
-            .ok_or(ServiceRequestError::UnknownSession)?;
-
-        let session_remaining_ttl = self
-            .session_key_spi_port
-            .store(
-                pake_session_id.as_str(),
-                SessionKey::new(result.session_key.to_vec()),
-            )
+        self.session_key_spi_port
+            .store(&session_id, session_key)
             .map_err(|_| ServiceRequestError::InternalServerError)?;
 
-        let msg = br#"{"msg":"OK"}"#.to_vec();
-        let pake_response = PakeResponsePayload {
-            pake_session_id: context.outer_request.pake_session_id.clone(),
+        let payload = PakeResponse {
             task: None,
-            response_data: Some(BASE64_STANDARD.encode(&msg)),
-            message: None,
-            expires_in: Some(to_iso8601_duration(session_remaining_ttl)),
+            data: None,
         };
 
-        let elapsed = start.elapsed();
-        debug!("AUTH finalize time: {} ns", elapsed.as_nanos());
-
-        Ok(R2psResponse {
-            state: context.state.clone(),
-            payload: OuterResponse::Pake(pake_response),
+        Ok(OperationResult {
+            state: context.state,
+            data: InnerResponseData::new(payload)?,
+            session_id: Some(session_id.clone()),
         })
     }
 }
@@ -268,26 +217,12 @@ impl RegisterStartOperation {
 }
 
 impl ServiceOperation for RegisterStartOperation {
-    fn execute(&self, context: OperationContext) -> Result<R2psResponse, ServiceRequestError> {
-        let data = context
-            .inner_request_json
-            .ok_or(ServiceRequestError::InvalidServiceRequestFormat)?;
-        let pake_payload = PakeRequestPayload::deserialize(data.to_vec()).map_err(|e| {
-            warn!("error decoding pake registration request: {:?}", e);
-            ServiceRequestError::InvalidPakeRequestPayload
-        })?;
+    fn execute(&self, context: OperationContext) -> Result<OperationResult, ServiceRequestError> {
+        let pake_request = PakeRequest::from_inner_request(context.inner_request)?;
 
-        debug!(
-            "deserialized pake payload req={}",
-            pake_payload.request_data
-        );
+        debug!("deserialized pake request {:?}", pake_request.data);
 
-        let decoded_request_data: Vec<u8> = general_purpose::STANDARD
-            .decode(pake_payload.request_data)
-            .map_err(|e| {
-                warn!("error base64 decoding pake registration request: {:?}", e);
-                ServiceRequestError::InvalidPakeRequestPayload
-            })?;
+        let decoded_request_data = pake_request.data.as_ref();
 
         let registration_request = RegistrationRequest::deserialize(&decoded_request_data)
             .map_err(|e| {
@@ -310,21 +245,18 @@ impl ServiceOperation for RegisterStartOperation {
             server_registration_start_result.message
         );
 
-        let response_data = server_registration_start_result
-            .message
-            .serialize()
-            .to_vec();
-        let pake_response = PakeResponsePayload {
-            pake_session_id: None,
+        let payload_bytes = server_registration_start_result.message.serialize();
+        let payload = PakePayloadVector::new(payload_bytes.to_vec());
+
+        let payload = PakeResponse {
             task: None,
-            response_data: Some(BASE64_STANDARD.encode(response_data)),
-            message: None,
-            expires_in: None,
+            data: Some(payload),
         };
 
-        Ok(R2psResponse {
+        Ok(OperationResult {
             state: context.state,
-            payload: OuterResponse::Pake(pake_response),
+            data: InnerResponseData::new(payload)?,
+            session_id: context.session_id,
         })
     }
 }
@@ -339,21 +271,11 @@ impl RegisterFinishOperation {
 }
 
 impl ServiceOperation for RegisterFinishOperation {
-    fn execute(&self, context: OperationContext) -> Result<R2psResponse, ServiceRequestError> {
-        let data = context
-            .inner_request_json
-            .ok_or(ServiceRequestError::InvalidServiceRequestFormat)?;
-        let pake_payload = PakeRequestPayload::deserialize(data.to_vec()).map_err(|e| {
-            warn!("error decoding pake registration request: {:?}", e);
-            ServiceRequestError::InvalidPakeRequestPayload
-        })?;
+    fn execute(&self, context: OperationContext) -> Result<OperationResult, ServiceRequestError> {
+        let inner_request = context.inner_request;
+        let pake_payload = PakeRequest::from_inner_request(inner_request)?;
 
-        let decoded_request_data: Vec<u8> = general_purpose::STANDARD
-            .decode(pake_payload.request_data)
-            .map_err(|e| {
-                warn!("error base64 decoding pake registration request: {:?}", e);
-                ServiceRequestError::InvalidPakeRequestPayload
-            })?;
+        let decoded_request_data = pake_payload.data.as_ref();
 
         let registration_request: RegistrationUpload<DefaultCipherSuite> =
             RegistrationUpload::deserialize(&decoded_request_data).map_err(|e| {
@@ -369,25 +291,20 @@ impl ServiceOperation for RegisterFinishOperation {
         );
 
         let new_state = DeviceHsmState {
-            client_id: context.state.client_id,
-            wallet_id: context.state.wallet_id,
-            client_public_key: context.state.client_public_key,
             password_file: Some(PasswordFile(password_file_serialized)),
             keys: Vec::new(),
+            ..context.state
         };
 
-        let msg = br#"{"msg":"OK"}"#.to_vec();
-        let pake_response = PakeResponsePayload {
-            pake_session_id: None,
+        let payload = PakeResponse {
             task: None,
-            response_data: Some(BASE64_STANDARD.encode(&msg)),
-            message: None,
-            expires_in: None,
+            data: None,
         };
 
-        Ok(R2psResponse {
+        Ok(OperationResult {
             state: new_state,
-            payload: OuterResponse::Pake(pake_response),
+            data: InnerResponseData::new(payload)?,
+            session_id: context.session_id,
         })
     }
 }

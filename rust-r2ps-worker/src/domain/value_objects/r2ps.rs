@@ -1,4 +1,6 @@
-use crate::domain::DeviceHsmState;
+use crate::application::service::operations::hsm::MessageVector;
+use crate::application::service::operations::hsm::SignatureVector;
+use crate::define_byte_vector;
 use crate::domain::EcPublicJwk;
 use base64::DecodeError;
 use josekit::JoseError;
@@ -7,7 +9,26 @@ use serde::{Deserialize, Serialize};
 use std::string::FromUtf8Error;
 use std::time::Duration;
 use strum_macros::Display;
+use tracing::warn;
 use utoipa::ToSchema;
+use uuid::Uuid;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub struct SessionId(String);
+
+impl SessionId {
+    pub fn new() -> Self {
+        Self(Uuid::new_v4().to_string())
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum Status {
+    #[serde(rename = "OK")]
+    Ok,
+    #[serde(rename = "ERROR")]
+    Error,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -53,52 +74,56 @@ pub struct R2psResponseJws {
     pub service_response_jws: String,
 }
 
-// Define your output message structure
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct R2psResponse {
-    pub state: DeviceHsmState, // change to jws later
-    pub payload: OuterResponse,
-}
-
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct OuterRequest {
-    pub client_id: String,
-    pub kid: String,
-    pub context: String,
-    #[serde(rename = "type")]
-    pub service_type: OperationId,
-    pub pake_session_id: Option<String>,
-    #[serde(rename = "ver")]
-    pub version: Option<String>,
-    pub nonce: Option<String>,
-    pub enc: Option<EncryptOption>,
+    pub version: u32,
+    pub session_id: Option<SessionId>,
+    pub context: String, // always "hsm". TODO: Replace with JOSE "aud" header?
     pub inner_jwe: Option<super::InnerJwe>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub enum OuterResponse {
-    Pake(PakeResponsePayload),
-    CreateKey(CreateKeyServiceDataResponse),
-    DeleteKey(DeleteKeyServiceData),
-    ListKeys(ListKeysResponse),
-    Asn1Signature(Vec<u8>),
+#[derive(Debug, Deserialize, Serialize)]
+pub struct InnerRequest {
+    pub version: u32,
+    #[serde(rename = "type")]
+    pub request_type: OperationId,
+    pub request_counter: u32, // TODO: Implement replay protection using this counter
+    pub data: Option<String>, // request specific data, serialized JSON typically
 }
 
-impl OuterResponse {
+#[derive(Debug, Deserialize, Serialize)]
+pub struct InnerResponse {
+    pub version: u32,
+    pub data: Option<String>, // request specific response data, serialized JSON typically
+    pub expires_in: Option<iso8601_duration::Duration>, // time until session expires
+    pub status: Status,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct OuterResponse {
+    pub version: u32,
+    pub session_id: Option<SessionId>,
+    pub inner_jwe: Option<super::InnerJwe>,
+}
+
+#[derive(Clone, Debug)]
+pub struct InnerResponseData {
+    data: serde_json::Value,
+}
+
+impl InnerResponseData {
+    pub fn new<T: Serialize>(data: T) -> Result<Self, ServiceRequestError> {
+        serde_json::to_value(data)
+            .map(|value| Self { data: value })
+            .map_err(|_| ServiceRequestError::Unknown)
+    }
+
     pub fn serialize(&self) -> Result<Vec<u8>, ServiceRequestError> {
-        match self {
-            Self::Pake(p) => serde_json::to_vec(p),
-            Self::CreateKey(p) => serde_json::to_vec(p),
-            Self::DeleteKey(p) => serde_json::to_vec(p),
-            Self::ListKeys(p) => serde_json::to_vec(p),
-            Self::Asn1Signature(p) => return Ok(p.clone()),
-        }
-        .map_err(|_| ServiceRequestError::Unknown)
+        serde_json::to_vec(&self.data).map_err(|_| ServiceRequestError::Unknown)
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum OperationId {
     AuthenticateStart,
@@ -106,15 +131,12 @@ pub enum OperationId {
     RegisterStart,
     RegisterFinish,
     PinChange,
-    HsmEcdsa,
+    HsmSign,
     HsmEcdh,
-    #[serde(rename = "hsm_ec_keygen")]
-    HsmEcKeygen,
-    #[serde(rename = "hsm_ec_delete_key")]
-    HsmEcDeleteKey,
+    HsmGenerateKey,
+    HsmDeleteKey,
     HsmListKeys,
-    SessionEnd,
-    SessionContextEnd,
+    EndSession,
     Store,
     Retrieve,
     Log,
@@ -125,14 +147,14 @@ pub enum OperationId {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum EncryptOption {
-    User,
+    Session,
     Device,
 }
 
 impl EncryptOption {
     pub fn as_str(&self) -> &'static str {
         match self {
-            EncryptOption::User => "user",
+            EncryptOption::Session => "session",
             EncryptOption::Device => "device",
         }
     }
@@ -145,19 +167,18 @@ impl OperationId {
             OperationId::AuthenticateFinish => EncryptOption::Device,
             OperationId::RegisterStart => EncryptOption::Device,
             OperationId::RegisterFinish => EncryptOption::Device,
-            OperationId::PinChange => EncryptOption::User,
-            OperationId::HsmEcdsa => EncryptOption::User,
-            OperationId::HsmEcdh => EncryptOption::User,
-            OperationId::HsmEcKeygen => EncryptOption::User,
-            OperationId::HsmEcDeleteKey => EncryptOption::User,
-            OperationId::HsmListKeys => EncryptOption::User,
-            OperationId::SessionEnd => EncryptOption::Device,
-            OperationId::SessionContextEnd => EncryptOption::Device,
-            OperationId::Store => EncryptOption::User,
-            OperationId::Retrieve => EncryptOption::User,
-            OperationId::Log => EncryptOption::User,
-            OperationId::GetLog => EncryptOption::User,
-            OperationId::Info => EncryptOption::User,
+            OperationId::PinChange => EncryptOption::Session,
+            OperationId::HsmSign => EncryptOption::Session,
+            OperationId::HsmEcdh => EncryptOption::Session,
+            OperationId::HsmGenerateKey => EncryptOption::Session,
+            OperationId::HsmDeleteKey => EncryptOption::Session,
+            OperationId::HsmListKeys => EncryptOption::Session,
+            OperationId::EndSession => EncryptOption::Device, // TODO: Why is this Device?
+            OperationId::Store => EncryptOption::Session,
+            OperationId::Retrieve => EncryptOption::Session,
+            OperationId::Log => EncryptOption::Session,
+            OperationId::GetLog => EncryptOption::Session,
+            OperationId::Info => EncryptOption::Session,
         }
     }
 }
@@ -167,25 +188,15 @@ pub fn to_iso8601_duration(d: Duration) -> iso8601_duration::Duration {
     iso8601_duration::Duration::new(0.0, 0.0, 0.0, 0.0, 0.0, d.as_secs() as f32)
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PakeResponsePayload {
-    /// The PAKE session ID assigned by the server
-    #[serde(rename = "pake_session_id")]
-    pub pake_session_id: Option<String>,
+define_byte_vector!(PakePayloadVector);
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PakeResponse {
     /// The session task recognized by the server bound to this pake session ID
-    #[serde(rename = "task")]
     pub task: Option<String>,
 
     /// PAKE response data as defined by the PAKE state incoming the request
-    #[serde(rename = "resp")]
-    pub response_data: Option<String>,
-
-    #[serde(rename = "msg")]
-    pub message: Option<String>,
-
-    #[serde(rename = "expires_in")]
-    pub expires_in: Option<iso8601_duration::Duration>,
+    pub data: Option<PakePayloadVector>,
 }
 
 #[derive(Serialize, Deserialize, ToSchema, Debug, Clone, Display)]
@@ -212,12 +223,17 @@ pub struct CreateKeyServiceDataResponse {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct DeleteKeyServiceData {
-    pub kid: String,
+    pub hsm_kid: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ListKeysResponse {
     pub key_info: Vec<KeyInfo>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct SignatureResponse {
+    pub signature: SignatureVector,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -231,48 +247,10 @@ pub struct ListKeysRequest {
     // TODO finns någon filteringspayload i Stefans kod....
 }
 
-mod base64_serde {
-    use base64::Engine;
-    use base64::engine::general_purpose::STANDARD;
-    use serde::{Deserialize, Deserializer, Serializer};
-
-    pub fn serialize<S>(bytes: &Vec<u8>, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_str(&STANDARD.encode(bytes))
-    }
-
-    pub fn deserialize<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let s = String::deserialize(deserializer)?;
-        STANDARD.decode(&s).map_err(serde::de::Error::custom)
-    }
-}
-
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct SignRequest {
-    pub kid: String,
-    #[serde(with = "base64_serde")]
-    pub tbs_hash: Vec<u8>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Claims {
-    pub ver: String,
-    pub nonce: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub expires_in: Option<iso8601_duration::Duration>,
-    pub enc: String,
-    pub data: String,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum PakeProtocol {
-    Opaque,
+    pub hsm_kid: String,
+    pub message: MessageVector,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -283,32 +261,28 @@ pub enum PakeState {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PakeRequestPayload {
-    /// Identifies the PAKE protocol
-    #[serde(rename = "protocol")]
-    pub protocol: PakeProtocol,
-
+pub struct PakeRequest {
     /// Optional authorization data required for initial PIN registrations or PIN resets
-    #[serde(rename = "authorization", skip_serializing_if = "Option::is_none")]
     pub authorization: Option<String>,
 
-    #[serde(rename = "task", skip_serializing_if = "Option::is_none")]
     pub task: Option<String>,
 
-    /// The PAKE request data as defined by the PAKE state
-    #[serde(rename = "req")]
-    pub request_data: String,
+    #[serde(rename = "data")]
+    pub data: PakePayloadVector,
 }
 
-impl PakeRequestPayload {
-    /// Serializes the payload to bytes
-    pub fn serialize(&self) -> Result<Vec<u8>, serde_json::Error> {
-        serde_json::to_vec(self)
-    }
+// TODO: Move this to operations/authentication.rs?
+impl PakeRequest {
+    /// Creates a PakeRequest from an InnerRequest
+    pub fn from_inner_request(inner_request: InnerRequest) -> Result<Self, ServiceRequestError> {
+        let data = inner_request
+            .data
+            .ok_or(ServiceRequestError::InvalidServiceRequestFormat)?;
 
-    /// Deserializes the payload from bytes
-    pub fn deserialize(data: Vec<u8>) -> Result<Self, serde_json::Error> {
-        serde_json::from_slice(data.as_slice())
+        serde_json::from_slice(data.as_bytes()).map_err(|e| {
+            warn!("error decoding pake request: {:?}", e);
+            ServiceRequestError::InvalidPakeRequest
+        })
     }
 }
 
@@ -323,7 +297,7 @@ pub struct R2psServerConfig {
 pub enum ServiceRequestError {
     JwsError,
     JweError,
-    InvalidPakeRequestPayload,
+    InvalidPakeRequest,
     InvalidRegistrationRequest,
     ServerRegistrationStartFailed,
     ServerLoginStartFailed,

@@ -1,10 +1,10 @@
-use crate::domain::DefaultCipherSuite;
+use crate::domain::{DefaultCipherSuite, SessionId};
 use opaque_ke::{ServerLogin, ServerLoginStartResult};
 use std::sync::{Arc, Mutex};
 
 pub trait PendingAuthSpiPort {
-    fn store_pending_auth(&self, client_id: &str, server_login_start_result: &Arc<LoginSession>);
-    fn get_pending_auth(&self, client_id: &str) -> Option<Arc<LoginSession>>;
+    fn store_pending_auth(&self, id: &SessionId, server_login_start_result: &Arc<LoginSession>);
+    fn get_pending_auth(&self, id: &SessionId) -> Option<Arc<LoginSession>>;
 }
 
 pub type LoginState = ServerLoginStartResult<DefaultCipherSuite>;

@@ -44,6 +44,28 @@ macro_rules! define_byte_vector {
                 &self.0
             }
         }
+
+        impl serde::Serialize for $name {
+            fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: serde::Serializer,
+            {
+                use base64::{Engine as _, engine::general_purpose::STANDARD};
+                serializer.serialize_str(&STANDARD.encode(&self.0))
+            }
+        }
+
+        impl<'de> serde::Deserialize<'de> for $name {
+            fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+            where
+                D: serde::Deserializer<'de>,
+            {
+                use base64::{Engine as _, engine::general_purpose::STANDARD};
+                let s = String::deserialize(deserializer)?;
+                let bytes = STANDARD.decode(&s).map_err(serde::de::Error::custom)?;
+                Ok($name(bytes))
+            }
+        }
     };
 }
 

@@ -5,7 +5,7 @@ use p256::pkcs8::{EncodePrivateKey, EncodePublicKey};
 use rust_r2ps_worker::domain::EncryptOption::Device;
 use rust_r2ps_worker::domain::ServiceRequestError;
 use rust_r2ps_worker::domain::value_objects::InnerJwe;
-use rust_r2ps_worker::domain::value_objects::r2ps::{OperationId, OuterRequest};
+use rust_r2ps_worker::domain::value_objects::r2ps::OuterRequest;
 
 #[test]
 fn test_decrypt_service_data_jwe_happy_path() -> Result<(), Box<dyn std::error::Error>> {
@@ -33,14 +33,9 @@ fn test_decrypt_service_data_jwe_happy_path() -> Result<(), Box<dyn std::error::
 
     // Wrap the Base64 encoded payload in a ServiceRequest
     let service_request = OuterRequest {
-        client_id: "test-client".to_string(),
-        kid: "test-kid".to_string(),
+        version: 1,
+        session_id: None,
         context: "test-context".to_string(),
-        service_type: OperationId::AuthenticateStart,
-        pake_session_id: None,
-        version: None,
-        nonce: None,
-        enc: Some(Device),
         inner_jwe: Some(InnerJwe::new(jwe_compact)),
     };
 
@@ -56,7 +51,10 @@ fn test_decrypt_service_data_jwe_happy_path() -> Result<(), Box<dyn std::error::
         "decrypt_service_data_jwe failed: {:?}",
         result_new.err()
     );
-    assert_eq!(result_new.unwrap().to_vec(), payload);
+    assert_eq!(
+        result_new.unwrap().data.unwrap().as_bytes().to_vec(),
+        payload
+    );
 
     Ok(())
 }
@@ -80,14 +78,9 @@ fn test_decrypt_service_data_jwe_rejects_invalid_formats() -> Result<(), Box<dyn
 
     for invalid_jwe in invalid_formats {
         let service_request = OuterRequest {
-            client_id: "test-client".to_string(),
-            kid: "test-kid".to_string(),
+            version: 1,
+            session_id: None,
             context: "test-context".to_string(),
-            service_type: OperationId::AuthenticateStart,
-            pake_session_id: None,
-            version: None,
-            nonce: None,
-            enc: Some(Device),
             inner_jwe: Some(InnerJwe::new(invalid_jwe.to_string())),
         };
 
@@ -113,14 +106,9 @@ fn test_decrypt_service_data_jwe_rejects_invalid_base64() -> Result<(), Box<dyn 
     let server_private_key = pem::parse(private_key_pem_string.as_bytes())?;
 
     let service_request = OuterRequest {
-        client_id: "test-client".to_string(),
-        kid: "test-kid".to_string(),
+        version: 1,
+        session_id: None,
         context: "test-context".to_string(),
-        service_type: OperationId::AuthenticateStart,
-        pake_session_id: None,
-        version: None,
-        nonce: None,
-        enc: Some(Device),
         inner_jwe: Some(InnerJwe::new("not-base64!!".to_string())),
     };
 

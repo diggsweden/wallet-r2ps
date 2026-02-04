@@ -1,4 +1,5 @@
 use crate::application::session_key_spi_port::{SessionKey, SessionKeySpiPort};
+use crate::domain::SessionId;
 use moka::sync::Cache;
 use std::time::{Duration, Instant};
 use tracing::debug;
@@ -6,7 +7,7 @@ use tracing::debug;
 const SESSION_KEY_TTL_SECS: u64 = 600;
 
 pub struct SessionKeyMemoryCache {
-    cache: Cache<String, SessionKeyWithTimestamp>,
+    cache: Cache<SessionId, SessionKeyWithTimestamp>,
 }
 
 #[derive(Debug, Clone)]
@@ -35,18 +36,15 @@ impl SessionKeyMemoryCache {
 impl SessionKeySpiPort for SessionKeyMemoryCache {
     fn store(
         &self,
-        pake_session_id: &str,
+        id: &SessionId,
         session_key: SessionKey,
     ) -> Result<Duration, crate::application::session_key_spi_port::ClientRepositoryError> {
-        debug!(
-            "storing session key session_id: {} {:02X?}",
-            pake_session_id, session_key
-        );
+        debug!("Storing session key session_id: {:?} {:?}", id, session_key);
 
         let inserted_at = Instant::now();
 
         self.cache.insert(
-            pake_session_id.to_string(),
+            id.clone(),
             SessionKeyWithTimestamp {
                 session_key,
                 inserted_at,
@@ -56,26 +54,23 @@ impl SessionKeySpiPort for SessionKeyMemoryCache {
         Ok(Duration::from_secs(SESSION_KEY_TTL_SECS))
     }
 
-    fn get(&self, pake_session_id: &str) -> Option<SessionKey> {
-        match self.cache.get(pake_session_id) {
+    fn get(&self, id: &SessionId) -> Option<SessionKey> {
+        match self.cache.get(id) {
             Some(session_key) => {
                 // Only log the session_key at debug level to avoid leaking sensitive info in production logs
-                debug!(
-                    "Found session key for {} -> {:?}",
-                    pake_session_id, session_key
-                );
+                debug!("Found session key for {:?} -> {:?}", id, session_key);
 
                 Some(session_key.session_key)
             }
             None => {
                 // Note: This is not an error because a pake_session_id is returned in Authenticate start,
                 //       but the session key is only stored after Authenticate finish.
-                debug!("session key not found for session_id: {}", pake_session_id);
+                debug!("session key not found for session_id: {:?}", id);
                 // TODO: Remove this debug logging when we're done with initial development
                 {
                     debug!("Cache entries count: {}", self.cache.entry_count());
                     for (key, _value) in self.cache.iter() {
-                        debug!("Cache contains session_id: {}", key);
+                        debug!("Cache contains session_id: {:?}", key);
                     }
                 }
                 None
@@ -83,9 +78,9 @@ impl SessionKeySpiPort for SessionKeyMemoryCache {
         }
     }
 
-    fn get_remaining_ttl(&self, pake_session_id: &str) -> Option<Duration> {
+    fn get_remaining_ttl(&self, id: &SessionId) -> Option<Duration> {
         const TTL: Duration = Duration::from_secs(SESSION_KEY_TTL_SECS);
-        self.cache.get(pake_session_id).and_then(|entry| {
+        self.cache.get(id).and_then(|entry| {
             let elapsed = entry.inserted_at.elapsed();
             TTL.checked_sub(elapsed)
         })
@@ -93,9 +88,9 @@ impl SessionKeySpiPort for SessionKeyMemoryCache {
 
     fn end_session(
         &self,
-        pake_session_id: &str,
+        id: &crate::domain::SessionId,
     ) -> Result<(), crate::application::session_key_spi_port::ClientRepositoryError> {
-        self.cache.invalidate(pake_session_id);
+        self.cache.invalidate(id);
         Ok(())
     }
 }

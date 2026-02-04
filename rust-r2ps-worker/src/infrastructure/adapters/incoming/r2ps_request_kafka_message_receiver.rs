@@ -97,7 +97,7 @@ impl R2psRequestKafkaMessageReceiver {
                         match r2ps_service.execute(r2ps_request) {
                             Ok(request_id) => {
                                 // Serialize output message to JSON
-                                debug!("R2psRequest received {}", request_id);
+                                debug!("R2psRequest {} processed successfully", request_id);
                             }
                             Err(err) => {
                                 error!("Error processing message: {:?}", err);

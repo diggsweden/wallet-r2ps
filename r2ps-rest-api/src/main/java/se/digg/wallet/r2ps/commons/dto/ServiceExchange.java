@@ -7,8 +7,8 @@ import java.time.Instant;
 public abstract class ServiceExchange {
 
   /** Indicates the version of this service exchange protocol */
-  @JsonProperty("ver")
-  private String version;
+  @JsonProperty("version")
+  private Integer version;
 
   /** Payload nonce that is sent by the client and returned by the server */
   @JsonProperty("nonce")
@@ -19,22 +19,22 @@ public abstract class ServiceExchange {
   private Instant iat;
 
   /** Indicates if the serviceData is encrypted or holds plaintext data */
-  @JsonProperty("enc")
-  private EncryptOption encryptOption;
+  // @JsonProperty("enc")
+  // private EncryptOption encryptOption;
 
   /** JSON data or a JWE with encrypted JSON payload */
   @JsonProperty("inner_jwe")
   private String innerJwe;
 
   public ServiceExchange() {
-    this.version = "1.0";
+    this.version = 1;
   }
 
-  public String getVersion() {
+  public Integer getVersion() {
     return version;
   }
 
-  public void setVersion(final String version) {
+  public void setVersion(final Integer version) {
     this.version = version;
   }
 
@@ -54,12 +54,23 @@ public abstract class ServiceExchange {
     this.iat = iat;
   }
 
-  public EncryptOption getEncryptOption() {
-    return encryptOption;
+  // public EncryptOption getEncryptOption() {
+  //   return encryptOption;
+  // }
+
+  // public void setEncryptOption(final EncryptOption encryptOption) {
+  //   this.encryptOption = encryptOption;
+  // }
+
+  @JsonProperty("session_id")
+  private String sessionId;
+
+  public String getSessionId() {
+    return sessionId;
   }
 
-  public void setEncryptOption(final EncryptOption encryptOption) {
-    this.encryptOption = encryptOption;
+  public void setSessionId(final String sessionId) {
+    this.sessionId = sessionId;
   }
 
   public String getInnerJwe() {

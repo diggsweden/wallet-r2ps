@@ -1,9 +1,7 @@
-use super::{OperationContext, ServiceOperation};
+use super::{OperationContext, OperationResult, ServiceOperation};
 use crate::application::session_key_spi_port::SessionKeySpiPort;
-use crate::domain::value_objects::r2ps::PakeResponsePayload;
-use crate::domain::{OuterResponse, R2psResponse, ServiceRequestError};
-use base64::Engine;
-use base64::prelude::BASE64_STANDARD;
+use crate::domain::value_objects::r2ps::PakeResponse;
+use crate::domain::{InnerResponseData, ServiceRequestError};
 use std::sync::Arc;
 
 pub struct SessionEndOperation {
@@ -19,30 +17,25 @@ impl SessionEndOperation {
 }
 
 impl ServiceOperation for SessionEndOperation {
-    fn execute(&self, context: OperationContext) -> Result<R2psResponse, ServiceRequestError> {
+    fn execute(&self, context: OperationContext) -> Result<OperationResult, ServiceRequestError> {
+        let session_id = context
+            .session_id
+            .as_ref()
+            .ok_or(ServiceRequestError::UnknownSession)?;
+
         self.session_key_spi_port
-            .end_session(
-                context
-                    .outer_request
-                    .pake_session_id
-                    .clone()
-                    .unwrap()
-                    .as_str(),
-            )
+            .end_session(&session_id)
             .map_err(|_| ServiceRequestError::UnknownSession)?;
 
-        let msg = br#"{"msg":"OK"}"#.to_vec();
-        let pake_response = PakeResponsePayload {
-            pake_session_id: context.outer_request.pake_session_id,
+        let payload = PakeResponse {
             task: None,
-            response_data: Some(BASE64_STANDARD.encode(&msg)),
-            message: None,
-            expires_in: None,
+            data: None,
         };
 
-        Ok(R2psResponse {
+        Ok(OperationResult {
             state: context.state,
-            payload: OuterResponse::Pake(pake_response),
+            data: InnerResponseData::new(payload)?,
+            session_id: context.session_id,
         })
     }
 }
