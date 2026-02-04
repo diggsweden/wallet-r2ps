@@ -160,12 +160,12 @@ impl ServiceOperation for AuthenticateFinishOperation {
         let session_id = context
             .session_id
             .as_ref()
-            .ok_or(ServiceRequestError::InvalidAuthenticateRequest)?;
+            .ok_or(ServiceRequestError::UnknownSession)?;
 
         let session = self
             .pending_auth_spi_port
             .get_pending_auth(&session_id)
-            .ok_or(ServiceRequestError::InvalidAuthenticateRequest)?;
+            .ok_or(ServiceRequestError::UnknownSession)?;
 
         let server_login_parameters = create_server_login_parameters(&context.device_id);
 
@@ -184,10 +184,9 @@ impl ServiceOperation for AuthenticateFinishOperation {
             })?;
 
         let session_key = SessionKey::new(result.session_key.to_vec());
-        debug!("SESSION KEY: {:?}", session_key);
+        debug!("Derived shared session key: {:?}", session_key);
 
-        let _session_remaining_ttl = self
-            .session_key_spi_port
+        self.session_key_spi_port
             .store(&session_id, session_key)
             .map_err(|_| ServiceRequestError::InternalServerError)?;
 

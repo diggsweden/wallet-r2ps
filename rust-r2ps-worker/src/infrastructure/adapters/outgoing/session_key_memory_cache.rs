@@ -35,19 +35,19 @@ impl SessionKeyMemoryCache {
 impl SessionKeySpiPort for SessionKeyMemoryCache {
     fn store(
         &self,
-        pake_session_id: &crate::domain::SessionId,
+        id: &crate::domain::SessionId,
         session_key: SessionKey,
     ) -> Result<Duration, crate::application::session_key_spi_port::ClientRepositoryError> {
         debug!(
-            "storing session key session_id: {} {:02X?}",
-            pake_session_id.as_str(),
+            "Storing session key session_id: {} {:?}",
+            id.as_str(),
             session_key
         );
 
         let inserted_at = Instant::now();
 
         self.cache.insert(
-            pake_session_id.as_str().to_string(),
+            id.as_str().to_string(),
             SessionKeyWithTimestamp {
                 session_key,
                 inserted_at,
@@ -88,9 +88,9 @@ impl SessionKeySpiPort for SessionKeyMemoryCache {
         }
     }
 
-    fn get_remaining_ttl(&self, pake_session_id: &crate::domain::SessionId) -> Option<Duration> {
+    fn get_remaining_ttl(&self, id: &crate::domain::SessionId) -> Option<Duration> {
         const TTL: Duration = Duration::from_secs(SESSION_KEY_TTL_SECS);
-        self.cache.get(pake_session_id.as_str()).and_then(|entry| {
+        self.cache.get(id.as_str()).and_then(|entry| {
             let elapsed = entry.inserted_at.elapsed();
             TTL.checked_sub(elapsed)
         })
@@ -98,9 +98,9 @@ impl SessionKeySpiPort for SessionKeyMemoryCache {
 
     fn end_session(
         &self,
-        pake_session_id: &crate::domain::SessionId,
+        id: &crate::domain::SessionId,
     ) -> Result<(), crate::application::session_key_spi_port::ClientRepositoryError> {
-        self.cache.invalidate(pake_session_id.as_str());
+        self.cache.invalidate(id.as_str());
         Ok(())
     }
 }
