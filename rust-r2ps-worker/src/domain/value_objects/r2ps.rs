@@ -84,15 +84,17 @@ pub struct OuterRequest {
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct InnerRequest {
+    pub version: u32,
     #[serde(rename = "type")]
     pub request_type: OperationId,
-    pub request_counter: u32, // TODO: Implement replay protection
-    pub data: Option<String>,
+    pub request_counter: u32, // TODO: Implement replay protection using this counter
+    pub data: Option<String>, // request specific data, serialized JSON typically
 }
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct InnerResponse {
-    pub data: Option<String>, // request specific response data, serialized
+    pub version: u32,
+    pub data: Option<String>, // request specific response data, serialized JSON typically
     pub expires_in: Option<iso8601_duration::Duration>, // time until session expires
     pub status: Status,
 }
