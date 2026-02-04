@@ -39,11 +39,7 @@ impl SessionKeySpiPort for SessionKeyMemoryCache {
         id: &SessionId,
         session_key: SessionKey,
     ) -> Result<Duration, crate::application::session_key_spi_port::ClientRepositoryError> {
-        debug!(
-            "Storing session key session_id: {} {:?}",
-            id.as_str(),
-            session_key
-        );
+        debug!("Storing session key session_id: {:?} {:?}", id, session_key);
 
         let inserted_at = Instant::now();
 
@@ -62,14 +58,14 @@ impl SessionKeySpiPort for SessionKeyMemoryCache {
         match self.cache.get(id) {
             Some(session_key) => {
                 // Only log the session_key at debug level to avoid leaking sensitive info in production logs
-                debug!("Found session key for {} -> {:?}", id.as_str(), session_key);
+                debug!("Found session key for {:?} -> {:?}", id, session_key);
 
                 Some(session_key.session_key)
             }
             None => {
                 // Note: This is not an error because a pake_session_id is returned in Authenticate start,
                 //       but the session key is only stored after Authenticate finish.
-                debug!("session key not found for session_id: {}", id.as_str());
+                debug!("session key not found for session_id: {:?}", id);
                 // TODO: Remove this debug logging when we're done with initial development
                 {
                     debug!("Cache entries count: {}", self.cache.entry_count());

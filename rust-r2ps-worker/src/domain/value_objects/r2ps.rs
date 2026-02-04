@@ -20,28 +20,6 @@ impl SessionId {
     pub fn new() -> Self {
         Self(Uuid::new_v4().to_string())
     }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl From<String> for SessionId {
-    fn from(s: String) -> Self {
-        Self(s)
-    }
-}
-
-impl From<SessionId> for String {
-    fn from(id: SessionId) -> Self {
-        id.0
-    }
-}
-
-impl AsRef<str> for SessionId {
-    fn as_ref(&self) -> &str {
-        &self.0
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
