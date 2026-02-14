@@ -1,0 +1,20 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: kafka-brokers
+  namespace: monitoring
+  labels:
+    app: strimzi
+    release: kube-prometheus-stack
+spec:
+  selector:
+    matchLabels:
+      strimzi.io/cluster: access-kafka-cluster
+      strimzi.io/kind: Kafka
+      strimzi.io/component-type: kafka
+  namespaceSelector:
+    matchNames:
+      - default
+  endpoints:
+    - port: tcp-prometheus
+      path: /metrics

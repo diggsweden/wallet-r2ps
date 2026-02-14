@@ -1,0 +1,200 @@
+# =============================================================================
+# bff-rest-api — Kubernetes manifests
+# Assumes:
+#   - Valkey installed via Bitnami Helm in namespace: default
+#     password in secret:  valkey  key: redis-password
+#   - Kafka bootstrap:     access-kafka-cluster-kafka-bootstrap:9092
+# =============================================================================
+
+---
+# -----------------------------------------------------------------------------
+# ServiceAccount (optional but good practice)
+# -----------------------------------------------------------------------------
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: bff-rest-api
+  namespace: default
+
+---
+# -----------------------------------------------------------------------------
+# Deployment
+# -----------------------------------------------------------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bff-rest-api
+  namespace: default
+  labels:
+    app: bff-rest-api
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: bff-rest-api
+  template:
+    metadata:
+      labels:
+        app: bff-rest-api
+    spec:
+      serviceAccountName: bff-rest-api
+
+      containers:
+        - name: bff-rest-api
+          # Replace with your actual image name / tag once built and pushed
+          # e.g. registry.example.com/bff-rest-api:latest
+          # or use a local k3s image loaded via: ctr images import image.tar
+          image: bff-rest-api:dev
+          imagePullPolicy: IfNotPresent # use Never if loading image locally into k3s
+
+          ports:
+            - name: http
+              containerPort: 8088
+              protocol: TCP
+            - name: jdwp
+              containerPort: 8000
+              protocol: TCP
+
+          env:
+            # ── Kafka ────────────────────────────────────────────────────────
+            - name: SPRING_KAFKA_BOOTSTRAP_SERVERS
+              value: "access-kafka-cluster-kafka-bootstrap:9092"
+
+            # ── Valkey / Redis ───────────────────────────────────────────────
+            # Sentinel mode: point Spring at the sentinel service, not the primary directly.
+            # Bitnami chart exposes sentinel on port 26379 via:
+            #   valkey.default.svc.cluster.local:26379
+            #
+            # Spring Boot Redis Sentinel config:
+            - name: SPRING_DATA_REDIS_SENTINEL_MASTER
+              value: "myprimary"
+            - name: SPRING_DATA_REDIS_SENTINEL_NODES
+              value: "valkey.default.svc.cluster.local:26379"
+            - name: SPRING_DATA_REDIS_USERNAME
+              value: "default"
+            - name: SPRING_DATA_REDIS_SENTINEL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: valkey
+                  key: valkey-password
+            - name: SPRING_DATA_REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: valkey
+                  key: valkey-password
+            - name: SPRING_DATA_REDIS_DATABASE
+              value: "0"
+
+            # ── JVM / Debug ──────────────────────────────────────────────────
+            - name: JAVA_TOOL_OPTIONS
+              value: >-
+                -Djava.net.preferIPv4Stack=true
+                -XX:UseSVE=0
+                -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:8000
+
+            # ── Timezone ─────────────────────────────────────────────────────
+            - name: TZ
+              value: "Europe/Stockholm"
+
+          # Restart on failure (mirrors restart: on-failure in compose)
+          # This is controlled at Pod level via restartPolicy below,
+          # but Deployment already defaults to Always which includes on-failure.
+
+          readinessProbe:
+            httpGet:
+              path: /r2ps-api/actuator/health
+              port: 8088
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 5
+
+          livenessProbe:
+            httpGet:
+              path: /r2ps-api/actuator/health/liveness
+              port: 8088
+            initialDelaySeconds: 60
+            periodSeconds: 15
+            failureThreshold: 3
+
+          resources:
+            requests:
+              cpu: 200m
+              memory: 512Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+
+      restartPolicy: Always # equivalent to restart: on-failure in compose
+
+---
+# -----------------------------------------------------------------------------
+# Service — exposes HTTP (8088) and JDWP debug port (8000→9012 in compose)
+# -----------------------------------------------------------------------------
+apiVersion: v1
+kind: Service
+metadata:
+  name: bff-rest-api
+  namespace: default
+  labels:
+    app: bff-rest-api
+spec:
+  selector:
+    app: bff-rest-api
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 8088
+      targetPort: 8088
+      protocol: TCP
+    - name: jdwp
+      port: 9012 # external port from compose (9012:8000)
+      targetPort: 8000
+      protocol: TCP
+
+---
+# -----------------------------------------------------------------------------
+# LoadBalancer Service — Direct access on port 8088 (for Android emulator / IP access)
+# k3s servicelb exposes this on all host interfaces including 10.0.2.2 for emulator
+# -----------------------------------------------------------------------------
+apiVersion: v1
+kind: Service
+metadata:
+  name: bff-rest-api-lb
+  namespace: default
+  labels:
+    app: bff-rest-api
+spec:
+  selector:
+    app: bff-rest-api
+  type: LoadBalancer
+  ports:
+    - name: http
+      port: 8088
+      targetPort: 8088
+      protocol: TCP
+
+---
+# -----------------------------------------------------------------------------
+# Ingress — Traefik (k3s default)
+# -----------------------------------------------------------------------------
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: bff-rest-api
+  namespace: default
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: web # port 80
+    # traefik.ingress.kubernetes.io/router.entrypoints: websecure # port 443
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: bff-rest-api.dev.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: bff-rest-api
+                port:
+                  number: 8088

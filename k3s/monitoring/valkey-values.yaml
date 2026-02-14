@@ -1,0 +1,27 @@
+# Valkey deployment configuration for k3s cluster
+# This configures Valkey with Sentinel mode and Prometheus monitoring
+
+# Enable Sentinel for high availability
+sentinel:
+  enabled: true
+
+# Deploy 3 replicas for redundancy
+replica:
+  replicaCount: 3
+
+# Enable Prometheus metrics collection
+metrics:
+  enabled: true
+  
+  # ServiceMonitor configuration for Prometheus Operator
+  serviceMonitor:
+    enabled: true
+    # IMPORTANT: ServiceMonitor must be in the monitoring namespace
+    namespace: monitoring
+    # Scrape interval (default: 30s)
+    interval: 30s
+    
+    # NOTE: The Bitnami Valkey chart (v5.2.0) does not support custom labels
+    # on the ServiceMonitor. The required label 'release: kube-prometheus-stack'
+    # is added via kubectl in the Makefile after Helm deployment.
+    # See: Makefile line 97

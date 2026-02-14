@@ -1,0 +1,70 @@
+# k3s-specific: disable components k3s doesn't expose the same way
+kubeEtcd:
+  enabled: false
+kubeControllerManager:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeProxy:
+  enabled: false
+
+# k3s exposes kubelet metrics on port 10250 (HTTPS), not the read-only port 10255 (HTTP).
+# https: true tells the ServiceMonitor to scrape port 10250 instead of 10255.
+kubelet:
+  serviceMonitor:
+    https: true
+    insecureSkipVerify: true
+
+prometheus:
+  prometheusSpec:
+    retention: 15d
+    # Scrape all PodMonitors and ServiceMonitors (remove restrictive selectors)
+    # This allows monitoring of Kafka, Valkey, and other services
+    podMonitorSelector: {}
+    serviceMonitorSelector: {}
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 20Gi
+
+grafana:
+  enabled: true
+  adminPassword: "changeme" # ← change this
+  ingress:
+    enabled: true
+    ingressClassName: traefik
+    hosts:
+      - grafana.dev.local
+    path: /
+    pathType: Prefix
+  service:
+    type: NodePort
+    nodePort: 30080
+  # Pre-wire Loki as a datasource so you don't configure it manually
+  additionalDataSources:
+    - name: Loki
+      type: loki
+      url: http://loki.monitoring.svc.cluster.local:3100
+      access: proxy
+      isDefault: false
+  # Enable sidecar for automatic dashboard discovery from ConfigMaps
+  sidecar:
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+      labelValue: "1"
+      folder: /tmp/dashboards
+      searchNamespace: ALL
+
+alertmanager:
+  alertmanagerSpec:
+    storage:
+      volumeClaimTemplate:
+        spec:
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 2Gi

@@ -1,0 +1,101 @@
+---
+# Secret for .env.opaque
+apiVersion: v1
+kind: Secret
+metadata:
+  name: opaque-secret
+  namespace: default
+type: Opaque
+stringData:
+  CLIENT_PUBLIC_KEY: "LS0tLS1CRUdJTiBQVUJMSUMgS0VZLS0tLS0KTUZrd0V3WUhLb1pJemowQ0FRWUlLb1pJemowREFRY0RRZ0FFMjMzWWFVbmlYcEV1TlkxNVp5Sm1xaSt0NFZ0SApFMEJzRnlNNmZNV3ZMNHh0ZGlEN3U4dTJlVFpsV3NLL1hyWVBDb2JFUlViUGFLVUo5VytsMTlDV1VBPT0KLS0tLS1FTkQgUFVCTElDIEtFWS0tLS0tCg=="
+  SERVER_PUBLIC_KEY: "LS0tLS1CRUdJTiBQVUJMSUMgS0VZLS0tLS0KTUZrd0V3WUhLb1pJemowQ0FRWUlLb1pJemowREFRY0RRZ0FFcHpReHVYTGVpUHl6aXRNS1FiVVNWT0QzQXhiKwpsOUxxVmpzNUduWWFuQTFrNEFtTVVUb1dwSVR3NVhYTTQ4TlBoYmdNaG9NMEZVcDRPUTI2ei92Q1FRPT0KLS0tLS1FTkQgUFVCTElDIEtFWS0tLS0tCg=="
+  SERVER_PRIVATE_KEY: "LS0tLS1CRUdJTiBQUklWQVRFIEtFWS0tLS0tCk1JR0hBZ0VBTUJNR0J5cUdTTTQ5QWdFR0NDcUdTTTQ5QXdFSEJHMHdhd0lCQVFRZy9OSUlkUkdPK3FVMmJqeFQKdG5adUM0NWdBZzZ3WjBVR2U5bkNlTTd3YzB5aFJBTkNBQVNuTkRHNWN0NkkvTE9LMHdwQnRSSlU0UGNERnY2WAowdXBXT3prYWRocWNEV1RnQ1l4Uk9oYWtoUERsZGN6ancwK0Z1QXlHZ3pRVlNuZzVEYnJQKzhKQgotLS0tLUVORCBQUklWQVRFIEtFWS0tLS0t"
+  OPAQUE_CONTEXT: "RPS-Ops"
+  OPAQUE_SERVER_IDENTIFIER: dev.cloud-wallet.digg.se
+  OPAQUE_SERVER_SETUP: "A/GotsC4kquhGguWJVycgQ5Wcw0XKuSl+vzVS7GS6sL80gh1EY76pTZuPFO2dm4LjmACDrBnRQZ72cJ4zvBzTAP7vw7Zs6oRM8CYBNqTNi2a/00XTsO6j1S+59ivMdNlrw=="
+
+---
+# Secret for .env.softhsm
+apiVersion: v1
+kind: Secret
+metadata:
+  name: softhsm-secret
+  namespace: default
+type: Opaque
+stringData:
+  PKCS11_SLOT_TOKEN_LABEL: "wallet-keys"
+  PKCS11_USER_PIN: "123456"
+  PKCS11_SO_PIN: "1938456231"
+  PKCS11_LIB: "/usr/lib/softhsm/libsofthsm2.so"
+  PKCS11_WRAP_KEY_ALIAS: "hsm-wrap-key"
+
+---
+# PersistentVolumeClaim for softhsm-tokens volume
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: softhsm-tokens-pvc
+  namespace: default
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+  # storageClassName: local-path  # Uncomment to use K3s default local-path provisioner explicitly
+
+---
+# Deployment for hsm-worker
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hsm-worker
+  namespace: default
+  labels:
+    app: hsm-worker
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: hsm-worker
+  template:
+    metadata:
+      labels:
+        app: hsm-worker
+    spec:
+      containers:
+        - name: hsm-worker
+          image: hsm-worker:dev
+          imagePullPolicy: IfNotPresent # Use Never if image is loaded locally via: k3s ctr images import
+
+          env:
+            - name: RUST_LOG
+              value: "info"
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: "access-kafka-cluster-kafka-bootstrap:9092"
+
+          # .env.softhsm values
+          envFrom:
+            - secretRef:
+                name: softhsm-secret
+            - secretRef:
+                name: opaque-secret
+
+          volumeMounts:
+            - name: softhsm-tokens
+              mountPath: /myuser/softhsm/tokens
+
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+
+      volumes:
+        - name: softhsm-tokens
+          persistentVolumeClaim:
+            claimName: softhsm-tokens-pvc
+
+      restartPolicy: Always

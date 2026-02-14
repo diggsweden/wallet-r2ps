@@ -1,0 +1,69 @@
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: r2ps-wallet-state
+  labels:
+    strimzi.io/cluster: access-kafka-cluster
+spec:
+  partitions: 10
+  replicas: 3
+  config:
+    min.insync.replicas: 2
+    retention.ms: -1
+    cleanup.policy: compact
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: r2ps-requests
+  labels:
+    strimzi.io/cluster: access-kafka-cluster
+spec:
+  partitions: 50
+  replicas: 2
+  config:
+    min.insync.replicas: 1
+    retention.ms: 600000
+    cleanup.policy: delete
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: r2ps-responses
+  labels:
+    strimzi.io/cluster: access-kafka-cluster
+spec:
+  partitions: 50
+  replicas: 2
+  config:
+    min.insync.replicas: 1
+    retention.ms: 600000
+    cleanup.policy: delete
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: state-init-requests
+  labels:
+    strimzi.io/cluster: access-kafka-cluster
+spec:
+  partitions: 10
+  replicas: 2
+  config:
+    min.insync.replicas: 1
+    retention.ms: 600000
+    cleanup.policy: delete
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: state-init-responses
+  labels:
+    strimzi.io/cluster: access-kafka-cluster
+spec:
+  partitions: 10
+  replicas: 2
+  config:
+    min.insync.replicas: 1
+    retention.ms: 600000
+    cleanup.policy: delete
