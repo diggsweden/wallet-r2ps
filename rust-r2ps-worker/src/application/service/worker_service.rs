@@ -7,7 +7,8 @@ use crate::define_byte_vector;
 use crate::domain::value_objects::r2ps::{OuterRequest, SessionId};
 use crate::domain::{
     DefaultCipherSuite, DeviceHsmState, EncryptOption, HsmWorkerRequest, InnerJwe, InnerRequest,
-    OuterResponse, ServiceRequestError, WorkerRequestError, WorkerResponseJws, WorkerServerConfig,
+    OperationId, OuterResponse, ServiceRequestError, WorkerRequestError, WorkerResponseJws,
+    WorkerServerConfig,
 };
 use argon2::password_hash::rand_core::OsRng;
 use base64::Engine;
@@ -29,7 +30,7 @@ use tracing::{debug, error, info};
 
 define_byte_vector!(DecryptedData);
 
-use super::operations::{OperationContext, OperationDispatcher};
+use super::operations::{OperationContext, OperationDispatcher, OperationResult};
 
 pub struct WorkerService {
     worker_response_spi_port: Arc<dyn WorkerResponseSpiPort + Send + Sync>,
@@ -39,6 +40,18 @@ pub struct WorkerService {
     operation_dispatcher: OperationDispatcher,
     jws_signer: EcdsaJwsSigner,
     state_jws_verifier: EcdsaJwsVerifier,
+}
+
+struct ResponseContext {
+    request_id: String,
+    request_type: OperationId,
+    session_key: Option<SessionKey>,
+    device_kid: String,
+}
+
+struct WorkerInput {
+    operation_context: OperationContext,
+    response_context: ResponseContext,
 }
 
 pub struct WorkerPorts {
@@ -157,14 +170,13 @@ impl WorkerService {
         debug!("Outer response before JWS encoding: {:#?}", outer_response);
 
         // Create JWT payload from outer_response
-        let payload_json = serde_json::to_string(&outer_response).map_err(|e| {
+        let value = serde_json::to_value(&outer_response).map_err(|e| {
             error!("Failed to serialize outer response: {:?}", e);
             ServiceRequestError::SerializeResponseError
         })?;
 
-        let map: serde_json::Map<String, serde_json::Value> = serde_json::from_str(&payload_json)
-            .map_err(|e| {
-            error!("Failed to create payload map: {:?}", e);
+        let map = value.as_object().cloned().ok_or_else(|| {
+            error!("Failed to convert outer response to JSON object");
             ServiceRequestError::SerializeResponseError
         })?;
 
@@ -211,6 +223,161 @@ impl WorkerService {
 
         debug!("decoded outer request JWS: {:#?}", outer_request);
         Ok(outer_request)
+    }
+
+    fn input(
+        &self,
+        hsm_worker_request: HsmWorkerRequest,
+    ) -> Result<WorkerInput, WorkerRequestError> {
+        let HsmWorkerRequest {
+            request_id,
+            state_jws,
+            outer_request_jws,
+        } = hsm_worker_request;
+
+        let state = DeviceHsmState::decode_from_jws(&state_jws, &self.state_jws_verifier)
+            .map_err(|_| WorkerRequestError::InvalidState)?;
+
+        // Extract client public key kid from JWS header
+        let device_kid = peek_jws_kid(&outer_request_jws)
+            .map_err(|_| WorkerRequestError::OuterJwsError)?
+            .ok_or(WorkerRequestError::OuterJwsError)?;
+
+        debug!("Peeked outer request JWS kid: {}", device_kid);
+
+        // Fetch the corresponding JWK from state using kid
+        let client_public_key = state
+            .find_device_key(&device_kid)
+            .ok_or(WorkerRequestError::OuterJwsError)?
+            .public_key
+            .clone();
+
+        let outer_request = self
+            .decode_outer_request_jws(outer_request_jws, &client_public_key)
+            .map_err(|_| WorkerRequestError::OuterJwsError)?;
+
+        info!(
+            "Received request id {}, client_id {}",
+            request_id, state.client_id
+        );
+
+        // TODO: Use JOSE 'aud' (audience) claim in the validation done inside decode_service_request_jws() instead
+        if outer_request.context != "hsm" {
+            return Err(WorkerRequestError::UnsupportedContext);
+        }
+
+        let session_id = outer_request.session_id.clone();
+        let session_key = session_id
+            .as_ref()
+            .and_then(|id| self.session_key_spi_port.get(id));
+
+        let inner_request = self
+            .decrypt_inner_request(outer_request.inner_jwe.as_ref(), session_key.as_ref())
+            .map_err(WorkerRequestError::ServiceError)?;
+
+        debug!("Inner request: {:#?}", inner_request);
+
+        let request_type = inner_request.request_type;
+
+        info!(
+            "Processing request id {} of type {:?}",
+            request_id, request_type
+        );
+
+        let operation_context = OperationContext {
+            request_id: request_id.clone(),
+            state,
+            outer_request: outer_request.clone(),
+            inner_request,
+            session_id: session_id.clone(),
+            device_kid: device_kid.clone(),
+        };
+
+        let response_context = ResponseContext {
+            request_id,
+            request_type,
+            session_key,
+            device_kid,
+        };
+
+        Ok(WorkerInput {
+            operation_context,
+            response_context,
+        })
+    }
+
+    fn output(
+        &self,
+        operation_result: OperationResult,
+        context: ResponseContext,
+    ) -> Result<WorkerResponseJws, WorkerRequestError> {
+        debug!("Operation result: {:#?}", operation_result.data);
+
+        let encoded_result = operation_result
+            .data
+            .serialize()
+            .map_err(|_| WorkerRequestError::EncryptionError)?;
+
+        let ttl = match operation_result.session_id.as_ref() {
+            Some(id) => self.session_key_spi_port.get_remaining_ttl(id),
+            None => None,
+        };
+
+        // Create InnerResponse with the serialized data
+        let serialized_data = String::from_utf8(encoded_result.clone())
+            .map_err(|_| WorkerRequestError::EncryptionError)?;
+        let inner_response = operation_result.to_inner_response(serialized_data, ttl);
+
+        debug!("Inner response: {:#?}", inner_response);
+
+        // Serialize InnerResponse to JSON
+        let inner_response_json =
+            serde_json::to_vec(&inner_response).map_err(|_| WorkerRequestError::EncryptionError)?;
+
+        let enc_option = context.request_type.encrypt_option();
+        debug!(
+            "Inner response to {:?} will be encrypted with {:?} encryption",
+            context.request_type, enc_option
+        );
+
+        // Encrypt the serialized InnerResponse into InnerJwe
+        let inner_jwe = match enc_option {
+            EncryptOption::Session => {
+                let session_key = context
+                    .session_key
+                    .clone()
+                    .ok_or(WorkerRequestError::UnknownSession)?;
+                InnerJwe::encrypt(&inner_response_json, &session_key)
+                    .map_err(|_| WorkerRequestError::EncryptionError)?
+            }
+            EncryptOption::Device => {
+                let client_public_key = operation_result
+                    .state
+                    .find_device_key(&context.device_kid)
+                    .ok_or(WorkerRequestError::EncryptionError)?
+                    .public_key
+                    .clone();
+                encrypt_with_ec_jwk(&inner_response_json, &client_public_key)
+                    .map_err(|_| WorkerRequestError::EncryptionError)?
+            }
+        };
+
+        let jws = self
+            .create_outer_response(inner_jwe, operation_result.session_id.as_ref())
+            .map_err(|_| WorkerRequestError::OuterJwsError)?;
+
+        let new_state_jws = operation_result
+            .state
+            .encode_to_jws(&self.jws_signer)
+            .map_err(|_| WorkerRequestError::OuterJwsError)?;
+
+        Ok(WorkerResponseJws {
+            request_id: context.request_id,
+            device_id: operation_result.state.client_id.clone(),
+            http_status: 200,
+            state_jws: new_state_jws,
+            service_response_jws: jws,
+        })
     }
 }
 
@@ -264,137 +431,20 @@ impl WorkerRequestUseCase for WorkerService {
         hsm_worker_request: HsmWorkerRequest,
     ) -> Result<WorkerRequestId, WorkerRequestError> {
         let start = Instant::now();
+        let WorkerInput {
+            operation_context,
+            response_context,
+        } = self.input(hsm_worker_request)?;
 
-        let state = DeviceHsmState::decode_from_jws(
-            &hsm_worker_request.state_jws,
-            &self.state_jws_verifier,
-        )
-        .map_err(|_| WorkerRequestError::InvalidState)?;
-
-        // Extract client public key kid from JWS header
-        let device_kid = peek_jws_kid(&hsm_worker_request.outer_request_jws)
-            .map_err(|_| WorkerRequestError::OuterJwsError)?
-            .ok_or(WorkerRequestError::OuterJwsError)?;
-
-        debug!("Peeked outer request JWS kid: {}", device_kid);
-
-        // Fetch the corresponding JWK from state using kid
-        let client_public_key = state
-            .find_device_key(&device_kid)
-            .ok_or(WorkerRequestError::OuterJwsError)?
-            .public_key
-            .clone();
-
-        let outer_request = self
-            .decode_outer_request_jws(hsm_worker_request.outer_request_jws, &client_public_key)
-            .map_err(|_| WorkerRequestError::OuterJwsError)?;
-
-        info!(
-            "Received request id {}, client_id {}",
-            hsm_worker_request.request_id, state.client_id
-        );
-
-        // TODO: Use JOSE 'aud' (audience) claim in the validation done inside decode_service_request_jws() instead
-        if outer_request.context != "hsm" {
-            return Err(WorkerRequestError::UnsupportedContext);
-        }
-
-        let session_id = outer_request.session_id.as_ref();
-        let session_key = session_id.and_then(|id| self.session_key_spi_port.get(id));
-
-        let inner_request = self
-            .decrypt_inner_request(outer_request.inner_jwe.as_ref(), session_key.as_ref())
-            .map_err(WorkerRequestError::ServiceError)?;
-
-        debug!("Inner request: {:#?}", inner_request);
-
-        let request_type = inner_request.request_type;
-
-        info!(
-            "Processing request id {} of type {:?}",
-            hsm_worker_request.request_id, request_type
-        );
-
-        let context = OperationContext {
-            request_id: hsm_worker_request.request_id.clone(),
-            state,
-            outer_request: outer_request.clone(),
-            inner_request,
-            session_id: session_id.cloned(),
-            device_kid: device_kid.clone(),
-        };
+        let request_id = response_context.request_id.clone();
+        let request_type = response_context.request_type;
 
         let operation_result = self
             .operation_dispatcher
-            .dispatch(context)
+            .dispatch(operation_context)
             .map_err(WorkerRequestError::ServiceError)?;
 
-        debug!("Operation result: {:#?}", operation_result.data);
-
-        let encoded_result = operation_result
-            .data
-            .serialize()
-            .map_err(|_| WorkerRequestError::EncryptionError)?;
-
-        let ttl = match session_id.as_ref() {
-            Some(id) => self.session_key_spi_port.get_remaining_ttl(id),
-            None => None,
-        };
-
-        // Create InnerResponse with the serialized data
-        let serialized_data = String::from_utf8(encoded_result.clone())
-            .map_err(|_| WorkerRequestError::EncryptionError)?;
-        let inner_response = operation_result.to_inner_response(serialized_data, ttl);
-
-        debug!("Inner response: {:#?}", inner_response);
-
-        // Serialize InnerResponse to JSON
-        let inner_response_json =
-            serde_json::to_vec(&inner_response).map_err(|_| WorkerRequestError::EncryptionError)?;
-
-        let enc_option = request_type.encrypt_option();
-        debug!(
-            "Inner response to {:?} will be encrypted with {:?} encryption",
-            request_type, enc_option
-        );
-
-        // Encrypt the serialized InnerResponse into InnerJwe
-        let inner_jwe = match enc_option {
-            EncryptOption::Session => {
-                let session_key = session_key
-                    .clone()
-                    .ok_or(WorkerRequestError::UnknownSession)?;
-                InnerJwe::encrypt(&inner_response_json, &session_key)
-                    .map_err(|_| WorkerRequestError::EncryptionError)?
-            }
-            EncryptOption::Device => {
-                let client_public_key = operation_result
-                    .state
-                    .find_device_key(&device_kid)
-                    .ok_or(WorkerRequestError::EncryptionError)?
-                    .public_key
-                    .clone();
-                encrypt_with_ec_jwk(&inner_response_json, &client_public_key)
-                    .map_err(|_| WorkerRequestError::EncryptionError)?
-            }
-        };
-
-        let jws = self
-            .create_outer_response(inner_jwe, operation_result.session_id.as_ref())
-            .map_err(|_| WorkerRequestError::OuterJwsError)?;
-
-        let new_state_jws = operation_result
-            .state
-            .encode_to_jws(&self.jws_signer)
-            .map_err(|_| WorkerRequestError::OuterJwsError)?;
-
-        let worker_response_jws = WorkerResponseJws {
-            request_id: hsm_worker_request.request_id.clone(),
-            device_id: operation_result.state.client_id.clone(),
-            http_status: 200,
-            state_jws: new_state_jws,
-            service_response_jws: jws,
-        };
+        let worker_response_jws = self.output(operation_result, response_context)?;
 
         let processing_elapsed = start.elapsed();
         debug!(
@@ -403,17 +453,15 @@ impl WorkerRequestUseCase for WorkerService {
             processing_elapsed.as_millis()
         );
 
-        let request_id = self
-            .worker_response_spi_port
-            .send(worker_response_jws.clone())
-            .map(|_| worker_response_jws.request_id.clone())
+        self.worker_response_spi_port
+            .send(worker_response_jws)
             .map_err(|_| WorkerRequestError::ConnectionError)?;
 
         let finished_elapsed = start.elapsed();
 
         info!(
             "Responding to request id {} ({:?}, took {}/{} ms)",
-            hsm_worker_request.request_id,
+            request_id,
             request_type,
             processing_elapsed.as_millis(),
             finished_elapsed.as_millis()
