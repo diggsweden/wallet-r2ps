@@ -1,11 +1,6 @@
 use crate::application::service::StateInitService;
-use crate::application::{WorkerPorts, WorkerService, load_pem_from_base64};
+use crate::infrastructure::bootstrap::build_services;
 use crate::infrastructure::config::app_config::AppConfig;
-use crate::application::OpaqueConfig;
-use crate::infrastructure::hsm_wrapper::HsmWrapper;
-use crate::infrastructure::pending_auth_memory_cache::PendingAuthMemoryCache;
-use crate::infrastructure::r2ps_response_kafka_message_sender::WorkerResponseKafkaSender;
-use crate::infrastructure::session_key_memory_cache::SessionKeyMemoryCache;
 use crate::infrastructure::{
     KafkaConfig, StateInitRequestKafkaReceiver, WorkerRequestKafkaReceiver,
     state_init_response_kafka_sender::StateInitResponseKafkaMessageSender,
@@ -42,36 +37,18 @@ pub fn run() {
     })
     .expect("Error setting Ctrl-C handler");
 
-    let server_public_key: pem::Pem = load_pem_from_base64(&app_config.server_public_key)
-        .expect("Failed to load SERVER_PUBLIC_KEY");
-    let server_private_key = load_pem_from_base64(&app_config.server_private_key)
-        .expect("Failed to load SERVER_PRIVATE_KEY");
-
-    let ports = WorkerPorts {
-        worker_response: Arc::new(WorkerResponseKafkaSender::new(&kafka_config)),
-        session_key: Arc::new(SessionKeyMemoryCache::new()),
-        hsm: Arc::new(HsmWrapper::new(app_config.clone().into()).unwrap()),
-        pending_auth: Arc::new(PendingAuthMemoryCache::new()),
-    };
-
-    let opaque_config: OpaqueConfig = app_config.into();
-
-    let worker_service = Arc::new(WorkerService::new(
-        server_public_key,
-        server_private_key,
-        ports,
-        opaque_config,
-    ));
+    let (worker_service, state_init_signer) = build_services(&app_config, kafka_config.clone());
+    let worker_service = Arc::new(worker_service);
 
     // init state initialization service
     let state_init_response_sender =
         Arc::new(StateInitResponseKafkaMessageSender::new(&kafka_config));
     let state_init_service = Arc::new(StateInitService::new(
         state_init_response_sender,
-        worker_service.server_config().clone(),
+        state_init_signer,
     ));
 
-    // start r2ps request worker
+    // start request worker
     let worker_kafka_receiver = WorkerRequestKafkaReceiver::new(worker_service, running.clone());
     let join_handle = worker_kafka_receiver.start_worker_thread(kafka_config.clone());
 

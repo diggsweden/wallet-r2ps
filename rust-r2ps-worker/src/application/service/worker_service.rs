@@ -1,26 +1,25 @@
-use crate::application::hsm_spi_port::HsmSpiPort;
-use crate::application::pending_auth_spi_port::PendingAuthSpiPort;
 use crate::application::session_key_spi_port::{SessionKey, SessionKeySpiPort};
 
-use crate::application::{WorkerRequestId, WorkerRequestUseCase, WorkerResponseSpiPort};
+use crate::application::{
+    WorkerPorts, WorkerRequestId, WorkerRequestUseCase, WorkerResponseSpiPort,
+};
 use crate::define_byte_vector;
 use crate::domain::value_objects::r2ps::OuterRequest;
 use crate::domain::{
     DeviceHsmState, EncryptOption, HsmWorkerRequest, InnerJwe, OperationId, OuterResponse,
-    ServiceRequestError, WorkerRequestError, WorkerResponseJws, WorkerServerConfig,
+    WorkerRequestError, WorkerResponseJws, WorkerServerConfig,
 };
-use josekit::jws::ES256;
 use josekit::jws::alg::ecdsa::{EcdsaJwsSigner, EcdsaJwsVerifier};
 use pem::Pem;
 use std::sync::Arc;
 use std::time::Instant;
-use tracing::{debug, error, info};
+use tracing::{debug, info};
 
 define_byte_vector!(DecryptedData);
 
-use crate::application::OpaqueConfig;
 use super::opaque_factory::init_server_setup;
 use super::operations::{OperationContext, OperationDispatcher, OperationResult};
+use crate::application::OpaqueConfig;
 
 pub struct WorkerService {
     worker_response_spi_port: Arc<dyn WorkerResponseSpiPort + Send + Sync>,
@@ -28,21 +27,16 @@ pub struct WorkerService {
     session_key_spi_port: Arc<dyn SessionKeySpiPort + Send + Sync>,
     // Operation dispatcher
     operation_dispatcher: OperationDispatcher,
-    jws_signer: EcdsaJwsSigner,
+    jws_signer: Arc<EcdsaJwsSigner>,
     state_jws_verifier: EcdsaJwsVerifier,
-}
-
-pub struct WorkerPorts {
-    pub worker_response: Arc<dyn WorkerResponseSpiPort + Send + Sync>,
-    pub session_key: Arc<dyn SessionKeySpiPort + Send + Sync>,
-    pub hsm: Arc<dyn HsmSpiPort + Send + Sync>,
-    pub pending_auth: Arc<dyn PendingAuthSpiPort + Send + Sync>,
 }
 
 impl WorkerService {
     pub fn new(
         server_public_key: Pem,
         server_private_key: Pem,
+        jws_signer: Arc<EcdsaJwsSigner>,
+        state_jws_verifier: EcdsaJwsVerifier,
         ports: WorkerPorts,
         opaque_config: OpaqueConfig,
     ) -> Self {
@@ -57,10 +51,6 @@ impl WorkerService {
             opaque_config.opaque_context,
             opaque_config.opaque_server_identifier,
         );
-
-        let (jws_signer, state_jws_verifier) =
-            jws_crypto_provider(&server_public_key, &server_private_key)
-                .expect("Failed to initialize JWS crypto from server keys");
 
         Self {
             worker_response_spi_port: ports.worker_response,
@@ -294,7 +284,7 @@ impl WorkerService {
 
         let new_state_jws = operation_result
             .state
-            .encode_to_jws(&self.jws_signer)
+            .encode_to_jws(&*self.jws_signer)
             .map_err(|_| WorkerRequestError::OuterJwsError)?;
 
         Ok(WorkerResponseJws {
@@ -305,30 +295,4 @@ impl WorkerService {
             service_response_jws: jws,
         })
     }
-}
-
-fn jws_crypto_provider(
-    server_public_key: &Pem,
-    server_private_key: &Pem,
-) -> Result<(EcdsaJwsSigner, EcdsaJwsVerifier), ServiceRequestError> {
-    // Create signer from PEM
-    let pem_string = pem::encode(server_private_key);
-    let jws_signer = ES256.signer_from_pem(pem_string.as_bytes()).map_err(|e| {
-        error!(
-            "Failed to create signer from server private key PEM: {:?}",
-            e
-        );
-        ServiceRequestError::JwsError
-    })?;
-
-    // Create verifier from PEM
-    let public_key_pem = pem::encode(server_public_key);
-    let state_jws_verifier = ES256.verifier_from_pem(&public_key_pem).map_err(|e| {
-        error!(
-            "Failed to create verifier from server public key PEM: {:?}",
-            e
-        );
-        ServiceRequestError::JwsError
-    })?;
-    Ok((jws_signer, state_jws_verifier))
 }

@@ -1,9 +1,6 @@
 use crate::application::StateInitResponseSpiPort;
-use crate::domain::{
-    DeviceHsmState, DeviceKeyEntry, StateInitRequest, StateInitResponse, WorkerServerConfig,
-};
+use crate::domain::{DeviceHsmState, DeviceKeyEntry, StateInitRequest, StateInitResponse};
 use josekit::jwk::Jwk;
-use josekit::jws::ES256;
 use josekit::jws::alg::ecdsa::EcdsaJwsSigner;
 use std::sync::Arc;
 use tracing::{debug, error, info};
@@ -11,7 +8,7 @@ use uuid::Uuid;
 
 pub struct StateInitService {
     response_spi_port: Arc<dyn StateInitResponseSpiPort + Send + Sync>,
-    jws_signer: EcdsaJwsSigner,
+    jws_signer: Arc<EcdsaJwsSigner>,
 }
 
 #[derive(Debug)]
@@ -25,13 +22,8 @@ pub enum StateInitError {
 impl StateInitService {
     pub fn new(
         response_spi_port: Arc<dyn StateInitResponseSpiPort + Send + Sync>,
-        server_config: WorkerServerConfig,
+        jws_signer: Arc<EcdsaJwsSigner>,
     ) -> Self {
-        let pem_string = pem::encode(&server_config.server_private_key);
-        let jws_signer = ES256
-            .signer_from_pem(&pem_string)
-            .expect("Failed to create JWS signer from server private key");
-
         Self {
             response_spi_port,
             jws_signer,
@@ -67,7 +59,7 @@ impl StateInitService {
         debug!("Created initial DeviceHsmState: {:#?}", state);
 
         // 5. Encode state as JWS
-        let state_jws = state.encode_to_jws(&self.jws_signer).map_err(|e| {
+        let state_jws = state.encode_to_jws(&*self.jws_signer).map_err(|e| {
             error!("Failed to encode state JWS: {:?}", e);
             StateInitError::SigningError
         })?;
