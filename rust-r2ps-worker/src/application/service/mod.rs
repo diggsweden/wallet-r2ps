@@ -1,3 +1,4 @@
+pub mod opaque_factory;
 pub mod operations;
 pub mod state_init_service;
 pub mod worker_service;

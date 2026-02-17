@@ -69,6 +69,47 @@ impl InnerJwe {
         })
     }
 
+    /// High-level decryption that peeks the kid and validates the encryption option against the request type
+    pub fn decrypt_request(
+        &self,
+        server_private_key: &Pem,
+        session_key: Option<&SessionKey>,
+    ) -> Result<InnerRequest, ServiceRequestError> {
+        let peeked_kid = self.peek_kid().map_err(|_| ServiceRequestError::JweError)?;
+        debug!("Peeked inner JWE kid: {:?}", peeked_kid);
+
+        // parse peeked_kid into EncryptOption
+        let enc_option = match peeked_kid.as_deref() {
+            Some("session") => EncryptOption::Session,
+            Some("device") => EncryptOption::Device,
+            _ => {
+                error!("Unknown encryption option in JWE kid: {:?}", peeked_kid);
+                return Err(ServiceRequestError::JweError);
+            }
+        };
+
+        debug!("Decrypting inner request using {:?} encryption", enc_option);
+
+        let inner_request = self
+            .decrypt(enc_option, server_private_key, session_key)
+            .map_err(|e| {
+                error!("Could not decrypt inner request: {:?}", e);
+                ServiceRequestError::JweError
+            })?;
+
+        if inner_request.request_type.encrypt_option() != enc_option {
+            error!(
+                "Encryption option for type {:?} mismatch: expected {:?}, decrypted JWE using {:?}",
+                inner_request.request_type,
+                inner_request.request_type.encrypt_option(),
+                enc_option
+            );
+            return Err(ServiceRequestError::JweError);
+        }
+
+        Ok(inner_request)
+    }
+
     fn decrypt_with_ec_pem(&self, private_key: &Pem) -> Result<Vec<u8>, ServiceRequestError> {
         let decrypter = ECDH_ES.decrypter_from_pem(pem::encode(private_key))?;
         let (payload, header) = jwe::deserialize_compact(&self.0, &decrypter)?;
@@ -115,5 +156,29 @@ impl InnerJwe {
         })?;
 
         Ok(Self(jwe))
+    }
+
+    pub fn encrypt_with_jwk(
+        payload: &[u8],
+        client_public_key: &josekit::jwk::Jwk,
+    ) -> Result<Self, ServiceRequestError> {
+        let mut header = JweHeader::new();
+        header.set_algorithm("ECDH-ES");
+        header.set_content_encryption("A256GCM");
+        header.set_key_id("device");
+
+        match ECDH_ES.encrypter_from_jwk(client_public_key) {
+            Ok(encrypter) => match jwe::serialize_compact(payload, &header, &encrypter) {
+                Ok(payload_bytes) => Ok(Self(payload_bytes)),
+                Err(e) => {
+                    error!("JWE encryption failed: {:?}", e);
+                    Err(ServiceRequestError::JweError)
+                }
+            },
+            Err(e) => {
+                error!("Failed to create encrypter from JWK: {:?}", e);
+                Err(ServiceRequestError::JweError)
+            }
+        }
     }
 }

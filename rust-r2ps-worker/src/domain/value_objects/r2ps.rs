@@ -3,13 +3,18 @@ use crate::application::service::operations::hsm::SignatureVector;
 use crate::define_byte_vector;
 use crate::domain::EcPublicJwk;
 use base64::DecodeError;
+use base64::Engine;
+use base64::prelude::BASE64_URL_SAFE_NO_PAD;
 use josekit::JoseError;
+use josekit::jws::ES256;
+use josekit::jws::alg::ecdsa::EcdsaJwsSigner;
+use josekit::jwt::{self, JwtPayload};
 use pem::Pem;
 use serde::{Deserialize, Serialize};
 use std::string::FromUtf8Error;
 use std::time::Duration;
 use strum_macros::Display;
-use tracing::warn;
+use tracing::{debug, error, warn};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
@@ -82,6 +87,56 @@ pub struct OuterRequest {
     pub inner_jwe: Option<super::InnerJwe>,
 }
 
+impl OuterRequest {
+    pub fn from_jws(
+        jws: &str,
+        client_public_key: &josekit::jwk::Jwk,
+    ) -> Result<Self, ServiceRequestError> {
+        // Create verifier from JWK using ES256 algorithm
+        let verifier = ES256.verifier_from_jwk(client_public_key).map_err(|e| {
+            error!("Failed to create verifier from JWK: {:?}", e);
+            ServiceRequestError::InvalidClientPublicKey
+        })?;
+
+        // Decode and verify JWT
+        let (payload, _header) = jwt::decode_with_verifier(jws, &verifier).map_err(|e| {
+            error!("JWS verification failed: {:?}", e);
+            ServiceRequestError::JwsError
+        })?;
+
+        // Deserialize payload to OuterRequest
+        let outer_request: OuterRequest =
+            serde_json::from_str(&payload.to_string()).map_err(|e| {
+                error!("Failed to deserialize outer request: {:?}", e);
+                ServiceRequestError::JwsError
+            })?;
+
+        debug!("decoded outer request JWS: {:#?}", outer_request);
+        Ok(outer_request)
+    }
+
+    pub fn peek_kid(jws: &str) -> Result<Option<String>, ServiceRequestError> {
+        // Split JWS compact serialization (header.payload.signature)
+        let parts: Vec<&str> = jws.split('.').collect();
+        if parts.len() < 3 {
+            return Err(ServiceRequestError::JwsError);
+        }
+
+        // Decode the header (first part)
+        let header_bytes = BASE64_URL_SAFE_NO_PAD
+            .decode(parts[0])
+            .map_err(|_| ServiceRequestError::JwsError)?;
+
+        let header: serde_json::Value =
+            serde_json::from_slice(&header_bytes).map_err(|_| ServiceRequestError::JwsError)?;
+
+        Ok(header
+            .get("kid")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()))
+    }
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 pub struct InnerRequest {
     pub version: u32,
@@ -104,6 +159,38 @@ pub struct OuterResponse {
     pub version: u32,
     pub session_id: Option<SessionId>,
     pub inner_jwe: Option<super::InnerJwe>,
+}
+
+impl OuterResponse {
+    pub fn to_jws(&self, signer: &EcdsaJwsSigner) -> Result<String, ServiceRequestError> {
+        debug!("Outer response before JWS encoding: {:#?}", self);
+
+        // Create JWT payload from outer_response
+        let value = serde_json::to_value(self).map_err(|e| {
+            error!("Failed to serialize outer response: {:?}", e);
+            ServiceRequestError::SerializeResponseError
+        })?;
+
+        let map = value.as_object().cloned().ok_or_else(|| {
+            error!("Failed to convert outer response to JSON object");
+            ServiceRequestError::SerializeResponseError
+        })?;
+
+        let payload = JwtPayload::from_map(map).map_err(|e| {
+            error!("Failed to create JwtPayload: {:?}", e);
+            ServiceRequestError::JwsError
+        })?;
+
+        // Create JWS header
+        let header = josekit::jws::JwsHeader::new();
+
+        let token = jwt::encode_with_signer(&payload, &header, signer).map_err(|e| {
+            error!("Failed to encode outer response JWS: {:?}", e);
+            ServiceRequestError::JwsError
+        })?;
+
+        Ok(token)
+    }
 }
 
 #[derive(Clone, Debug)]

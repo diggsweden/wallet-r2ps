@@ -1,6 +1,7 @@
 use crate::application::service::StateInitService;
-use crate::application::{OpaqueConfig, WorkerPorts, WorkerService, load_pem_from_base64};
+use crate::application::{WorkerPorts, WorkerService, load_pem_from_base64};
 use crate::infrastructure::config::app_config::AppConfig;
+use crate::application::OpaqueConfig;
 use crate::infrastructure::hsm_wrapper::HsmWrapper;
 use crate::infrastructure::pending_auth_memory_cache::PendingAuthMemoryCache;
 use crate::infrastructure::r2ps_response_kafka_message_sender::WorkerResponseKafkaSender;
