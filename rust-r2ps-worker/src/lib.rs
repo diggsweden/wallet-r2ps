@@ -13,15 +13,6 @@ pub mod application;
 pub mod domain;
 pub mod infrastructure;
 
-// ============ Generate OpenAPI ============
-// #[derive(OpenApi)]
-// #[openapi(
-//     components(schemas(
-//         PermitListDto
-//     ))
-// )]
-// pub struct ApiDoc;
-
 pub fn run() {
     // config from env
     let app_config = AppConfig::new().unwrap();

@@ -4,7 +4,7 @@ use p256::SecretKey;
 use p256::pkcs8::{EncodePrivateKey, EncodePublicKey};
 use rust_r2ps_worker::domain::EncryptOption::Device;
 use rust_r2ps_worker::domain::ServiceRequestError;
-use rust_r2ps_worker::domain::value_objects::InnerJwe;
+use rust_r2ps_worker::domain::value_objects::TypedJwe;
 use rust_r2ps_worker::domain::value_objects::r2ps::{InnerRequest, OperationId, OuterRequest};
 
 #[test]
@@ -42,7 +42,7 @@ fn test_decrypt_service_data_jwe_happy_path() -> Result<(), Box<dyn std::error::
         version: 1,
         session_id: None,
         context: "test-context".to_string(),
-        inner_jwe: Some(InnerJwe::new(jwe_compact)),
+        inner_jwe: Some(TypedJwe::new(jwe_compact)),
     };
 
     // Decrypt the serviceRequest with the private key
@@ -91,7 +91,7 @@ fn test_decrypt_service_data_jwe_rejects_invalid_formats() -> Result<(), Box<dyn
             version: 1,
             session_id: None,
             context: "test-context".to_string(),
-            inner_jwe: Some(InnerJwe::new(invalid_jwe.to_string())),
+            inner_jwe: Some(TypedJwe::new(invalid_jwe.to_string())),
         };
 
         let result =
@@ -119,7 +119,7 @@ fn test_decrypt_service_data_jwe_rejects_invalid_base64() -> Result<(), Box<dyn 
         version: 1,
         session_id: None,
         context: "test-context".to_string(),
-        inner_jwe: Some(InnerJwe::new("not-base64!!".to_string())),
+        inner_jwe: Some(TypedJwe::new("not-base64!!".to_string())),
     };
 
     let result =

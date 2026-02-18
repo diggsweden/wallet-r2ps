@@ -17,10 +17,10 @@ pub struct AppConfig {
     pub pkcs11_user_pin: Option<String>,
     pub pkcs11_wrap_key_alias: String,
     /// bootstrap servers, comma separated list
-    /// https://github.com/confluentinc/librdkafka/blob/master/CONFIGURATION.md
+    /// <https://github.com/confluentinc/librdkafka/blob/master/CONFIGURATION.md>
     pub kafka_bootstrap_servers: String,
 
-    /// https://github.com/confluentinc/librdkafka/blob/master/CONFIGURATION.md
+    /// <https://github.com/confluentinc/librdkafka/blob/master/CONFIGURATION.md>
     pub kafka_broker_address_family: String,
     pub kafka_group_id: String,
     pub kafka_group_instance_id: String,

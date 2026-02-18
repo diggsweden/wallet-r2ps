@@ -8,7 +8,7 @@ pub fn debug_log_payload(payload: &[u8], context: &str) {
     }
 }
 
-/// Macro to create distinct New Type wrappers around Vec<u8> with common behavior
+/// Macro to create distinct New Type wrappers around `Vec<u8>` with common behavior
 #[macro_export]
 macro_rules! define_byte_vector {
     ($name:ident) => {

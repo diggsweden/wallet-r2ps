@@ -11,10 +11,14 @@ path = "src/lib.rs"
 [[bin]]
 name = "generate_openapi"
 path = "src/generate_openapi.rs"
+required-features = ["openapi"]
 
 [[bin]]
 name = "rust-r2ps-worker"
 path = "src/main.rs"
+
+[features]
+openapi = ["dep:utoipa"]
 
 [dependencies]
 rdkafka = { version = "0.38.0", features = ["cmake-build"] }
@@ -54,7 +58,7 @@ chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1.18.1", features = ["v4", "serde"] }
 digest = "0.10.7"
 hex = "0.4.3"
-utoipa = { version = "5", features = ["uuid"] }
+utoipa = { version = "5", features = ["uuid"], optional = true }
 ring = "0.17.14"
 spki = "0"
 iso8601-duration = { version = "0.2.0", features = ["serde"] }

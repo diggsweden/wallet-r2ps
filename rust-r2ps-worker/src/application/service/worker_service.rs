@@ -6,7 +6,7 @@ use crate::application::{
 use crate::define_byte_vector;
 use crate::domain::value_objects::r2ps::OuterRequest;
 use crate::domain::{
-    DeviceHsmState, EncryptOption, HsmWorkerRequest, InnerJwe, OperationId, OuterResponse,
+    DeviceHsmState, EncryptOption, HsmWorkerRequest, OperationId, OuterResponse, TypedJwe,
     WorkerRequestError, WorkerResponseJws, WorkerServerConfig,
 };
 use josekit::jws::alg::ecdsa::{EcdsaJwsSigner, EcdsaJwsVerifier};
@@ -140,11 +140,11 @@ impl WorkerService {
             outer_request_jws,
         } = hsm_worker_request;
 
-        let state = DeviceHsmState::decode_from_jws(&state_jws, &self.state_jws_verifier)
+        let state = DeviceHsmState::decode_from_jws(state_jws.as_str(), &self.state_jws_verifier)
             .map_err(|_| WorkerRequestError::InvalidState)?;
 
         // Extract client public key kid from JWS header
-        let device_kid = OuterRequest::peek_kid(&outer_request_jws)
+        let device_kid = OuterRequest::peek_kid(outer_request_jws.as_str())
             .map_err(|_| WorkerRequestError::OuterJwsError)?
             .ok_or(WorkerRequestError::OuterJwsError)?;
 
@@ -157,7 +157,7 @@ impl WorkerService {
             .public_key
             .clone();
 
-        let outer_request = OuterRequest::from_jws(&outer_request_jws, &client_public_key)
+        let outer_request = OuterRequest::from_jws(outer_request_jws.as_str(), &client_public_key)
             .map_err(|_| WorkerRequestError::OuterJwsError)?;
 
         info!("Received request id {}", request_id);
@@ -237,24 +237,20 @@ impl WorkerService {
 
         debug!("Inner response: {:#?}", inner_response);
 
-        // Serialize InnerResponse to JSON
-        let inner_response_json =
-            serde_json::to_vec(&inner_response).map_err(|_| WorkerRequestError::EncryptionError)?;
-
         let enc_option = context.request_type.encrypt_option();
         debug!(
             "Inner response to {:?} will be encrypted with {:?} encryption",
             context.request_type, enc_option
         );
 
-        // Encrypt the serialized InnerResponse into InnerJwe
+        // Encrypt the InnerResponse into TypedJwe
         let inner_jwe = match enc_option {
             EncryptOption::Session => {
                 let session_key = context
                     .session_key
                     .clone()
                     .ok_or(WorkerRequestError::UnknownSession)?;
-                InnerJwe::encrypt(&inner_response_json, &session_key)
+                TypedJwe::encrypt(&inner_response, &session_key)
                     .map_err(|_| WorkerRequestError::EncryptionError)?
             }
             EncryptOption::Device => {
@@ -264,7 +260,7 @@ impl WorkerService {
                     .ok_or(WorkerRequestError::EncryptionError)?
                     .public_key
                     .clone();
-                InnerJwe::encrypt_with_jwk(&inner_response_json, &client_public_key)
+                TypedJwe::encrypt_with_jwk(&inner_response, &client_public_key)
                     .map_err(|_| WorkerRequestError::EncryptionError)?
             }
         };

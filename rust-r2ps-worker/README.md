@@ -64,3 +64,11 @@ Then build and run the rust-r2ps-worker with:
 ```bash
 cargo run
 ```
+
+## Docs and openapi
+
+Generate [./docs/domain-model.html](./docs/book/book/introduction.html) and [./openapi.json](./openapi.json)
+
+```
+make docs
+```

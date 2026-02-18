@@ -1,3 +1,4 @@
+use crate::domain::value_objects::typed_jws::TypedJws;
 use crate::domain::{DefaultCipherSuite, HsmKey, ServiceRequestError};
 use generic_array::GenericArray;
 use josekit::jwk::Jwk;
@@ -6,8 +7,14 @@ use josekit::jwt::{self, JwtPayload};
 use opaque_ke::ServerRegistrationLen;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, error};
+#[cfg(feature = "openapi")]
+use utoipa::ToSchema;
 
+/// An OPAQUE server registration file, containing the server's share of the password credential.
+/// Serialized as a base64-encoded string of the OPAQUE password file bytes.
 #[derive(Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+#[cfg_attr(feature = "openapi", schema(value_type = String, format = "byte"))]
 pub struct PasswordFile(pub GenericArray<u8, ServerRegistrationLen<DefaultCipherSuite>>);
 
 // A distinct type with a suitable debug implementation
@@ -23,17 +30,30 @@ impl PasswordFile {
     }
 }
 
+/// A timestamped OPAQUE password file entry, binding a password credential
+/// to a specific server identifier.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
 pub struct PasswordFileEntry {
+    /// The OPAQUE server registration data
     pub password_file: PasswordFile,
+    /// The server identifier this credential is bound to
     pub server_identifier: String,
-    pub created_at: String, // ISO8601 timestamp
+    /// ISO 8601 timestamp of when this entry was created
+    pub created_at: String,
 }
 
+/// A registered device key with its associated OPAQUE password files.
+/// Each device can have multiple password file entries (e.g. after PIN changes).
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
 pub struct DeviceKeyEntry {
+    /// The device's EC public key as a JWK (JSON Web Key) object
+    #[cfg_attr(feature = "openapi", schema(value_type = std::collections::HashMap<String, String>))]
     pub public_key: Jwk,
+    /// Ordered list of OPAQUE password file entries (latest is last)
     pub password_files: Vec<PasswordFileEntry>,
+    /// One-time authorization code for initial device registration
     pub dev_authorization_code: Option<String>,
 }
 
@@ -43,10 +63,16 @@ impl DeviceKeyEntry {
     }
 }
 
+/// The complete persisted state for a device, encoded as a JWS and passed
+/// between the REST API and the HSM worker on every request.
+/// Contains all registered device keys and HSM-managed key pairs.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
 pub struct DeviceHsmState {
+    /// State schema version for forward compatibility
     pub version: u32,
     pub device_keys: Vec<DeviceKeyEntry>,
+    /// HSM-managed key pairs belonging to this device
     pub hsm_keys: Vec<HsmKey>,
 }
 
@@ -182,7 +208,10 @@ impl DeviceHsmState {
     // === JWS encoding/decoding ===
 
     /// Encode state as JWS using provided signer
-    pub fn encode_to_jws(&self, signer: &dyn JwsSigner) -> Result<String, ServiceRequestError> {
+    pub fn encode_to_jws(
+        &self,
+        signer: &dyn JwsSigner,
+    ) -> Result<TypedJws<DeviceHsmState>, ServiceRequestError> {
         // Create JWT payload from state
         let payload_json = serde_json::to_string(&self).map_err(|e| {
             error!("Failed to serialize state: {:?}", e);
@@ -208,7 +237,7 @@ impl DeviceHsmState {
             ServiceRequestError::JwsError
         })?;
 
-        Ok(token)
+        Ok(TypedJws::new(token))
     }
 
     /// Decode state from JWS using provided verifier

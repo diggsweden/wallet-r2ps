@@ -1,0 +1,17 @@
+# Rust build artifacts
+/target/
+
+# Generated OpenAPI specification
+openapi.json
+
+# Generated mdbook output
+docs/book/book/
+
+# Generated API reference markdown
+docs/book/src/api-reference/*.md
+
+# Old HTML documentation artifacts (can be removed after migration)
+docs/domain-model.html
+docs/domain-schema.json
+docs/schema_doc.css
+docs/schema_doc.min.js
