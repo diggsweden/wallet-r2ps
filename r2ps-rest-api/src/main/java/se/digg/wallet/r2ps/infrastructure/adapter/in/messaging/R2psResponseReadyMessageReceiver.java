@@ -9,12 +9,11 @@ import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Service;
 import se.digg.wallet.r2ps.application.port.in.R2psResponseUseCase;
+import se.digg.wallet.r2ps.application.port.out.PendingRequestContextSpiPort;
 import se.digg.wallet.r2ps.application.port.out.R2psDeviceStateSpiPort;
 import se.digg.wallet.r2ps.application.port.out.R2psResponseSinkSpiPort;
 import se.digg.wallet.r2ps.application.service.R2psResponseService;
 import se.digg.wallet.r2ps.domain.model.R2psResponse;
-import se.digg.wallet.r2ps.infrastructure.adapter.dto.R2psResponseDto;
-import se.digg.wallet.r2ps.infrastructure.config.Config;
 
 import static java.lang.Thread.sleep;
 
@@ -32,9 +31,11 @@ public class R2psResponseReadyMessageReceiver {
 
   public R2psResponseReadyMessageReceiver(ObjectMapper objectMapper,
       R2psResponseSinkSpiPort r2psResponseSinkSpiPort,
-      R2psDeviceStateSpiPort r2psDeviceStateSpiPort) {
+      R2psDeviceStateSpiPort r2psDeviceStateSpiPort,
+      PendingRequestContextSpiPort pendingRequestContextSpiPort) {
     this.objectMapper = objectMapper;
-    r2psResponseUseCase = new R2psResponseService(r2psResponseSinkSpiPort, r2psDeviceStateSpiPort);
+    r2psResponseUseCase = new R2psResponseService(r2psResponseSinkSpiPort, r2psDeviceStateSpiPort,
+        pendingRequestContextSpiPort);
   }
 
 

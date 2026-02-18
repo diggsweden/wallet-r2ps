@@ -32,7 +32,7 @@ impl StateInitResponseSpiPort for StateInitResponseKafkaMessageSender {
             StateInitResponseError::SerializationError
         })?;
 
-        let key = &response.client_id;
+        let key = &response.request_id;
         let request_id = &response.request_id;
 
         let record = BaseRecord::to("state-init-responses")

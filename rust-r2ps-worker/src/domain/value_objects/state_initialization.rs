@@ -6,7 +6,6 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "camelCase")]
 pub struct StateInitRequest {
     pub request_id: String,
-    pub client_id: String,
     pub public_key: EcPublicJwk,
 }
 
@@ -15,7 +14,6 @@ pub struct StateInitRequest {
 #[serde(rename_all = "camelCase")]
 pub struct StateInitResponse {
     pub request_id: String,
-    pub client_id: String,
     pub state_jws: String,
     pub dev_authorization_code: String,
 }

@@ -160,10 +160,7 @@ impl WorkerService {
         let outer_request = OuterRequest::from_jws(&outer_request_jws, &client_public_key)
             .map_err(|_| WorkerRequestError::OuterJwsError)?;
 
-        info!(
-            "Received request id {}, client_id {}",
-            request_id, state.client_id
-        );
+        info!("Received request id {}", request_id);
 
         // TODO: Use JOSE 'aud' (audience) claim in the validation done inside decode_service_request_jws() instead
         if outer_request.context != "hsm" {
@@ -289,7 +286,6 @@ impl WorkerService {
 
         Ok(WorkerResponseJws {
             request_id: context.request_id,
-            device_id: operation_result.state.client_id.clone(),
             http_status: 200,
             state_jws: new_state_jws,
             service_response_jws: jws,

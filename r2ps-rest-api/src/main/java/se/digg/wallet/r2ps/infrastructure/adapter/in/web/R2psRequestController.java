@@ -2,17 +2,10 @@ package se.digg.wallet.r2ps.infrastructure.adapter.in.web;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.nimbusds.jose.*;
 import com.nimbusds.jose.JWSObject;
-import com.nimbusds.jose.jwk.Curve;
-import com.nimbusds.jose.jwk.ECKey;
-import com.nimbusds.jose.jwk.JWK;
 import java.net.URI;
-import java.security.KeyFactory;
-import java.security.interfaces.ECPublicKey;
-import java.security.spec.X509EncodedKeySpec;
 import java.text.ParseException;
-import java.util.Base64;
+import java.time.Duration;
 import java.util.Optional;
 import java.util.UUID;
 import org.slf4j.Logger;
@@ -28,19 +21,25 @@ import org.springframework.web.bind.annotation.RestController;
 import se.digg.wallet.r2ps.application.dto.AsyncResponseDto;
 import se.digg.wallet.r2ps.application.dto.AsyncResponseError;
 import se.digg.wallet.r2ps.application.dto.AsyncResponseStatus;
+import se.digg.wallet.r2ps.application.dto.PendingRequestContext;
 import se.digg.wallet.r2ps.application.port.in.R2psResponseUseCase;
+import se.digg.wallet.r2ps.application.port.out.PendingRequestContextSpiPort;
 import se.digg.wallet.r2ps.application.port.out.R2psDeviceStateSpiPort;
 import se.digg.wallet.r2ps.application.port.out.R2psResponseSinkSpiPort;
 import se.digg.wallet.r2ps.application.port.out.RequestMessageSpiPort;
 import se.digg.wallet.r2ps.application.port.out.StateInitRequestSpiPort;
 import se.digg.wallet.r2ps.application.service.R2psResponseService;
 import se.digg.wallet.r2ps.commons.dto.BffRequest;
+import se.digg.wallet.r2ps.commons.dto.NewStateRequestDto;
+import se.digg.wallet.r2ps.commons.dto.NewStateResponseDto;
 import se.digg.wallet.r2ps.commons.exception.ServiceRequestHandlingException;
+import se.digg.wallet.r2ps.domain.model.EcPublicJwk;
 import se.digg.wallet.r2ps.domain.model.HsmWorkerRequest;
 import se.digg.wallet.r2ps.domain.model.R2psResponse;
 import se.digg.wallet.r2ps.domain.model.StateInitRequest;
 import se.digg.wallet.r2ps.domain.model.StateInitResponse;
 import se.digg.wallet.r2ps.infrastructure.adapter.in.messaging.StateInitResponseCache;
+import se.digg.wallet.r2ps.infrastructure.adapter.out.R2psDeviceStateValKey;
 import se.digg.wallet.r2ps.infrastructure.config.Config;
 import se.digg.wallet.r2ps.infrastructure.service.UrlFormatterService;
 
@@ -53,6 +52,7 @@ public class R2psRequestController {
   private final RequestMessageSpiPort requestMessageSpiPort;
   private final StateInitRequestSpiPort stateInitRequestSpiPort;
   private final StateInitResponseCache stateInitResponseCache;
+  private final PendingRequestContextSpiPort pendingRequestContextSpiPort;
   private final R2psResponseUseCase r2psResponseUseCase;
   private final UrlFormatterService urlFormatter;
 
@@ -65,6 +65,7 @@ public class R2psRequestController {
       final RequestMessageSpiPort requestMessageSpiPort,
       final StateInitRequestSpiPort stateInitRequestSpiPort,
       final StateInitResponseCache stateInitResponseCache,
+      final PendingRequestContextSpiPort pendingRequestContextSpiPort,
       R2psResponseSinkSpiPort r2psResponseSinkSpiPort,
       UrlFormatterService urlFormatter,
       Config config) {
@@ -73,31 +74,12 @@ public class R2psRequestController {
     this.requestMessageSpiPort = requestMessageSpiPort;
     this.stateInitRequestSpiPort = stateInitRequestSpiPort;
     this.stateInitResponseCache = stateInitResponseCache;
+    this.pendingRequestContextSpiPort = pendingRequestContextSpiPort;
     this.urlFormatter = urlFormatter;
     syncResponseSupport = config.getKafka().rest().serveSync();
     maxResponseTimeoutInMillis = config.getKafka().rest().syncTimeoutMs();
-    r2psResponseUseCase = new R2psResponseService(r2psResponseSinkSpiPort, r2psDeviceStateSpiPort);
-  }
-
-  public static ECKey pemToECKey(String pem) throws Exception {
-    // Remove PEM headers and whitespace
-    String pemContent =
-        pem.replace("-----BEGIN PUBLIC KEY-----", "")
-            .replace("-----END PUBLIC KEY-----", "")
-            .replaceAll("\\s", "");
-
-    // Decode base64
-    byte[] encodedKey = Base64.getDecoder().decode(pemContent);
-
-    // Create X509 key spec
-    X509EncodedKeySpec keySpec = new X509EncodedKeySpec(encodedKey);
-
-    // Generate EC public key
-    KeyFactory keyFactory = KeyFactory.getInstance("EC");
-    ECPublicKey publicKey = (ECPublicKey) keyFactory.generatePublic(keySpec);
-
-    // Convert to Nimbus ECKey using the Builder
-    return new ECKey.Builder(Curve.P_256, publicKey).build();
+    r2psResponseUseCase = new R2psResponseService(r2psResponseSinkSpiPort, r2psDeviceStateSpiPort,
+        pendingRequestContextSpiPort);
   }
 
   @GetMapping("/task/{correlationId}")
@@ -154,20 +136,17 @@ public class R2psRequestController {
     }
 
     UUID deviceId = UUID.fromString(bffRequest.getClientId());
-
     String stateJws = r2psDeviceStateSpiPort.load(deviceId.toString());
-    String devAuthorizationCode = null;
 
     if (stateJws == null) {
-      // Initialize state via Rust HSM worker
-      StateInitResponse initResponse = sendStateInitRequest(bffRequest);
-      stateJws = initResponse.stateJws();
-      devAuthorizationCode = initResponse.devAuthorizationCode();
-      log.info("State initialized for client {}, dev_authorization_code: {}",
-          bffRequest.getClientId(), devAuthorizationCode);
+      log.info("No state found for deviceId: {}", deviceId);
+      return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
     }
 
     UUID requestId = UUID.randomUUID();
+    pendingRequestContextSpiPort.save(requestId.toString(),
+        new PendingRequestContext(deviceId.toString(), R2psDeviceStateValKey.DEFAULT_TTL_SECONDS));
+
     HsmWorkerRequest hsmWorkerRequest =
         new HsmWorkerRequest(requestId, stateJws, bffRequest.getOuterRequestJws());
     log.info("Sending service request:\n{}", objectMapper.writeValueAsString(hsmWorkerRequest));
@@ -204,6 +183,40 @@ public class R2psRequestController {
     return ResponseEntity.status(HttpStatus.REQUEST_TIMEOUT).build();
   }
 
+  /**
+   * DEV-ONLY: overwrite and NewStateRequestDto.clientId must be removed before production.
+   */
+  @PostMapping(
+      value = "/new_state",
+      produces = MediaType.APPLICATION_JSON_VALUE,
+      consumes = MediaType.APPLICATION_JSON_VALUE)
+  public ResponseEntity<NewStateResponseDto> newState(@RequestBody NewStateRequestDto request)
+      throws Exception {
+    long ttlSeconds = parseTtl(request.ttl());
+
+    // DEV-ONLY: allow caller to supply an existing clientId for overwrite; otherwise generate one
+    String clientId = (request.clientId() != null && request.overwrite())
+        ? request.clientId()
+        : UUID.randomUUID().toString();
+
+    if (!request.overwrite() && r2psDeviceStateSpiPort.load(clientId) != null) {
+      return ResponseEntity.ok(new NewStateResponseDto("OK", clientId, null));
+    }
+
+    StateInitResponse initResponse = sendStateInitRequest(clientId, request.publicKey(), ttlSeconds);
+    log.info("New state created for clientId: {}, dev_authorization_code: {}",
+        clientId, initResponse.devAuthorizationCode());
+
+    return ResponseEntity.ok(new NewStateResponseDto("OK", clientId, initResponse.devAuthorizationCode()));
+  }
+
+  private long parseTtl(String iso8601) {
+    if (iso8601 == null) {
+      return R2psDeviceStateValKey.DEFAULT_TTL_SECONDS;
+    }
+    return Duration.parse(iso8601).toSeconds();
+  }
+
   private void logServiceRequest(final String serviceRequest) {
     log.trace("Service request JWS: {}", serviceRequest);
     try {
@@ -237,45 +250,18 @@ public class R2psRequestController {
     return Optional.empty();
   }
 
-  private StateInitResponse sendStateInitRequest(BffRequest bffRequest) throws Exception {
+  private StateInitResponse sendStateInitRequest(String clientId, EcPublicJwk publicKey,
+      long ttlSeconds) throws Exception {
     String requestId = UUID.randomUUID().toString();
-    String clientId = bffRequest.getClientId();
 
-    // Use hardcoded device public key for now
-    // TODO: Extract from JWS header once device sends it
-    se.digg.wallet.r2ps.domain.model.EcPublicJwk publicKey = getHardcodedDevicePublicKey();
+    pendingRequestContextSpiPort.save(requestId, new PendingRequestContext(clientId, ttlSeconds));
 
-    // Create state init request
-    StateInitRequest request = new StateInitRequest(requestId, clientId, publicKey);
+    StateInitRequest request = new StateInitRequest(requestId, publicKey);
+    stateInitRequestSpiPort.send(request, UUID.fromString(clientId));
+    log.info("Sent state init request for clientId: {}, requestId: {}", clientId, requestId);
 
-    // Send via Kafka
-    UUID deviceId = UUID.fromString(clientId);
-    stateInitRequestSpiPort.send(request, deviceId);
-    log.info("Sent state init request for client: {}, requestId: {}", clientId, requestId);
-
-    // Wait for response
-    return stateInitResponseCache.waitForResponse(requestId, java.time.Duration.ofSeconds(5))
-        .orElseThrow(() -> new RuntimeException("State initialization timeout for client: " + clientId));
+    return stateInitResponseCache.waitForResponse(requestId, Duration.ofSeconds(5))
+        .orElseThrow(() -> new RuntimeException(
+            "State initialization timeout for client: " + clientId));
   }
-
-  private se.digg.wallet.r2ps.domain.model.EcPublicJwk getHardcodedDevicePublicKey() throws Exception {
-    String clientPublicKeyPem =
-        """
-        -----BEGIN PUBLIC KEY-----
-        MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE233YaUniXpEuNY15ZyJmqi+t4VtH
-        E0BsFyM6fMWvL4xtdiD7u8u2eTZlWsK/XrYPCobERUbPaKUJ9W+l19CWUA==
-        -----END PUBLIC KEY-----
-        """;
-
-    ECKey ecKey = pemToECKey(clientPublicKeyPem).toPublicJWK();
-
-    return new se.digg.wallet.r2ps.domain.model.EcPublicJwk(
-        "EC",
-        ecKey.getCurve().toString(),
-        ecKey.getX().toString(),
-        ecKey.getY().toString(),
-        ecKey.computeThumbprint("SHA-256").toString()
-    );
-  }
-
 }

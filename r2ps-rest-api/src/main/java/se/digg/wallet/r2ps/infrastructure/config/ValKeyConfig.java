@@ -8,6 +8,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.serializer.Jackson2JsonRedisSerializer;
+import se.digg.wallet.r2ps.application.dto.PendingRequestContext;
 import se.digg.wallet.r2ps.domain.aggregate.ServerWallet;
 import se.digg.wallet.r2ps.domain.event.Event;
 import se.digg.wallet.r2ps.domain.model.R2psResponse;
@@ -57,6 +58,15 @@ class ValKeyConfig {
     RedisTemplate<String, ServerWallet> template = new RedisTemplate<>();
     template.setConnectionFactory(connectionFactory);
     template.setValueSerializer(new Jackson2JsonRedisSerializer<>(mapper, ServerWallet.class));
+    return template;
+  }
+
+  @Bean
+  RedisTemplate<String, PendingRequestContext> redisTemplatePendingRequestContext(
+      RedisConnectionFactory connectionFactory) {
+    RedisTemplate<String, PendingRequestContext> template = new RedisTemplate<>();
+    template.setConnectionFactory(connectionFactory);
+    template.setValueSerializer(new Jackson2JsonRedisSerializer<>(mapper, PendingRequestContext.class));
     return template;
   }
 

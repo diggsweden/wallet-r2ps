@@ -54,7 +54,6 @@ pub struct HsmWorkerRequestDto {
 #[serde(rename_all = "camelCase")]
 pub struct R2psResponseDto {
     pub request_id: String,
-    pub device_id: String,
     pub http_status: u16,
     pub state_jws: String,
     pub service_response_jws: String,
@@ -73,7 +72,6 @@ pub struct HsmWorkerRequest {
 #[serde(rename_all = "camelCase")]
 pub struct WorkerResponseJws {
     pub request_id: String,
-    pub device_id: String,
     pub http_status: u16,
     pub state_jws: String,
     pub service_response_jws: String,
@@ -403,6 +401,7 @@ pub enum ServiceRequestError {
     HsmKeyNotFound,
     UnsupportedContext,
     InternalServerError,
+    InvalidAuthorizationCode,
     Unknown,
 }
 

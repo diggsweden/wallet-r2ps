@@ -2,12 +2,13 @@ package se.digg.wallet.r2ps.infrastructure.adapter.in.messaging;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import java.util.UUID;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Service;
+import se.digg.wallet.r2ps.application.dto.PendingRequestContext;
+import se.digg.wallet.r2ps.application.port.out.PendingRequestContextSpiPort;
 import se.digg.wallet.r2ps.application.port.out.R2psDeviceStateSpiPort;
 import se.digg.wallet.r2ps.domain.model.StateInitResponse;
 
@@ -18,14 +19,17 @@ public class StateInitResponseReceiver {
 
   private final ObjectMapper objectMapper;
   private final R2psDeviceStateSpiPort deviceStateSpiPort;
+  private final PendingRequestContextSpiPort pendingRequestContextSpiPort;
   private final StateInitResponseCache responseCache;
 
   public StateInitResponseReceiver(
       ObjectMapper objectMapper,
       R2psDeviceStateSpiPort deviceStateSpiPort,
+      PendingRequestContextSpiPort pendingRequestContextSpiPort,
       StateInitResponseCache responseCache) {
     this.objectMapper = objectMapper;
     this.deviceStateSpiPort = deviceStateSpiPort;
+    this.pendingRequestContextSpiPort = pendingRequestContextSpiPort;
     this.responseCache = responseCache;
   }
 
@@ -41,17 +45,16 @@ public class StateInitResponseReceiver {
       return;
     }
 
-    log.info(
-        "Received state init response - Key: {}, clientId: {}, requestId: {}",
-        key,
-        response.clientId(),
-        response.requestId());
+    log.info("Received state init response - Key: {}, requestId: {}", key, response.requestId());
 
-    // Save state to Redis
-    deviceStateSpiPort.save(response.clientId(), response.stateJws());
-    log.debug("Saved state to Redis for clientId: {}", response.clientId());
+    String requestId = response.requestId();
+    PendingRequestContext ctx = pendingRequestContextSpiPort.load(requestId)
+        .orElseThrow(() -> new IllegalStateException(
+            "No pending context for state-init requestId: " + requestId));
 
-    // Cache full response (for dev_authorization_code)
+    deviceStateSpiPort.save(ctx.stateKey(), response.stateJws(), ctx.ttlSeconds());
+    log.debug("Saved state to Redis for clientId: {}", ctx.stateKey());
+
     responseCache.put(response.requestId(), response);
   }
 }

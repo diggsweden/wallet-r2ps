@@ -251,6 +251,22 @@ impl ServiceOperation for RegisterStartOperation {
 
         debug!("deserialized pake request {:?}", pake_request.data);
 
+        // TODO: require authorization code (currently optional)
+        if let Some(provided_code) = &pake_request.authorization {
+            let device_key = context
+                .state
+                .find_device_key(&context.device_kid)
+                .ok_or(ServiceRequestError::UnknownKey)?;
+            if device_key.dev_authorization_code.as_deref() != Some(provided_code.as_str()) {
+                warn!("authorization code mismatch in register start");
+                return Err(ServiceRequestError::InvalidAuthorizationCode);
+            }
+        } else {
+            warn!("missing authorization code in register start");
+            // TODO: Enable this
+            // return Err(ServiceRequestError::InvalidAuthorizationCode);
+        }
+
         let decoded_request_data = pake_request.data.as_ref();
 
         let registration_request =
@@ -313,6 +329,22 @@ impl ServiceOperation for RegisterFinishOperation {
         let inner_request = context.inner_request;
         let pake_payload = PakeRequest::from_inner_request(inner_request)?;
 
+        // TODO: require authorization code (currently optional)
+        if let Some(provided_code) = &pake_payload.authorization {
+            let device_key = context
+                .state
+                .find_device_key(&context.device_kid)
+                .ok_or(ServiceRequestError::UnknownKey)?;
+            if device_key.dev_authorization_code.as_deref() != Some(provided_code.as_str()) {
+                warn!("authorization code mismatch in register finish");
+                return Err(ServiceRequestError::InvalidAuthorizationCode);
+            }
+        } else {
+            warn!("missing authorization code in register finish");
+            // TODO: Enable this
+            // return Err(ServiceRequestError::InvalidAuthorizationCode);
+        }
+
         let decoded_request_data = pake_payload.data.as_ref();
 
         let registration_request: RegistrationUpload<DefaultCipherSuite> =
@@ -335,6 +367,7 @@ impl ServiceOperation for RegisterFinishOperation {
             &context.device_kid,
             PasswordFile(password_file_serialized),
             self.server_identifier.clone(),
+            pake_payload.authorization.as_deref(),
         )?;
 
         let payload = PakeResponse {

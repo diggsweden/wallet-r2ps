@@ -46,7 +46,6 @@ impl DeviceKeyEntry {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeviceHsmState {
     pub version: u32,
-    pub client_id: String,
     pub device_keys: Vec<DeviceKeyEntry>,
     pub hsm_keys: Vec<HsmKey>,
 }
@@ -145,12 +144,15 @@ impl DeviceHsmState {
             .map(|pf_entry| &pf_entry.password_file)
     }
 
-    /// Adds a password file entry to the client key for the given kid
+    /// Adds a password file entry to the client key for the given kid.
+    /// If `authorization_code` is provided, it must match `dev_authorization_code` on the entry,
+    /// after which that code is cleared (consumed).
     pub fn add_password_file(
         &mut self,
         kid: &str,
         password_file: PasswordFile,
         server_identifier: String,
+        authorization_code: Option<&str>,
     ) -> Result<(), ServiceRequestError> {
         use chrono::Utc;
 
@@ -165,6 +167,13 @@ impl DeviceHsmState {
         let entry = self
             .find_device_key_mut(kid)
             .ok_or(ServiceRequestError::UnknownClient)?;
+
+        if let Some(code) = authorization_code {
+            if entry.dev_authorization_code.as_deref() != Some(code) {
+                return Err(ServiceRequestError::InvalidAuthorizationCode);
+            }
+            entry.dev_authorization_code = None;
+        }
 
         entry.password_files.push(password_file_entry);
         Ok(())

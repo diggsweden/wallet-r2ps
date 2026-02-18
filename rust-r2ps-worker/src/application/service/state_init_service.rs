@@ -32,13 +32,18 @@ impl StateInitService {
 
     /// Initialize a new DeviceHsmState for a client
     pub fn initialize(&self, request: StateInitRequest) -> Result<String, StateInitError> {
-        info!("Initializing state for client_id: {}", request.client_id);
+        debug!("Initializing state, request id: {}", request.request_id);
 
         // 1. Convert EcPublicJwk to josekit Jwk
         let device_key = ec_public_jwk_to_jwk(&request.public_key)?;
 
         // 2. Validate public_key JWK (EC P-256)
         validate_ec_public_jwk(&request.public_key)?;
+
+        info!(
+            "Initializing state for public key with kid: {}",
+            request.public_key.kid
+        );
 
         // 3. Generate dev_authorization_code
         let dev_auth_code = format!("dac_{}", Uuid::new_v4());
@@ -47,7 +52,6 @@ impl StateInitService {
         // 4. Create DeviceHsmState
         let state = DeviceHsmState {
             version: 1,
-            client_id: request.client_id.clone(),
             device_keys: vec![DeviceKeyEntry {
                 public_key: device_key,
                 password_files: vec![],
@@ -67,7 +71,6 @@ impl StateInitService {
         // 6. Create response
         let response = StateInitResponse {
             request_id: request.request_id.clone(),
-            client_id: request.client_id,
             state_jws,
             dev_authorization_code: dev_auth_code,
         };

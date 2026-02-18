@@ -27,7 +27,7 @@ impl WorkerResponseSpiPort for WorkerResponseKafkaSender {
     fn send(&self, worker_response: WorkerResponseJws) -> Result<(), WorkerResponseError> {
         let response = match serde_json::to_string(&worker_response) {
             Ok(output_json) => {
-                let key = &worker_response.device_id; // device_id is client_id
+                let key = &worker_response.request_id;
                 let request_id = &worker_response.request_id;
                 let record = BaseRecord::to("r2ps-responses")
                     .key(key)
