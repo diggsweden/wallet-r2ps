@@ -31,9 +31,13 @@ public class R2psResponseService implements R2psResponseUseCase {
 
   @Override
   public void r2psResponseReady(R2psResponse r2psResponse) {
-    PendingRequestContext ctx = pendingRequestContextSpiPort.load(r2psResponse.requestId().toString())
-        .orElseThrow(() -> new IllegalStateException(
-            "No pending context for requestId: " + r2psResponse.requestId()));
+    Optional<PendingRequestContext> ctxOpt =
+        pendingRequestContextSpiPort.load(r2psResponse.requestId().toString());
+    if (ctxOpt.isEmpty()) {
+      log.warn("No pending context for requestId: {}, ignoring", r2psResponse.requestId());
+      return;
+    }
+    PendingRequestContext ctx = ctxOpt.get();
     r2psDeviceStateSpiPort.save(ctx.stateKey(), r2psResponse.stateJws(), ctx.ttlSeconds());
     r2psResponseSinkSpiPort.storeResponse(r2psResponse);
   }

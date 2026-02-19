@@ -1,6 +1,7 @@
 package se.digg.wallet.r2ps.infrastructure.adapter.in.messaging;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import java.util.Optional;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.slf4j.Logger;
@@ -48,9 +49,12 @@ public class StateInitResponseReceiver {
     log.info("Received state init response - Key: {}, requestId: {}", key, response.requestId());
 
     String requestId = response.requestId();
-    PendingRequestContext ctx = pendingRequestContextSpiPort.load(requestId)
-        .orElseThrow(() -> new IllegalStateException(
-            "No pending context for state-init requestId: " + requestId));
+    Optional<PendingRequestContext> ctxOpt = pendingRequestContextSpiPort.load(requestId);
+    if (ctxOpt.isEmpty()) {
+      log.warn("No pending context for state-init requestId: {}, ignoring", requestId);
+      return;
+    }
+    PendingRequestContext ctx = ctxOpt.get();
 
     deviceStateSpiPort.save(ctx.stateKey(), response.stateJws(), ctx.ttlSeconds());
     log.debug("Saved state to Redis for clientId: {}", ctx.stateKey());
