@@ -7,12 +7,13 @@ use crate::define_byte_vector;
 use crate::domain::value_objects::r2ps::OuterRequest;
 use crate::domain::{
     DeviceHsmState, EncryptOption, HsmWorkerRequest, OperationId, OuterResponse, TypedJwe,
-    WorkerRequestError, WorkerResponseJws, WorkerServerConfig,
+    WorkerRequestError, WorkerResponse, WorkerServerConfig,
 };
 use josekit::jws::alg::ecdsa::{EcdsaJwsSigner, EcdsaJwsVerifier};
 use pem::Pem;
 use std::sync::Arc;
 use std::time::Instant;
+use josekit::jwk::Jwk;
 use tracing::{debug, info};
 
 define_byte_vector!(DecryptedData);
@@ -121,7 +122,7 @@ struct ResponseContext {
     request_id: String,
     request_type: OperationId,
     session_key: Option<SessionKey>,
-    device_kid: String,
+    device_public_key: Jwk,
 }
 
 struct WorkerInput {
@@ -143,7 +144,7 @@ impl WorkerService {
         let state = DeviceHsmState::decode_from_jws(state_jws.as_str(), &self.state_jws_verifier)
             .map_err(|_| WorkerRequestError::InvalidState)?;
 
-        // Extract client public key kid from JWS header
+        // Extract client public key kid from the JWS header
         let device_kid = OuterRequest::peek_kid(outer_request_jws.as_str())
             .map_err(|_| WorkerRequestError::OuterJwsError)?
             .ok_or(WorkerRequestError::OuterJwsError)?;
@@ -151,13 +152,13 @@ impl WorkerService {
         debug!("Peeked outer request JWS kid: {}", device_kid);
 
         // Fetch the corresponding JWK from state using kid
-        let client_public_key = state
+        let device_public_key = state
             .find_device_key(&device_kid)
             .ok_or(WorkerRequestError::OuterJwsError)?
             .public_key
             .clone();
 
-        let outer_request = OuterRequest::from_jws(outer_request_jws.as_str(), &client_public_key)
+        let outer_request = OuterRequest::from_jws(outer_request_jws.as_str(), &device_public_key)
             .map_err(|_| WorkerRequestError::OuterJwsError)?;
 
         info!("Received request id {}", request_id);
@@ -204,7 +205,7 @@ impl WorkerService {
             request_id,
             request_type,
             session_key,
-            device_kid,
+            device_public_key,
         };
 
         Ok(WorkerInput {
@@ -217,7 +218,7 @@ impl WorkerService {
         &self,
         operation_result: OperationResult,
         context: ResponseContext,
-    ) -> Result<WorkerResponseJws, WorkerRequestError> {
+    ) -> Result<WorkerResponse, WorkerRequestError> {
         debug!("Operation result: {:#?}", operation_result.data);
 
         let encoded_result = operation_result
@@ -254,13 +255,7 @@ impl WorkerService {
                     .map_err(|_| WorkerRequestError::EncryptionError)?
             }
             EncryptOption::Device => {
-                let client_public_key = operation_result
-                    .state
-                    .find_device_key(&context.device_kid)
-                    .ok_or(WorkerRequestError::EncryptionError)?
-                    .public_key
-                    .clone();
-                TypedJwe::encrypt_with_jwk(&inner_response, &client_public_key)
+                TypedJwe::encrypt_with_jwk(&inner_response, &context.device_public_key)
                     .map_err(|_| WorkerRequestError::EncryptionError)?
             }
         };
@@ -277,10 +272,11 @@ impl WorkerService {
 
         let new_state_jws = operation_result
             .state
-            .encode_to_jws(&*self.jws_signer)
+            .map(|state| state.encode_to_jws(&*self.jws_signer))
+            .transpose()
             .map_err(|_| WorkerRequestError::OuterJwsError)?;
 
-        Ok(WorkerResponseJws {
+        Ok(WorkerResponse {
             request_id: context.request_id,
             http_status: 200,
             state_jws: new_state_jws,

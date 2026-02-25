@@ -48,7 +48,7 @@ impl ServiceOperation for HsmSignOperation {
         debug!("HSM ECDSA ASN.1 signature: {:?}", signature);
 
         Ok(OperationResult {
-            state: context.state,
+            state: None,
             data: InnerResponseData::new(SignatureResponse { signature })?,
             session_id: context.session_id,
         })
@@ -83,7 +83,7 @@ impl ServiceOperation for HsmGenerateKeyOperation {
         new_state.add_hsm_key(hsm_key.clone())?;
 
         Ok(OperationResult {
-            state: new_state,
+            state: Some(new_state),
             data: InnerResponseData::new(CreateKeyServiceDataResponse {
                 public_key: hsm_key.public_key_jwk,
             })?,
@@ -107,7 +107,7 @@ impl ServiceOperation for HsmDeleteKeyOperation {
         new_state.remove_hsm_key(&payload.hsm_kid)?;
 
         Ok(OperationResult {
-            state: new_state,
+            state: Some(new_state),
             data: InnerResponseData::new(DeleteKeyServiceData {
                 hsm_kid: payload.hsm_kid,
             })?,
@@ -133,7 +133,7 @@ impl ServiceOperation for HsmListKeysOperation {
         };
 
         Ok(OperationResult {
-            state: context.state,
+            state: None,
             data: InnerResponseData::new(payload)?,
             session_id: context.session_id,
         })

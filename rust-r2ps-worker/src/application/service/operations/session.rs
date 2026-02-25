@@ -33,7 +33,7 @@ impl ServiceOperation for SessionEndOperation {
         };
 
         Ok(OperationResult {
-            state: context.state,
+            state: None,
             data: InnerResponseData::new(payload)?,
             session_id: context.session_id,
         })

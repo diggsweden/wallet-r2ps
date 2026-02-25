@@ -37,8 +37,10 @@ public class R2psResponseService implements R2psResponseUseCase {
       log.warn("No pending context for requestId: {}, ignoring", r2psResponse.requestId());
       return;
     }
-    PendingRequestContext ctx = ctxOpt.get();
-    r2psDeviceStateSpiPort.save(ctx.stateKey(), r2psResponse.stateJws(), ctx.ttlSeconds());
+    if (r2psResponse.stateJws().isPresent()) {
+      PendingRequestContext ctx = ctxOpt.get();
+      r2psDeviceStateSpiPort.save(ctx.stateKey(), r2psResponse.stateJws().get(), ctx.ttlSeconds());
+    }
     r2psResponseSinkSpiPort.storeResponse(r2psResponse);
   }
 

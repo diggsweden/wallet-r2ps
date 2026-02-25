@@ -1,5 +1,5 @@
 use crate::application::{WorkerResponseError, WorkerResponseSpiPort};
-use crate::domain::WorkerResponseJws;
+use crate::domain::WorkerResponse;
 use crate::infrastructure::KafkaConfig;
 use rdkafka::ClientConfig;
 use rdkafka::producer::{BaseProducer, BaseRecord};
@@ -24,7 +24,7 @@ impl WorkerResponseKafkaSender {
 }
 
 impl WorkerResponseSpiPort for WorkerResponseKafkaSender {
-    fn send(&self, worker_response: WorkerResponseJws) -> Result<(), WorkerResponseError> {
+    fn send(&self, worker_response: WorkerResponse) -> Result<(), WorkerResponseError> {
         let response = match serde_json::to_string(&worker_response) {
             Ok(output_json) => {
                 let key = &worker_response.request_id;

@@ -142,7 +142,7 @@ impl ServiceOperation for AuthenticateStartOperation {
         };
 
         Ok(OperationResult {
-            state: context.state,
+            state: None,
             data: InnerResponseData::new(payload)?,
             session_id: Some(session_id),
         })
@@ -227,7 +227,7 @@ impl ServiceOperation for AuthenticateFinishOperation {
         };
 
         Ok(OperationResult {
-            state: context.state,
+            state: None,
             data: InnerResponseData::new(payload)?,
             session_id: Some(session_id.clone()),
         })
@@ -306,7 +306,7 @@ impl ServiceOperation for RegisterStartOperation {
         };
 
         Ok(OperationResult {
-            state: context.state,
+            state: None,
             data: InnerResponseData::new(payload)?,
             session_id: context.session_id,
         })
@@ -376,7 +376,7 @@ impl ServiceOperation for RegisterFinishOperation {
         };
 
         Ok(OperationResult {
-            state: new_state,
+            state: Some(new_state),
             data: InnerResponseData::new(payload)?,
             session_id: context.session_id,
         })

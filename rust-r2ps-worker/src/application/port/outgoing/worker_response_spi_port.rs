@@ -1,7 +1,7 @@
-use crate::domain::WorkerResponseJws;
+use crate::domain::WorkerResponse;
 
 pub trait WorkerResponseSpiPort {
-    fn send(&self, worker_response: WorkerResponseJws) -> Result<(), WorkerResponseError>;
+    fn send(&self, worker_response: WorkerResponse) -> Result<(), WorkerResponseError>;
 }
 
 #[derive(Debug)]

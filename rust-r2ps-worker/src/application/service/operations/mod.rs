@@ -29,7 +29,7 @@ pub struct OperationContext {
 }
 
 pub struct OperationResult {
-    pub state: crate::domain::DeviceHsmState,
+    pub state: Option<crate::domain::DeviceHsmState>,
     pub data: crate::domain::InnerResponseData,
     pub session_id: Option<SessionId>,
 }

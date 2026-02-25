@@ -97,12 +97,12 @@ pub struct HsmWorkerRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(ToSchema))]
 #[serde(rename_all = "camelCase")]
-pub struct WorkerResponseJws {
+pub struct WorkerResponse {
     /// Correlation ID matching the original request
     pub request_id: String,
     pub http_status: u16,
     /// JWS-encoded updated device state (DeviceHsmState)
-    pub state_jws: TypedJws<DeviceHsmState>,
+    pub state_jws: Option<TypedJws<DeviceHsmState>>,
     /// JWS-encoded service response (OuterResponse)
     pub service_response_jws: TypedJws<OuterResponse>,
 }
