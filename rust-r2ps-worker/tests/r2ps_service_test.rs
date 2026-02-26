@@ -2,8 +2,8 @@ use josekit::jwe::ECDH_ES;
 use josekit::jwe::JweHeader;
 use p256::SecretKey;
 use p256::pkcs8::{EncodePrivateKey, EncodePublicKey};
-use rust_r2ps_worker::domain::EncryptOption::Device;
 use rust_r2ps_worker::domain::ServiceRequestError;
+use rust_r2ps_worker::domain::typed_jwe::DecryptionKey;
 use rust_r2ps_worker::domain::value_objects::TypedJwe;
 use rust_r2ps_worker::domain::value_objects::r2ps::{InnerRequest, OperationId, OuterRequest};
 
@@ -51,7 +51,7 @@ fn test_decrypt_service_data_jwe_happy_path() -> Result<(), Box<dyn std::error::
             .inner_jwe
             .as_ref()
             .unwrap()
-            .decrypt(Device, &server_private_key, None);
+            .decrypt(DecryptionKey::Device(&server_private_key));
 
     assert!(
         result_new.is_ok(),
@@ -99,7 +99,7 @@ fn test_decrypt_service_data_jwe_rejects_invalid_formats() -> Result<(), Box<dyn
                 .inner_jwe
                 .as_ref()
                 .unwrap()
-                .decrypt(Device, &server_private_key, None);
+                .decrypt(DecryptionKey::Device(&server_private_key));
 
         assert!(matches!(result, Err(ServiceRequestError::JweError)));
     }
@@ -127,7 +127,7 @@ fn test_decrypt_service_data_jwe_rejects_invalid_base64() -> Result<(), Box<dyn 
             .inner_jwe
             .as_ref()
             .unwrap()
-            .decrypt(Device, &server_private_key, None);
+            .decrypt(DecryptionKey::Device(&server_private_key));
     assert!(
         result.is_err(),
         "decrypt_service_data_jwe should reject invalid base64: {:?}",

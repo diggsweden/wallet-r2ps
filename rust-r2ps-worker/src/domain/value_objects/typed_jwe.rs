@@ -17,6 +17,23 @@ use crate::domain::value_objects::r2ps::InnerRequest;
 use crate::domain::value_objects::r2ps::InnerResponse;
 use crate::domain::{EncryptOption, ServiceRequestError};
 
+/// The key material needed to decrypt a JWE, determined by the encryption mode.
+pub enum DecryptionKey<'a> {
+    /// Session-based: decryption with the session key.
+    Session(&'a SessionKey),
+    /// Device-based: decryption with the server's private key
+    Device(&'a Pem),
+}
+
+impl<'a> DecryptionKey<'a> {
+    pub fn encrypt_option(&self) -> EncryptOption {
+        match self {
+            DecryptionKey::Session(_) => EncryptOption::Session,
+            DecryptionKey::Device(_) => EncryptOption::Device,
+        }
+    }
+}
+
 /// A JWE (JSON Web Encryption) compact serialization string containing an encrypted payload of
 /// type `T`. Encrypted with either the session key (AES-256-GCM via "dir" algorithm) or the
 /// device's public key (ECDH-ES), depending on the operation type.
@@ -102,16 +119,11 @@ impl<T> TypedJwe<T> {
 impl<T: DeserializeOwned> TypedJwe<T> {
     pub fn decrypt(
         &self,
-        enc_option: EncryptOption,
-        server_private_key: &Pem,
-        session_key: Option<&SessionKey>,
+        key: DecryptionKey<'_>,
     ) -> Result<T, ServiceRequestError> {
-        let payload = match enc_option {
-            EncryptOption::Session => {
-                let key = session_key.ok_or(ServiceRequestError::UnknownSession)?;
-                self.decrypt_with_aes(key)?
-            }
-            EncryptOption::Device => self.decrypt_with_ec_pem(server_private_key)?,
+        let payload = match key{
+            DecryptionKey::Session(session_key) => self.decrypt_with_aes(session_key)?,
+            DecryptionKey::Device(private_key) => self.decrypt_with_ec_pem(private_key)?,
         };
 
         serde_json::from_slice(&payload).map_err(|e| {
@@ -267,19 +279,21 @@ impl TypedJwe<InnerRequest> {
         let peeked_kid = self.peek_kid().map_err(|_| ServiceRequestError::JweError)?;
         debug!("Peeked inner JWE kid: {:?}", peeked_kid);
 
-        let enc_option = match peeked_kid.as_deref() {
-            Some("session") => EncryptOption::Session,
-            Some("device") => EncryptOption::Device,
+        let decryption_key = match peeked_kid.as_deref() {
+            Some("session") => DecryptionKey::Session(session_key.ok_or(ServiceRequestError::UnknownSession)?),
+            Some("device") => DecryptionKey::Device(server_private_key),
             _ => {
                 error!("Unknown encryption option in JWE kid: {:?}", peeked_kid);
                 return Err(ServiceRequestError::JweError);
             }
         };
 
+        let enc_option = decryption_key.encrypt_option();
+
         debug!("Decrypting inner request using {:?} encryption", enc_option);
 
         let inner_request = self
-            .decrypt(enc_option, server_private_key, session_key)
+            .decrypt(decryption_key)
             .map_err(|e| {
                 error!("Could not decrypt inner request: {:?}", e);
                 ServiceRequestError::JweError
