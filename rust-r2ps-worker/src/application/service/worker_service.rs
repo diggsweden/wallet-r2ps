@@ -18,9 +18,7 @@ use tracing::{debug, info};
 
 define_byte_vector!(DecryptedData);
 
-use super::opaque_factory::init_server_setup;
 use super::operations::{OperationContext, OperationDispatcher, OperationResult};
-use crate::application::OpaqueConfig;
 
 pub struct WorkerService {
     worker_response_spi_port: Arc<dyn WorkerResponseSpiPort + Send + Sync>,
@@ -39,18 +37,11 @@ impl WorkerService {
         jws_signer: Arc<EcdsaJwsSigner>,
         state_jws_verifier: EcdsaJwsVerifier,
         ports: WorkerPorts,
-        opaque_config: OpaqueConfig,
     ) -> Self {
-        let server_setup =
-            init_server_setup(&opaque_config.opaque_server_setup, &server_private_key);
-
         let operation_dispatcher = OperationDispatcher::from_dependencies(
-            server_setup,
+            ports.pake,
             ports.session_key.clone(),
             ports.hsm,
-            ports.pending_auth,
-            opaque_config.opaque_context,
-            opaque_config.opaque_server_identifier,
         );
 
         Self {

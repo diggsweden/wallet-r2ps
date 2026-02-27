@@ -1,9 +1,9 @@
 use crate::application::{OpaqueConfig, WorkerPorts, WorkerService, load_pem_from_base64};
 use crate::domain::ServiceRequestError;
 use crate::infrastructure::KafkaConfig;
+use crate::infrastructure::adapters::outgoing::opaque_pake_adapter::OpaquePakeAdapter;
 use crate::infrastructure::config::app_config::AppConfig;
 use crate::infrastructure::hsm_wrapper::HsmWrapper;
-use crate::infrastructure::pending_auth_memory_cache::PendingAuthMemoryCache;
 use crate::infrastructure::r2ps_response_kafka_message_sender::WorkerResponseKafkaSender;
 use crate::infrastructure::session_key_memory_cache::SessionKeyMemoryCache;
 use josekit::jws::ES256;
@@ -21,14 +21,21 @@ pub fn build_services(
     let server_private_key = load_pem_from_base64(&app_config.server_private_key)
         .expect("Failed to load SERVER_PRIVATE_KEY");
 
+    let opaque_config: OpaqueConfig = app_config.clone().into();
+
+    let pake = Arc::new(OpaquePakeAdapter::from_config(
+        &opaque_config.opaque_server_setup,
+        &server_private_key,
+        opaque_config.opaque_context,
+        opaque_config.opaque_server_identifier.clone(),
+    ));
+
     let ports = WorkerPorts {
         worker_response: Arc::new(WorkerResponseKafkaSender::new(&kafka_config)),
         session_key: Arc::new(SessionKeyMemoryCache::new()),
         hsm: Arc::new(HsmWrapper::new(app_config.clone().into()).unwrap()),
-        pending_auth: Arc::new(PendingAuthMemoryCache::new()),
+        pake,
     };
-
-    let opaque_config: OpaqueConfig = app_config.clone().into();
 
     let (jws_signer, state_jws_verifier) =
         jws_crypto_provider(&server_public_key, &server_private_key)
@@ -41,7 +48,6 @@ pub fn build_services(
         jws_signer.clone(),
         state_jws_verifier,
         ports,
-        opaque_config,
     );
 
     (worker_service, jws_signer)

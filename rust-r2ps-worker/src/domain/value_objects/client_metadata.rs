@@ -1,21 +1,19 @@
 use crate::domain::value_objects::typed_jws::TypedJws;
-use crate::domain::{DefaultCipherSuite, HsmKey, ServiceRequestError};
-use generic_array::GenericArray;
+use crate::domain::{HsmKey, ServiceRequestError};
 use josekit::jwk::Jwk;
 use josekit::jws::{JwsSigner, JwsVerifier};
 use josekit::jwt::{self, JwtPayload};
-use opaque_ke::ServerRegistrationLen;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, error};
 #[cfg(feature = "openapi")]
 use utoipa::ToSchema;
 
 /// An OPAQUE server registration file, containing the server's share of the password credential.
-/// Serialized as a base64-encoded string of the OPAQUE password file bytes.
+/// Stored as raw bytes; serialization format is opaque to the domain layer.
 #[derive(Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(ToSchema))]
 #[cfg_attr(feature = "openapi", schema(value_type = String, format = "byte"))]
-pub struct PasswordFile(pub GenericArray<u8, ServerRegistrationLen<DefaultCipherSuite>>);
+pub struct PasswordFile(pub Vec<u8>);
 
 // A distinct type with a suitable debug implementation
 impl std::fmt::Debug for PasswordFile {
@@ -25,7 +23,7 @@ impl std::fmt::Debug for PasswordFile {
 }
 
 impl PasswordFile {
-    pub fn as_bytes(&self) -> &GenericArray<u8, ServerRegistrationLen<DefaultCipherSuite>> {
+    pub fn as_bytes(&self) -> &[u8] {
         &self.0
     }
 }
@@ -176,20 +174,9 @@ impl DeviceHsmState {
     pub fn add_password_file(
         &mut self,
         kid: &str,
-        password_file: PasswordFile,
-        server_identifier: String,
+        password_file_entry: PasswordFileEntry,
         authorization_code: Option<&str>,
     ) -> Result<(), ServiceRequestError> {
-        use chrono::Utc;
-
-        let timestamp = Utc::now().to_rfc3339();
-
-        let password_file_entry = PasswordFileEntry {
-            password_file,
-            server_identifier,
-            created_at: timestamp,
-        };
-
         let entry = self
             .find_device_key_mut(kid)
             .ok_or(ServiceRequestError::UnknownClient)?;

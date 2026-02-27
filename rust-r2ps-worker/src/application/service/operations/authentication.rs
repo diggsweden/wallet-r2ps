@@ -1,149 +1,61 @@
 use super::{OperationContext, OperationResult, ServiceOperation};
-use crate::application::pending_auth_spi_port::{LoginSession, PendingAuthSpiPort};
+use crate::application::port::outgoing::pake_port;
 use crate::application::session_key_spi_port::{SessionKey, SessionKeySpiPort};
-use crate::domain::value_objects::r2ps::{PakeRequest, PakeResponse};
-use crate::domain::{
-    DefaultCipherSuite, InnerResponseData, PakePayloadVector, PasswordFile, ServiceRequestError,
-    SessionId,
-};
-use argon2::password_hash::rand_core::OsRng;
-use opaque_ke::{
-    CredentialFinalization, CredentialRequest, Identifiers, RegistrationRequest,
-    RegistrationUpload, ServerLogin, ServerLoginParameters, ServerRegistration, ServerSetup,
-};
+use crate::domain;
 use std::sync::Arc;
-use tracing::{debug, warn};
+use tracing::warn;
 
-/// Creates OPAQUE ServerLoginParameters with standardized context and identifiers
-fn create_server_login_parameters<'a: 'b, 'b>(
-    context: &'a str,
-    client_identifier: &'a str,
-    server_identifier: &'a str,
-) -> ServerLoginParameters<'a, 'b> {
-    let context_bytes = context.as_bytes();
-    let client = client_identifier.as_bytes();
-    let server = server_identifier.as_bytes();
-
-    debug!(
-        "OPAQUE context: '{}' hex: {}",
-        String::from_utf8_lossy(context_bytes),
-        hex::encode(context_bytes)
-    );
-    debug!(
-        "OPAQUE client: '{}' hex: {}",
-        String::from_utf8_lossy(client),
-        hex::encode(client)
-    );
-    debug!(
-        "OPAQUE server: '{}' hex: {}",
-        String::from_utf8_lossy(server),
-        hex::encode(server)
-    );
-
-    ServerLoginParameters {
-        context: Some(context_bytes),
-        identifiers: Identifiers {
-            client: Some(client),
-            server: Some(server),
-        },
+fn pake_err_to_service_err(e: pake_port::PakeError) -> domain::ServiceRequestError {
+    match e {
+        pake_port::PakeError::InvalidPasswordFile => domain::ServiceRequestError::InvalidSerializedPasswordFile,
+        pake_port::PakeError::InvalidRequest => domain::ServiceRequestError::InvalidAuthenticateRequest,
+        pake_port::PakeError::AuthStartFailed => domain::ServiceRequestError::ServerLoginStartFailed,
+        pake_port::PakeError::AuthFinishFailed => domain::ServiceRequestError::ServerLoginFinishFailed,
+        pake_port::PakeError::RegistrationStartFailed => domain::ServiceRequestError::ServerRegistrationStartFailed,
+        pake_port::PakeError::UnknownSession => domain::ServiceRequestError::UnknownSession,
     }
 }
 
 // AuthenticateStart Operation
 pub struct AuthenticateStartOperation {
-    server_setup: ServerSetup<DefaultCipherSuite>,
-    pending_auth_spi_port: Arc<dyn PendingAuthSpiPort + Send + Sync>,
-    context: String,
-    server_identifier: String,
+    pake_port: Arc<dyn pake_port::PakePort>,
 }
 
 impl AuthenticateStartOperation {
-    pub fn new(
-        server_setup: ServerSetup<DefaultCipherSuite>,
-        pending_auth_spi_port: Arc<dyn PendingAuthSpiPort + Send + Sync>,
-        context: String,
-        server_identifier: String,
-    ) -> Self {
-        Self {
-            server_setup,
-            pending_auth_spi_port,
-            context,
-            server_identifier,
-        }
+    pub fn new(pake_port: Arc<dyn pake_port::PakePort>) -> Self {
+        Self { pake_port }
     }
 }
 
 impl ServiceOperation for AuthenticateStartOperation {
-    fn execute(&self, context: OperationContext) -> Result<OperationResult, ServiceRequestError> {
-        let pake_request = PakeRequest::from_inner_request(context.inner_request)?;
+    fn execute(&self, context: OperationContext) -> Result<OperationResult, domain::ServiceRequestError> {
+        let pake_request = domain::PakeRequest::from_inner_request(context.inner_request)?;
 
-        debug!(
-            "deserialized pake payload authenticate request data: {:?}",
-            pake_request.data
-        );
-
-        // Get password file from device_keys using client_key_id from context
-        let password_file_serialized = context
+        let password_file = context
             .state
             .get_password_file(&context.device_kid)
-            .ok_or(ServiceRequestError::UnknownClient)?;
-        let password_file = ServerRegistration::<DefaultCipherSuite>::deserialize(
-            password_file_serialized.as_bytes(),
-        )
-        .map_err(|e| {
-            warn!("error decoding pake request: {:?}", e);
-            ServiceRequestError::InvalidSerializedPasswordFile
-        })?;
+            .ok_or(domain::ServiceRequestError::UnknownClient)?;
 
-        let decoded_request_data = pake_request.data.as_ref();
-        let credential_request =
-            CredentialRequest::deserialize(decoded_request_data).map_err(|e| {
-                warn!("error decoding pake request: {:?}", e);
-                ServiceRequestError::InvalidAuthenticateRequest
-            })?;
+        let session_id = domain::SessionId::new();
 
-        // client_key_id (kid from JWS header) is the thumbprint
-        let device_kid = &context.device_kid;
-        debug!(
-            "Using client JWK thumbprint (device kid) for OPAQUE: {}",
-            device_kid
-        );
+        let response_bytes = self
+            .pake_port
+            .authentication_start(
+                pake_request.data.as_ref(),
+                password_file.as_bytes(),
+                &context.device_kid,
+                &session_id,
+            )
+            .map_err(pake_err_to_service_err)?;
 
-        let mut server_rng = OsRng;
-        let server_login_parameters =
-            create_server_login_parameters(&self.context, device_kid, &self.server_identifier);
-
-        let server_login_start_result = ServerLogin::start(
-            &mut server_rng,
-            &self.server_setup,
-            Some(password_file),
-            credential_request,
-            device_kid.as_bytes(),
-            server_login_parameters,
-        )
-        .map_err(|e| {
-            warn!("error decoding pake request: {:?}", e);
-            ServiceRequestError::ServerLoginStartFailed
-        })?;
-
-        let payload_bytes = server_login_start_result.message.serialize();
-        let payload = PakePayloadVector::new(payload_bytes.to_vec());
-
-        let session_id = SessionId::new();
-
-        self.pending_auth_spi_port.store_pending_auth(
-            &session_id,
-            &Arc::new(LoginSession::new(server_login_start_result.state)),
-        );
-
-        let payload = PakeResponse {
+        let payload = domain::PakeResponse {
             task: None,
-            data: Some(payload),
+            data: Some(domain::PakePayloadVector::new(response_bytes)),
         };
 
         Ok(OperationResult {
             state: None,
-            data: InnerResponseData::new(payload)?,
+            data: domain::InnerResponseData::new(payload)?,
             session_id: Some(session_id),
         })
     }
@@ -151,84 +63,57 @@ impl ServiceOperation for AuthenticateStartOperation {
 
 // AuthenticateFinish Operation
 pub struct AuthenticateFinishOperation {
-    pending_auth_spi_port: Arc<dyn PendingAuthSpiPort + Send + Sync>,
+    pake_port: Arc<dyn pake_port::PakePort>,
     session_key_spi_port: Arc<dyn SessionKeySpiPort + Send + Sync>,
-    context: String,
-    server_identifier: String,
 }
 
 impl AuthenticateFinishOperation {
     pub fn new(
-        pending_auth_spi_port: Arc<dyn PendingAuthSpiPort + Send + Sync>,
+        pake_port: Arc<dyn pake_port::PakePort>,
         session_key_spi_port: Arc<dyn SessionKeySpiPort + Send + Sync>,
-        context: String,
-        server_identifier: String,
     ) -> Self {
         Self {
-            pending_auth_spi_port,
+            pake_port,
             session_key_spi_port,
-            context,
-            server_identifier,
         }
     }
 }
 
 impl ServiceOperation for AuthenticateFinishOperation {
-    fn execute(&self, context: OperationContext) -> Result<OperationResult, ServiceRequestError> {
-        let pake_request = PakeRequest::from_inner_request(context.inner_request)?;
+    fn execute(&self, context: OperationContext) -> Result<OperationResult, domain::ServiceRequestError> {
+        let pake_request = domain::PakeRequest::from_inner_request(context.inner_request)?;
 
-        let decoded_request_data = pake_request.data.as_ref();
-
-        // Get the pending auth session id which was created in the start phase and sent to the client,
-        // which the client now returns back to us to finish the authentication.
         let session_id = context
             .session_id
             .as_ref()
-            .ok_or(ServiceRequestError::UnknownSession)?;
+            .ok_or(domain::ServiceRequestError::UnknownSession)?;
 
-        let session = self
-            .pending_auth_spi_port
-            .get_pending_auth(session_id)
-            .ok_or(ServiceRequestError::UnknownSession)?;
-
-        let device_kid = &context.device_kid;
-        debug!(
-            "Using client JWK thumbprint (device kid) for OPAQUE: {}",
-            device_kid
-        );
-
-        let server_login_parameters =
-            create_server_login_parameters(&self.context, device_kid, &self.server_identifier);
-
-        let server_login = session
-            .take()
-            .ok_or(ServiceRequestError::InvalidAuthenticateRequest)?;
-        let result = server_login
-            .finish(
-                CredentialFinalization::deserialize(decoded_request_data)
-                    .map_err(|_| ServiceRequestError::InvalidAuthenticateRequest)?,
-                server_login_parameters,
+        let session_key_bytes = self
+            .pake_port
+            .authentication_finish(
+                pake_request.data.as_ref(),
+                session_id,
+                &context.device_kid,
             )
             .map_err(|e| {
-                warn!("could not finish auth request request: {:?}", e);
-                ServiceRequestError::ServerLoginFinishFailed
+                warn!("authentication finish failed: {:?}", e);
+                pake_err_to_service_err(e)
             })?;
 
-        let session_key = SessionKey::new(result.session_key.to_vec());
-        debug!("Derived shared session key: {:?}", session_key);
+        let session_key = SessionKey::new(session_key_bytes);
 
         self.session_key_spi_port
             .store(session_id, session_key)
-            .map_err(|_| ServiceRequestError::InternalServerError)?;
+            .map_err(|_| domain::ServiceRequestError::InternalServerError)?;
 
-        let payload = PakeResponse {
+        let payload = domain::PakeResponse {
             task: None,
             data: None,
         };
 
         Ok(OperationResult {
             state: None,
-            data: InnerResponseData::new(payload)?,
+            data: domain::InnerResponseData::new(payload)?,
             session_id: Some(session_id.clone()),
         })
     }
@@ -236,78 +121,48 @@ impl ServiceOperation for AuthenticateFinishOperation {
 
 // RegisterStart Operation
 pub struct RegisterStartOperation {
-    server_setup: ServerSetup<DefaultCipherSuite>,
+    pake_port: Arc<dyn pake_port::PakePort>,
 }
 
 impl RegisterStartOperation {
-    pub fn new(server_setup: ServerSetup<DefaultCipherSuite>) -> Self {
-        Self { server_setup }
+    pub fn new(pake_port: Arc<dyn pake_port::PakePort>) -> Self {
+        Self { pake_port }
     }
 }
 
 impl ServiceOperation for RegisterStartOperation {
-    fn execute(&self, context: OperationContext) -> Result<OperationResult, ServiceRequestError> {
-        let pake_request = PakeRequest::from_inner_request(context.inner_request)?;
-
-        debug!("deserialized pake request {:?}", pake_request.data);
+    fn execute(&self, context: OperationContext) -> Result<OperationResult, domain::ServiceRequestError> {
+        let pake_request = domain::PakeRequest::from_inner_request(context.inner_request)?;
 
         // TODO: require authorization code (currently optional)
         if let Some(provided_code) = &pake_request.authorization {
             let device_key = context
                 .state
                 .find_device_key(&context.device_kid)
-                .ok_or(ServiceRequestError::UnknownKey)?;
+                .ok_or(domain::ServiceRequestError::UnknownKey)?;
             if device_key.dev_authorization_code.as_deref() != Some(provided_code.as_str()) {
                 warn!("authorization code mismatch in register start");
-                return Err(ServiceRequestError::InvalidAuthorizationCode);
+                return Err(domain::ServiceRequestError::InvalidAuthorizationCode);
             }
         } else {
             warn!("missing authorization code in register start");
             // TODO: Enable this
-            // return Err(ServiceRequestError::InvalidAuthorizationCode);
+            // return Err(domain::ServiceRequestError::InvalidAuthorizationCode);
         }
 
-        let decoded_request_data = pake_request.data.as_ref();
+        let response_bytes = self
+            .pake_port
+            .registration_start(pake_request.data.as_ref(), &context.device_kid)
+            .map_err(pake_err_to_service_err)?;
 
-        let registration_request =
-            RegistrationRequest::deserialize(decoded_request_data).map_err(|e| {
-                warn!("invalid registration request evaluate: {:?}", e);
-                ServiceRequestError::InvalidRegistrationRequest
-            })?;
-
-        // client_key_id (kid from JWS header) is the thumbprint
-        let client_thumbprint = &context.device_kid;
-        debug!(
-            "Using client JWK thumbprint for OPAQUE: {}",
-            client_thumbprint
-        );
-
-        let server_registration_start_result = ServerRegistration::<DefaultCipherSuite>::start(
-            &self.server_setup,
-            registration_request,
-            client_thumbprint.as_bytes(),
-        )
-        .map_err(|e| {
-            warn!("invalid registration request evaluate: {:?}", e);
-            ServiceRequestError::ServerRegistrationStartFailed
-        })?;
-
-        debug!(
-            "server_registration_start_result: {:?}",
-            server_registration_start_result.message
-        );
-
-        let payload_bytes = server_registration_start_result.message.serialize();
-        let payload = PakePayloadVector::new(payload_bytes.to_vec());
-
-        let payload = PakeResponse {
+        let payload = domain::PakeResponse {
             task: None,
-            data: Some(payload),
+            data: Some(domain::PakePayloadVector::new(response_bytes)),
         };
 
         Ok(OperationResult {
             state: None,
-            data: InnerResponseData::new(payload)?,
+            data: domain::InnerResponseData::new(payload)?,
             session_id: context.session_id,
         })
     }
@@ -315,69 +170,64 @@ impl ServiceOperation for RegisterStartOperation {
 
 // RegisterFinish Operation
 pub struct RegisterFinishOperation {
-    server_identifier: String,
+    pake_port: Arc<dyn pake_port::PakePort>,
 }
 
 impl RegisterFinishOperation {
-    pub fn new(server_identifier: String) -> Self {
-        Self { server_identifier }
+    pub fn new(pake_port: Arc<dyn pake_port::PakePort>) -> Self {
+        Self { pake_port }
     }
 }
 
 impl ServiceOperation for RegisterFinishOperation {
-    fn execute(&self, context: OperationContext) -> Result<OperationResult, ServiceRequestError> {
-        let inner_request = context.inner_request;
-        let pake_payload = PakeRequest::from_inner_request(inner_request)?;
+    fn execute(&self, context: OperationContext) -> Result<OperationResult, domain::ServiceRequestError> {
+        let pake_payload = domain::PakeRequest::from_inner_request(context.inner_request)?;
 
         // TODO: require authorization code (currently optional)
         if let Some(provided_code) = &pake_payload.authorization {
             let device_key = context
                 .state
                 .find_device_key(&context.device_kid)
-                .ok_or(ServiceRequestError::UnknownKey)?;
+                .ok_or(domain::ServiceRequestError::UnknownKey)?;
             if device_key.dev_authorization_code.as_deref() != Some(provided_code.as_str()) {
                 warn!("authorization code mismatch in register finish");
-                return Err(ServiceRequestError::InvalidAuthorizationCode);
+                return Err(domain::ServiceRequestError::InvalidAuthorizationCode);
             }
         } else {
             warn!("missing authorization code in register finish");
             // TODO: Enable this
-            // return Err(ServiceRequestError::InvalidAuthorizationCode);
+            // return Err(domain::ServiceRequestError::InvalidAuthorizationCode);
         }
 
-        let decoded_request_data = pake_payload.data.as_ref();
+        let pake_port::RegistrationResult {
+            password_file,
+            server_identifier,
+        } = self
+            .pake_port
+            .registration_finish(pake_payload.data.as_ref())
+            .map_err(pake_err_to_service_err)?;
 
-        let registration_request: RegistrationUpload<DefaultCipherSuite> =
-            RegistrationUpload::deserialize(decoded_request_data).map_err(|e| {
-                warn!("invalid registration request finalize: {:?}", e);
-                ServiceRequestError::InvalidRegistrationRequest
-            })?;
-
-        let password_file = ServerRegistration::<DefaultCipherSuite>::finish(registration_request);
-        let password_file_serialized = password_file.serialize();
-        debug!("password file: {:?}", hex::encode(password_file_serialized));
-
-        debug!(
-            "Storing server identifier used in OPAQUE: {:?}",
-            &self.server_identifier
-        );
+        let password_file_entry = domain::PasswordFileEntry {
+            password_file,
+            server_identifier,
+            created_at: chrono::Utc::now().to_rfc3339(),
+        };
 
         let mut new_state = context.state;
         new_state.add_password_file(
             &context.device_kid,
-            PasswordFile(password_file_serialized),
-            self.server_identifier.clone(),
+            password_file_entry,
             pake_payload.authorization.as_deref(),
         )?;
 
-        let payload = PakeResponse {
+        let payload = domain::PakeResponse {
             task: None,
             data: None,
         };
 
         Ok(OperationResult {
             state: Some(new_state),
-            data: InnerResponseData::new(payload)?,
+            data: domain::InnerResponseData::new(payload)?,
             session_id: context.session_id,
         })
     }

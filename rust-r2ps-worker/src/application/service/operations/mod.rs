@@ -3,10 +3,9 @@ pub mod hsm;
 pub mod session;
 
 use crate::application::hsm_spi_port::HsmSpiPort;
-use crate::application::pending_auth_spi_port::PendingAuthSpiPort;
+use crate::application::port::outgoing::pake_port::PakePort;
 use crate::application::session_key_spi_port::SessionKeySpiPort;
-use crate::domain::{DefaultCipherSuite, OperationId, ServiceRequestError, SessionId};
-use opaque_ke::ServerSetup;
+use crate::domain::{OperationId, ServiceRequestError, SessionId};
 use std::sync::Arc;
 use std::time::Instant;
 use tracing::debug;
@@ -73,28 +72,18 @@ pub struct OperationDispatcher {
 impl OperationDispatcher {
     /// Creates a new OperationDispatcher with all operation handlers initialized
     pub fn from_dependencies(
-        server_setup: ServerSetup<DefaultCipherSuite>,
+        pake_port: Arc<dyn PakePort>,
         session_key_spi_port: Arc<dyn SessionKeySpiPort + Send + Sync>,
         hsm_spi_port: Arc<dyn HsmSpiPort + Send + Sync>,
-        pending_auth_spi_port: Arc<dyn PendingAuthSpiPort + Send + Sync>,
-        opaque_context: String,
-        opaque_server_identifier: String,
     ) -> Self {
         Self {
-            authenticate_start_op: AuthenticateStartOperation::new(
-                server_setup.clone(),
-                pending_auth_spi_port.clone(),
-                opaque_context.clone(),
-                opaque_server_identifier.clone(),
-            ),
+            authenticate_start_op: AuthenticateStartOperation::new(pake_port.clone()),
             authenticate_finish_op: AuthenticateFinishOperation::new(
-                pending_auth_spi_port.clone(),
+                pake_port.clone(),
                 session_key_spi_port.clone(),
-                opaque_context,
-                opaque_server_identifier.clone(),
             ),
-            register_start_op: RegisterStartOperation::new(server_setup.clone()),
-            register_finish_op: RegisterFinishOperation::new(opaque_server_identifier),
+            register_start_op: RegisterStartOperation::new(pake_port.clone()),
+            register_finish_op: RegisterFinishOperation::new(pake_port),
             hsm_ecdsa_op: HsmSignOperation::new(hsm_spi_port.clone()),
             hsm_keygen_op: HsmGenerateKeyOperation::new(hsm_spi_port.clone()),
             hsm_delete_key_op: HsmDeleteKeyOperation,
