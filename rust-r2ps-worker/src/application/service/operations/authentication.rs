@@ -7,11 +7,21 @@ use tracing::warn;
 
 fn pake_err_to_service_err(e: pake_port::PakeError) -> domain::ServiceRequestError {
     match e {
-        pake_port::PakeError::InvalidPasswordFile => domain::ServiceRequestError::InvalidSerializedPasswordFile,
-        pake_port::PakeError::InvalidRequest => domain::ServiceRequestError::InvalidAuthenticateRequest,
-        pake_port::PakeError::AuthStartFailed => domain::ServiceRequestError::ServerLoginStartFailed,
-        pake_port::PakeError::AuthFinishFailed => domain::ServiceRequestError::ServerLoginFinishFailed,
-        pake_port::PakeError::RegistrationStartFailed => domain::ServiceRequestError::ServerRegistrationStartFailed,
+        pake_port::PakeError::InvalidPasswordFile => {
+            domain::ServiceRequestError::InvalidSerializedPasswordFile
+        }
+        pake_port::PakeError::InvalidRequest => {
+            domain::ServiceRequestError::InvalidAuthenticateRequest
+        }
+        pake_port::PakeError::AuthStartFailed => {
+            domain::ServiceRequestError::ServerLoginStartFailed
+        }
+        pake_port::PakeError::AuthFinishFailed => {
+            domain::ServiceRequestError::ServerLoginFinishFailed
+        }
+        pake_port::PakeError::RegistrationStartFailed => {
+            domain::ServiceRequestError::ServerRegistrationStartFailed
+        }
         pake_port::PakeError::UnknownSession => domain::ServiceRequestError::UnknownSession,
     }
 }
@@ -28,7 +38,10 @@ impl AuthenticateStartOperation {
 }
 
 impl ServiceOperation for AuthenticateStartOperation {
-    fn execute(&self, context: OperationContext) -> Result<OperationResult, domain::ServiceRequestError> {
+    fn execute(
+        &self,
+        context: OperationContext,
+    ) -> Result<OperationResult, domain::ServiceRequestError> {
         let pake_request = domain::PakeRequest::from_inner_request(context.inner_request)?;
 
         let password_file = context
@@ -80,7 +93,10 @@ impl AuthenticateFinishOperation {
 }
 
 impl ServiceOperation for AuthenticateFinishOperation {
-    fn execute(&self, context: OperationContext) -> Result<OperationResult, domain::ServiceRequestError> {
+    fn execute(
+        &self,
+        context: OperationContext,
+    ) -> Result<OperationResult, domain::ServiceRequestError> {
         let pake_request = domain::PakeRequest::from_inner_request(context.inner_request)?;
 
         let session_id = context
@@ -90,11 +106,7 @@ impl ServiceOperation for AuthenticateFinishOperation {
 
         let session_key_bytes = self
             .pake_port
-            .authentication_finish(
-                pake_request.data.as_ref(),
-                session_id,
-                &context.device_kid,
-            )
+            .authentication_finish(pake_request.data.as_ref(), session_id, &context.device_kid)
             .map_err(|e| {
                 warn!("authentication finish failed: {:?}", e);
                 pake_err_to_service_err(e)
@@ -131,7 +143,10 @@ impl RegisterStartOperation {
 }
 
 impl ServiceOperation for RegisterStartOperation {
-    fn execute(&self, context: OperationContext) -> Result<OperationResult, domain::ServiceRequestError> {
+    fn execute(
+        &self,
+        context: OperationContext,
+    ) -> Result<OperationResult, domain::ServiceRequestError> {
         let pake_request = domain::PakeRequest::from_inner_request(context.inner_request)?;
 
         // TODO: require authorization code (currently optional)
@@ -180,7 +195,10 @@ impl RegisterFinishOperation {
 }
 
 impl ServiceOperation for RegisterFinishOperation {
-    fn execute(&self, context: OperationContext) -> Result<OperationResult, domain::ServiceRequestError> {
+    fn execute(
+        &self,
+        context: OperationContext,
+    ) -> Result<OperationResult, domain::ServiceRequestError> {
         let pake_payload = domain::PakeRequest::from_inner_request(context.inner_request)?;
 
         // TODO: require authorization code (currently optional)

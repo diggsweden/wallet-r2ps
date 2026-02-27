@@ -112,8 +112,8 @@ impl pake_port::PakePort for OpaquePakeAdapter {
         request_bytes: &[u8],
         client_id: &str,
     ) -> Result<Vec<u8>, pake_port::PakeError> {
-        let registration_request =
-            opaque_ke::RegistrationRequest::deserialize(request_bytes).map_err(|e| {
+        let registration_request = opaque_ke::RegistrationRequest::deserialize(request_bytes)
+            .map_err(|e| {
                 warn!("invalid registration request: {:?}", e);
                 pake_port::PakeError::InvalidRequest
             })?;
@@ -133,13 +133,15 @@ impl pake_port::PakePort for OpaquePakeAdapter {
         Ok(result.message.serialize().to_vec())
     }
 
-    fn registration_finish(&self, upload_bytes: &[u8]) -> Result<pake_port::RegistrationResult, pake_port::PakeError> {
-        let upload =
-            opaque_ke::RegistrationUpload::<DefaultCipherSuite>::deserialize(upload_bytes)
-                .map_err(|e| {
-                    warn!("invalid registration upload: {:?}", e);
-                    pake_port::PakeError::InvalidRequest
-                })?;
+    fn registration_finish(
+        &self,
+        upload_bytes: &[u8],
+    ) -> Result<pake_port::RegistrationResult, pake_port::PakeError> {
+        let upload = opaque_ke::RegistrationUpload::<DefaultCipherSuite>::deserialize(upload_bytes)
+            .map_err(|e| {
+                warn!("invalid registration upload: {:?}", e);
+                pake_port::PakeError::InvalidRequest
+            })?;
 
         let password_file = opaque_ke::ServerRegistration::<DefaultCipherSuite>::finish(upload);
         Ok(pake_port::RegistrationResult {
@@ -158,9 +160,9 @@ impl pake_port::PakePort for OpaquePakeAdapter {
         let password_file =
             opaque_ke::ServerRegistration::<DefaultCipherSuite>::deserialize(password_file_bytes)
                 .map_err(|e| {
-                    warn!("invalid password file: {:?}", e);
-                    pake_port::PakeError::InvalidPasswordFile
-                })?;
+                warn!("invalid password file: {:?}", e);
+                pake_port::PakeError::InvalidPasswordFile
+            })?;
 
         let credential_request =
             opaque_ke::CredentialRequest::deserialize(request_bytes).map_err(|e| {
@@ -187,8 +189,10 @@ impl pake_port::PakePort for OpaquePakeAdapter {
         })?;
 
         let response_bytes = result.message.serialize().to_vec();
-        self.pending_logins
-            .insert(session_id.clone(), Arc::new(PendingLogin::new(result.state)));
+        self.pending_logins.insert(
+            session_id.clone(),
+            Arc::new(PendingLogin::new(result.state)),
+        );
 
         Ok(response_bytes)
     }
@@ -206,8 +210,8 @@ impl pake_port::PakePort for OpaquePakeAdapter {
 
         let server_login = pending.take().ok_or(pake_port::PakeError::UnknownSession)?;
 
-        let finalization =
-            opaque_ke::CredentialFinalization::deserialize(finalization_bytes).map_err(|e| {
+        let finalization = opaque_ke::CredentialFinalization::deserialize(finalization_bytes)
+            .map_err(|e| {
                 warn!("invalid credential finalization: {:?}", e);
                 pake_port::PakeError::InvalidRequest
             })?;
@@ -276,8 +280,5 @@ fn create_server_setup(
         .map_err(|e| format!("Failed to deserialize public key: {:?}", e))?,
     );
 
-    Ok(opaque_ke::ServerSetup::<DefaultCipherSuite>::new_with_key_pair(
-        &mut OsRng,
-        keypair,
-    ))
+    Ok(opaque_ke::ServerSetup::<DefaultCipherSuite>::new_with_key_pair(&mut OsRng, keypair))
 }

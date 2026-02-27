@@ -117,11 +117,8 @@ impl<T> TypedJwe<T> {
 }
 
 impl<T: DeserializeOwned> TypedJwe<T> {
-    pub fn decrypt(
-        &self,
-        key: DecryptionKey<'_>,
-    ) -> Result<T, ServiceRequestError> {
-        let payload = match key{
+    pub fn decrypt(&self, key: DecryptionKey<'_>) -> Result<T, ServiceRequestError> {
+        let payload = match key {
             DecryptionKey::Session(session_key) => self.decrypt_with_aes(session_key)?,
             DecryptionKey::Device(private_key) => self.decrypt_with_ec_pem(private_key)?,
         };
@@ -280,7 +277,9 @@ impl TypedJwe<InnerRequest> {
         debug!("Peeked inner JWE kid: {:?}", peeked_kid);
 
         let decryption_key = match peeked_kid.as_deref() {
-            Some("session") => DecryptionKey::Session(session_key.ok_or(ServiceRequestError::UnknownSession)?),
+            Some("session") => {
+                DecryptionKey::Session(session_key.ok_or(ServiceRequestError::UnknownSession)?)
+            }
             Some("device") => DecryptionKey::Device(server_private_key),
             _ => {
                 error!("Unknown encryption option in JWE kid: {:?}", peeked_kid);
@@ -292,12 +291,10 @@ impl TypedJwe<InnerRequest> {
 
         debug!("Decrypting inner request using {:?} encryption", enc_option);
 
-        let inner_request = self
-            .decrypt(decryption_key)
-            .map_err(|e| {
-                error!("Could not decrypt inner request: {:?}", e);
-                ServiceRequestError::JweError
-            })?;
+        let inner_request = self.decrypt(decryption_key).map_err(|e| {
+            error!("Could not decrypt inner request: {:?}", e);
+            ServiceRequestError::JweError
+        })?;
 
         if inner_request.request_type.encrypt_option() != enc_option {
             error!(

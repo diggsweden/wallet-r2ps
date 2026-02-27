@@ -46,12 +46,11 @@ fn test_decrypt_service_data_jwe_happy_path() -> Result<(), Box<dyn std::error::
     };
 
     // Decrypt the serviceRequest with the private key
-    let result_new =
-        service_request
-            .inner_jwe
-            .as_ref()
-            .unwrap()
-            .decrypt(DecryptionKey::Device(&server_private_key));
+    let result_new = service_request
+        .inner_jwe
+        .as_ref()
+        .unwrap()
+        .decrypt(DecryptionKey::Device(&server_private_key));
 
     assert!(
         result_new.is_ok(),
@@ -94,12 +93,11 @@ fn test_decrypt_service_data_jwe_rejects_invalid_formats() -> Result<(), Box<dyn
             inner_jwe: Some(TypedJwe::new(invalid_jwe.to_string())),
         };
 
-        let result =
-            service_request
-                .inner_jwe
-                .as_ref()
-                .unwrap()
-                .decrypt(DecryptionKey::Device(&server_private_key));
+        let result = service_request
+            .inner_jwe
+            .as_ref()
+            .unwrap()
+            .decrypt(DecryptionKey::Device(&server_private_key));
 
         assert!(matches!(result, Err(ServiceRequestError::JweError)));
     }
@@ -122,12 +120,11 @@ fn test_decrypt_service_data_jwe_rejects_invalid_base64() -> Result<(), Box<dyn 
         inner_jwe: Some(TypedJwe::new("not-base64!!".to_string())),
     };
 
-    let result =
-        service_request
-            .inner_jwe
-            .as_ref()
-            .unwrap()
-            .decrypt(DecryptionKey::Device(&server_private_key));
+    let result = service_request
+        .inner_jwe
+        .as_ref()
+        .unwrap()
+        .decrypt(DecryptionKey::Device(&server_private_key));
     assert!(
         result.is_err(),
         "decrypt_service_data_jwe should reject invalid base64: {:?}",

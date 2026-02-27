@@ -16,8 +16,11 @@ pub struct RegistrationResult {
 }
 
 pub trait PakePort: Send + Sync {
-    fn registration_start(&self, request_bytes: &[u8], client_id: &str)
-        -> Result<Vec<u8>, PakeError>;
+    fn registration_start(
+        &self,
+        request_bytes: &[u8],
+        client_id: &str,
+    ) -> Result<Vec<u8>, PakeError>;
 
     fn registration_finish(&self, upload_bytes: &[u8]) -> Result<RegistrationResult, PakeError>;
 

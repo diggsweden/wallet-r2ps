@@ -9,11 +9,11 @@ use crate::domain::{
     DeviceHsmState, EncryptOption, HsmWorkerRequest, OperationId, OuterResponse, TypedJwe,
     WorkerRequestError, WorkerResponse, WorkerServerConfig,
 };
+use josekit::jwk::Jwk;
 use josekit::jws::alg::ecdsa::{EcdsaJwsSigner, EcdsaJwsVerifier};
 use pem::Pem;
 use std::sync::Arc;
 use std::time::Instant;
-use josekit::jwk::Jwk;
 use tracing::{debug, info};
 
 define_byte_vector!(DecryptedData);
