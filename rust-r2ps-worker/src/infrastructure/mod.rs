@@ -1,4 +1,4 @@
-mod adapters;
+pub mod adapters;
 
 pub mod bootstrap;
 pub mod config;

@@ -1,10 +1,5 @@
-use crate::domain::value_objects::typed_jws::TypedJws;
-use crate::domain::{HsmKey, ServiceRequestError};
-use josekit::jwk::Jwk;
-use josekit::jws::{JwsSigner, JwsVerifier};
-use josekit::jwt::{self, JwtPayload};
+use crate::domain::{EcPublicJwk, HsmKey, ServiceRequestError};
 use serde::{Deserialize, Serialize};
-use tracing::{debug, error};
 #[cfg(feature = "openapi")]
 use utoipa::ToSchema;
 
@@ -47,8 +42,7 @@ pub struct PasswordFileEntry {
 #[cfg_attr(feature = "openapi", derive(ToSchema))]
 pub struct DeviceKeyEntry {
     /// The device's EC public key as a JWK (JSON Web Key) object
-    #[cfg_attr(feature = "openapi", schema(value_type = std::collections::HashMap<String, String>))]
-    pub public_key: Jwk,
+    pub public_key: EcPublicJwk,
     /// Ordered list of OPAQUE password file entries (latest is last)
     pub password_files: Vec<PasswordFileEntry>,
     /// One-time authorization code for initial device registration
@@ -57,7 +51,7 @@ pub struct DeviceKeyEntry {
 
 impl DeviceKeyEntry {
     pub fn kid(&self) -> Option<&str> {
-        self.public_key.key_id()
+        Some(self.public_key.kid.as_str())
     }
 }
 
@@ -190,60 +184,5 @@ impl DeviceHsmState {
 
         entry.password_files.push(password_file_entry);
         Ok(())
-    }
-
-    // === JWS encoding/decoding ===
-
-    /// Encode state as JWS using provided signer
-    pub fn encode_to_jws(
-        &self,
-        signer: &dyn JwsSigner,
-    ) -> Result<TypedJws<DeviceHsmState>, ServiceRequestError> {
-        // Create JWT payload from state
-        let payload_json = serde_json::to_string(&self).map_err(|e| {
-            error!("Failed to serialize state: {:?}", e);
-            ServiceRequestError::SerializeStateError
-        })?;
-
-        let map: serde_json::Map<String, serde_json::Value> = serde_json::from_str(&payload_json)
-            .map_err(|e| {
-            error!("Failed to create payload map: {:?}", e);
-            ServiceRequestError::SerializeStateError
-        })?;
-
-        let payload = JwtPayload::from_map(map).map_err(|e| {
-            error!("Failed to create JwtPayload: {:?}", e);
-            ServiceRequestError::JwsError
-        })?;
-
-        // Create JWS header
-        let header = josekit::jws::JwsHeader::new();
-
-        let token = jwt::encode_with_signer(&payload, &header, signer).map_err(|e| {
-            error!("Failed to encode state JWS: {:?}", e);
-            ServiceRequestError::JwsError
-        })?;
-
-        Ok(TypedJws::new(token))
-    }
-
-    /// Decode state from JWS using provided verifier
-    pub fn decode_from_jws(
-        jws: &str,
-        verifier: &dyn JwsVerifier,
-    ) -> Result<Self, ServiceRequestError> {
-        // Decode and verify JWT
-        let (payload, _header) = jwt::decode_with_verifier(jws, verifier).map_err(|e| {
-            error!("State JWS verification failed: {:?}", e);
-            ServiceRequestError::JwsError
-        })?;
-
-        let state: DeviceHsmState = serde_json::from_str(&payload.to_string()).map_err(|e| {
-            error!("Failed to deserialize state: {:?}", e);
-            ServiceRequestError::JwsError
-        })?;
-
-        debug!("decoded state JWS: {:#?}", state);
-        Ok(state)
     }
 }

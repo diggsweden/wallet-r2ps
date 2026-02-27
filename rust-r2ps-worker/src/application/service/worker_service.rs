@@ -1,65 +1,41 @@
+use crate::application::port::outgoing::jose_port;
 use crate::application::session_key_spi_port::{SessionKey, SessionKeySpiPort};
 
 use crate::application::{
     WorkerPorts, WorkerRequestId, WorkerRequestUseCase, WorkerResponseSpiPort,
 };
-use crate::define_byte_vector;
 use crate::domain::value_objects::r2ps::OuterRequest;
 use crate::domain::{
-    DeviceHsmState, EncryptOption, HsmWorkerRequest, OperationId, OuterResponse, TypedJwe,
-    WorkerRequestError, WorkerResponse, WorkerServerConfig,
+    DeviceHsmState, EcPublicJwk, EncryptOption, HsmWorkerRequest, OperationId, OuterResponse,
+    WorkerRequestError, WorkerResponse,
 };
-use josekit::jwk::Jwk;
-use josekit::jws::alg::ecdsa::{EcdsaJwsSigner, EcdsaJwsVerifier};
-use pem::Pem;
 use std::sync::Arc;
 use std::time::Instant;
 use tracing::{debug, info};
 
-define_byte_vector!(DecryptedData);
-
 use super::operations::{OperationContext, OperationDispatcher, OperationResult};
 
 pub struct WorkerService {
+    jose: Arc<dyn jose_port::JosePort>,
     worker_response_spi_port: Arc<dyn WorkerResponseSpiPort + Send + Sync>,
-    worker_server_config: WorkerServerConfig,
     session_key_spi_port: Arc<dyn SessionKeySpiPort + Send + Sync>,
-    // Operation dispatcher
     operation_dispatcher: OperationDispatcher,
-    jws_signer: Arc<EcdsaJwsSigner>,
-    state_jws_verifier: EcdsaJwsVerifier,
 }
 
 impl WorkerService {
-    pub fn new(
-        server_public_key: Pem,
-        server_private_key: Pem,
-        jws_signer: Arc<EcdsaJwsSigner>,
-        state_jws_verifier: EcdsaJwsVerifier,
-        ports: WorkerPorts,
-    ) -> Self {
+    pub fn new(jose: Arc<dyn jose_port::JosePort>, ports: WorkerPorts) -> Self {
         let operation_dispatcher = OperationDispatcher::from_dependencies(
             ports.pake,
-            ports.session_key.clone(),
+            ports.session_key.clone(), // TODO: Make OperationDispatcher side-effect free - remove this
             ports.hsm,
         );
 
         Self {
+            jose,
             worker_response_spi_port: ports.worker_response,
-            worker_server_config: WorkerServerConfig {
-                server_public_key,
-                server_private_key,
-            },
             operation_dispatcher,
             session_key_spi_port: ports.session_key,
-            jws_signer,
-            state_jws_verifier,
         }
-    }
-
-    /// Returns a reference to the server configuration
-    pub fn server_config(&self) -> &WorkerServerConfig {
-        &self.worker_server_config
     }
 }
 
@@ -113,7 +89,7 @@ struct ResponseContext {
     request_id: String,
     request_type: OperationId,
     session_key: Option<SessionKey>,
-    device_public_key: Jwk,
+    device_public_key: EcPublicJwk,
 }
 
 struct WorkerInput {
@@ -132,11 +108,13 @@ impl WorkerService {
             outer_request_jws,
         } = hsm_worker_request;
 
-        let state = DeviceHsmState::decode_from_jws(state_jws.as_str(), &self.state_jws_verifier)
+        let state = DeviceHsmState::from_jws(state_jws.as_str(), self.jose.as_ref())
             .map_err(|_| WorkerRequestError::InvalidState)?;
 
         // Extract client public key kid from the JWS header
-        let device_kid = OuterRequest::peek_kid(outer_request_jws.as_str())
+        let device_kid = self
+            .jose
+            .peek_kid(outer_request_jws.as_str())
             .map_err(|_| WorkerRequestError::OuterJwsError)?
             .ok_or(WorkerRequestError::OuterJwsError)?;
 
@@ -149,8 +127,8 @@ impl WorkerService {
             .public_key
             .clone();
 
-        let outer_request = OuterRequest::from_jws(outer_request_jws.as_str(), &device_public_key)
-            .map_err(|_| WorkerRequestError::OuterJwsError)?;
+        let outer_request =
+            OuterRequest::from_jws(outer_request_jws.as_str(), self.jose.as_ref(), &device_public_key)?;
 
         info!("Received request id {}", request_id);
 
@@ -164,15 +142,7 @@ impl WorkerService {
             .as_ref()
             .and_then(|id| self.session_key_spi_port.get(id));
 
-        let inner_request = outer_request
-            .inner_jwe
-            .as_ref()
-            .ok_or(WorkerRequestError::InnerJweError)?
-            .decrypt_request(
-                &self.worker_server_config.server_private_key,
-                session_key.as_ref(),
-            )
-            .map_err(WorkerRequestError::ServiceError)?;
+        let inner_request = outer_request.decrypt_inner(self.jose.as_ref(), session_key.as_ref())?;
 
         debug!("Inner request: {:#?}", inner_request);
 
@@ -223,8 +193,8 @@ impl WorkerService {
         };
 
         // Create InnerResponse with the serialized data
-        let serialized_data = String::from_utf8(encoded_result.clone())
-            .map_err(|_| WorkerRequestError::EncryptionError)?;
+        let serialized_data =
+            String::from_utf8(encoded_result).map_err(|_| WorkerRequestError::EncryptionError)?;
         let inner_response = operation_result.to_inner_response(serialized_data, ttl);
 
         debug!("Inner response: {:#?}", inner_response);
@@ -236,20 +206,19 @@ impl WorkerService {
         );
 
         // Encrypt the InnerResponse into TypedJwe
-        let inner_jwe = match enc_option {
+        let enc_key = match enc_option {
             EncryptOption::Session => {
                 let session_key = context
                     .session_key
-                    .clone()
+                    .as_ref()
                     .ok_or(WorkerRequestError::UnknownSession)?;
-                TypedJwe::encrypt(&inner_response, &session_key)
-                    .map_err(|_| WorkerRequestError::EncryptionError)?
+                jose_port::JweEncryptionKey::Session(session_key)
             }
             EncryptOption::Device => {
-                TypedJwe::encrypt_with_jwk(&inner_response, &context.device_public_key)
-                    .map_err(|_| WorkerRequestError::EncryptionError)?
+                jose_port::JweEncryptionKey::Device(&context.device_public_key)
             }
         };
+        let inner_jwe = inner_response.encrypt(self.jose.as_ref(), enc_key)?;
 
         let outer_response = OuterResponse {
             version: 1,
@@ -257,15 +226,16 @@ impl WorkerService {
             session_id: operation_result.session_id.clone(),
         };
 
-        let jws = outer_response
-            .to_jws(&self.jws_signer)
-            .map_err(|_| WorkerRequestError::OuterJwsError)?;
+        let jws = outer_response.sign(self.jose.as_ref())?;
 
         let new_state_jws = operation_result
             .state
-            .map(|state| state.encode_to_jws(&*self.jws_signer))
-            .transpose()
-            .map_err(|_| WorkerRequestError::OuterJwsError)?;
+            .map(|state| {
+                state
+                    .sign(self.jose.as_ref())
+                    .map_err(|_| WorkerRequestError::OuterJwsError)
+            })
+            .transpose()?;
 
         Ok(WorkerResponse {
             request_id: context.request_id,
