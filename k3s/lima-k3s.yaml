@@ -1,0 +1,177 @@
+# Lima VM configuration for k3s
+# This replaces the previous Colima setup
+
+# VM resources - matching previous Colima configuration
+cpus: 4
+memory: "16GiB"
+disk: "100GiB"
+
+# Operating system image
+images:
+  - location: "https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-amd64.img"
+    arch: "x86_64"
+  - location: "https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-arm64.img"
+    arch: "aarch64"
+
+# Mount project directory for access to k8s manifests
+mounts:
+  - location: "~"
+    writable: false
+
+# Containerd runtime configuration
+containerd:
+  system: false
+  user: false
+
+# Port forwarding for k8s services
+portForwards:
+  # Kubernetes API server
+  - guestPort: 6443
+    hostPort: 6443
+    proto: tcp
+  # HTTP ingress
+  - guestPort: 80
+    hostPort: 80
+    proto: tcp
+  # HTTPS ingress
+  - guestPort: 443
+    hostPort: 443
+    proto: tcp
+
+# Provisioning scripts to install and configure k3s
+provision:
+  # System-level provisioning (runs as root)
+  - mode: system
+    script: |
+      #!/bin/bash
+      set -eux -o pipefail
+      
+      # Install k3s if not already installed
+      if [ ! -f /usr/local/bin/k3s ]; then
+        echo "Installing k3s..."
+        curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="--disable=traefik --write-kubeconfig-mode 644" sh -
+      else
+        echo "k3s already installed, skipping..."
+      fi
+      
+      # Ensure k3s is running
+      systemctl enable k3s --now
+      
+      # Wait for k3s to be ready
+      echo "Waiting for k3s to be ready..."
+      for i in {1..30}; do
+        if k3s kubectl get nodes &>/dev/null; then
+          echo "k3s is ready!"
+          break
+        fi
+        echo "Waiting for k3s... ($i/30)"
+        sleep 2
+      done
+      
+      # Ensure containerd socket is accessible
+      chmod 666 /run/k3s/containerd/containerd.sock || true
+      
+      # Detect architecture
+      ARCH=$(uname -m)
+      if [ "$ARCH" = "x86_64" ]; then
+        ARCH_SUFFIX="amd64"
+      elif [ "$ARCH" = "aarch64" ]; then
+        ARCH_SUFFIX="arm64"
+      else
+        echo "Unsupported architecture: $ARCH"
+        exit 1
+      fi
+      
+      # Install nerdctl if not already installed
+      if [ ! -f /usr/local/bin/nerdctl ]; then
+        echo "Installing nerdctl..."
+        NERDCTL_VERSION="2.0.3"
+        curl -fsSL "https://github.com/containerd/nerdctl/releases/download/v${NERDCTL_VERSION}/nerdctl-${NERDCTL_VERSION}-linux-${ARCH_SUFFIX}.tar.gz" | \
+          tar -xz -C /usr/local/bin nerdctl
+        chmod +x /usr/local/bin/nerdctl
+        echo "nerdctl installed successfully"
+      else
+        echo "nerdctl already installed, skipping..."
+      fi
+      
+      # Install buildkit if not already installed
+      if [ ! -f /usr/local/bin/buildkitd ]; then
+        echo "Installing buildkit..."
+        BUILDKIT_VERSION="0.17.1"
+        curl -fsSL "https://github.com/moby/buildkit/releases/download/v${BUILDKIT_VERSION}/buildkit-v${BUILDKIT_VERSION}.linux-${ARCH_SUFFIX}.tar.gz" | \
+          tar -xz -C /usr/local
+        chmod +x /usr/local/bin/buildkitd /usr/local/bin/buildctl
+        echo "buildkit installed successfully"
+      else
+        echo "buildkit already installed, skipping..."
+      fi
+      
+      # Create buildkit socket directory
+      mkdir -p /run/buildkit
+      
+      # Create buildkitd systemd service
+      if [ ! -f /etc/systemd/system/buildkit.service ]; then
+        echo "Creating buildkitd systemd service..."
+        cat > /etc/systemd/system/buildkit.service << 'EOFSERVICE'
+      [Unit]
+      Description=BuildKit
+      Documentation=https://github.com/moby/buildkit
+      After=k3s.service
+      Requires=k3s.service
+      
+      [Service]
+      Type=simple
+      ExecStart=/usr/local/bin/buildkitd --containerd-worker-addr /run/k3s/containerd/containerd.sock --addr unix:///run/buildkit/buildkitd.sock
+      Restart=always
+      RestartSec=5
+      StandardOutput=append:/var/log/buildkitd.log
+      StandardError=append:/var/log/buildkitd.log
+      
+      [Install]
+      WantedBy=multi-user.target
+      EOFSERVICE
+        systemctl daemon-reload
+        systemctl enable buildkit
+        echo "buildkitd systemd service created"
+      fi
+      
+      # Start buildkitd
+      systemctl start buildkit
+      echo "buildkitd service started"
+      
+      echo "k3s installation complete"
+
+  # User-level provisioning
+  - mode: user
+    script: |
+      #!/bin/bash
+      set -eux -o pipefail
+      
+      # Create .kube directory
+      mkdir -p ~/.kube
+      
+      # Copy kubeconfig
+      if [ -f /etc/rancher/k3s/k3s.yaml ]; then
+        sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/config
+        sudo chown $(id -u):$(id -g) ~/.kube/config
+        chmod 600 ~/.kube/config
+      fi
+      
+      echo "User provisioning complete"
+
+# Probe scripts to check if VM is ready
+probes:
+  - mode: readiness
+    description: "k3s to be ready"
+    script: |
+      #!/bin/bash
+      set -eux -o pipefail
+      k3s kubectl get nodes >/dev/null 2>&1
+    hint: |
+      k3s is not ready yet. Run 'limactl shell k3s sudo systemctl status k3s' to check the status.
+
+# Enable host DNS resolution
+hostResolver:
+  enabled: true
+  hosts:
+    host.lima.internal: host.lima.internal

@@ -4,10 +4,11 @@ OS := $(shell uname -s)
 
 # On Linux, k3s uses its own embedded containerd socket separate from the system containerd.
 # Point nerdctl at the k3s socket so built images are available to k3s directly.
+# On macOS with Lima, use limactl shell to execute nerdctl inside the VM.
 ifeq ($(OS), Linux)
 NERDCTL := sudo nerdctl --address /run/k3s/containerd/containerd.sock
 else
-NERDCTL := nerdctl
+NERDCTL := limactl shell k3s sudo nerdctl --address /run/k3s/containerd/containerd.sock
 endif
 
 default: check-prerequisites start-k3s install-backends deploy-hsm-worker deploy-bff deploy-headlamp
@@ -45,17 +46,23 @@ check-prerequisites:
 	else \
 		echo "✓ helm found: $$(helm version --short 2>/dev/null || echo $$(helm version 2>&1 | head -n1))"; \
 	fi; \
-	if [ "$(OS)" = "Darwin" ] && ! command -v colima &> /dev/null; then \
-		echo "❌ colima not found (required on OSX)"; \
-		MISSING="$$MISSING colima"; \
+	if [ "$(OS)" = "Darwin" ] && ! command -v limactl &> /dev/null; then \
+		echo "❌ limactl not found (required on OSX)"; \
+		MISSING="$$MISSING limactl"; \
 	elif [ "$(OS)" = "Darwin" ]; then \
-		echo "✓ colima found: $$(colima version 2>&1 | head -n1)"; \
+		echo "✓ limactl found: $$(limactl --version 2>&1 | head -n1)"; \
 	fi; \
 	if ! command -v nerdctl &> /dev/null; then \
 		echo "❌ nerdctl not found"; \
 		MISSING="$$MISSING nerdctl"; \
 	else \
 		echo "✓ nerdctl found: $$(nerdctl version 2>&1 | grep Version | head -n1)"; \
+	fi; \
+	if [ "$(OS)" = "Linux" ] && ! command -v buildkitd &> /dev/null; then \
+		echo "❌ buildkitd not found (required on Linux)"; \
+		MISSING="$$MISSING buildkitd"; \
+	elif [ "$(OS)" = "Linux" ]; then \
+		echo "✓ buildkitd found: $$(buildkitd --version 2>&1 | head -n1)"; \
 	fi; \
 	if [ -n "$$MISSING" ]; then \
 		echo ""; \
@@ -99,10 +106,10 @@ check-prerequisites:
 				echo "  curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash"; \
 			fi; \
 		fi; \
-		if [[ "$$MISSING" == *"colima"* ]]; then \
+		if [[ "$$MISSING" == *"limactl"* ]]; then \
 			echo ""; \
-			echo "colima:"; \
-			echo "  brew install colima"; \
+			echo "limactl:"; \
+			echo "  brew install lima"; \
 		fi; \
 		if [[ "$$MISSING" == *"nerdctl"* ]]; then \
 			echo ""; \
@@ -115,6 +122,14 @@ check-prerequisites:
 				echo "  sudo tar Cxzvf /usr/local nerdctl-full-\${NERDCTL_VERSION}-linux-amd64.tar.gz"; \
 			fi; \
 		fi; \
+		if [[ "$$MISSING" == *"buildkitd"* ]]; then \
+			echo ""; \
+			echo "buildkitd:"; \
+			echo "  BUILDKIT_VERSION=\$$(curl -s https://api.github.com/repos/moby/buildkit/releases/latest | grep tag_name | cut -d '\"' -f 4 | sed 's/v//')"; \
+			echo "  wget https://github.com/moby/buildkit/releases/download/v\$${BUILDKIT_VERSION}/buildkit-v\$${BUILDKIT_VERSION}.linux-amd64.tar.gz"; \
+			echo "  sudo tar Cxzvf /usr/local buildkit-v\$${BUILDKIT_VERSION}.linux-amd64.tar.gz"; \
+			echo "  # Note: buildkitd will be started automatically by 'make start-k3s'"; \
+		fi; \
 		echo ""; \
 		exit 1; \
 	fi
@@ -122,11 +137,29 @@ check-prerequisites:
 
 start-k3s:
 ifeq ($(OS), Darwin)
-	@echo "Starting colima (OSX)"
-	-colima start --kubernetes --runtime containerd --cpu 4 --memory 16 --network-address || true
-	@COLIMA_ADDRESS=$$(colima list --json | jq -r '.address'); \
-	echo "Add to host file or DNS"; \
-	echo "$$COLIMA_ADDRESS grafana.dev.local kafbat.dev.local bff-rest-api.dev.local headlamp.dev.local"
+	@echo "Starting Lima VM with k3s (OSX)"
+	@if ! limactl list | grep -q "^k3s"; then \
+		echo "Creating and starting Lima VM..."; \
+		limactl start --name=k3s --tty=false lima-k3s.yaml; \
+	elif ! limactl list | grep "^k3s" | grep -q "Running"; then \
+		echo "Starting existing Lima VM..."; \
+		limactl start k3s; \
+	else \
+		echo "Lima VM 'k3s' is already running"; \
+	fi
+	@echo "Waiting for k3s to be ready..."
+	@sleep 5
+	@limactl shell k3s sudo k3s kubectl wait --for=condition=Ready nodes --all --timeout=60s 2>/dev/null || true
+	@echo "Configuring kubectl access..."
+	@mkdir -p ~/.kube
+	@limactl shell k3s sudo cat /etc/rancher/k3s/k3s.yaml | sed 's/127.0.0.1/localhost/g' > ~/.kube/config
+	@chmod 600 ~/.kube/config
+	@echo ""
+	@echo "✓ k3s started in Lima VM successfully"
+	@echo ""
+	@echo "Add the following to your /etc/hosts file:"
+	@echo "127.0.0.1 grafana.dev.local kafbat.dev.local bff-rest-api.dev.local headlamp.dev.local"
+	@echo ""
 else ifeq ($(OS), Linux)
 	@echo "Starting k3s (Linux/Ubuntu)"
 	@if [ ! -f /usr/local/bin/k3s ]; then \
@@ -263,6 +296,46 @@ deploy-headlamp: install-traefik
 
 apply:
 	kubectl apply -f ./monitoring/kube-prometheus-values.yaml
+
+stop-k3s:
+ifeq ($(OS), Darwin)
+	@echo "Stopping Lima k3s VM..."
+	@if limactl list | grep -q "^k3s"; then \
+		limactl stop k3s; \
+		echo "✓ Lima k3s VM stopped"; \
+	else \
+		echo "Lima k3s VM does not exist"; \
+	fi
+else ifeq ($(OS), Linux)
+	@echo "Stopping k3s service..."
+	@sudo systemctl stop k3s || sudo service k3s stop
+	@echo "✓ k3s service stopped"
+else
+	@echo "Unsupported OS: $(OS)"
+endif
+
+clean-k3s:
+ifeq ($(OS), Darwin)
+	@echo "Deleting Lima k3s VM..."
+	@if limactl list | grep -q "^k3s"; then \
+		limactl delete k3s; \
+		echo "✓ Lima k3s VM deleted"; \
+	else \
+		echo "Lima k3s VM does not exist"; \
+	fi
+	@echo "Cleaning up kubeconfig..."
+	@rm -f ~/.kube/config
+else ifeq ($(OS), Linux)
+	@echo "Uninstalling k3s..."
+	@if [ -f /usr/local/bin/k3s-uninstall.sh ]; then \
+		sudo /usr/local/bin/k3s-uninstall.sh; \
+		echo "✓ k3s uninstalled"; \
+	else \
+		echo "k3s not installed"; \
+	fi
+else
+	@echo "Unsupported OS: $(OS)"
+endif
 
 # Display this help message
 help:
