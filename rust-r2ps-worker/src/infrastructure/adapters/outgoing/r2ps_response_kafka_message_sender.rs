@@ -27,8 +27,8 @@ impl WorkerResponseSpiPort for WorkerResponseKafkaSender {
     fn send(&self, worker_response: WorkerResponse) -> Result<(), WorkerResponseError> {
         let response = match serde_json::to_string(&worker_response) {
             Ok(output_json) => {
-                let key = &worker_response.request_id;
-                let request_id = &worker_response.request_id;
+                let key = &worker_response.correlation_id;
+                let correlation_id = &worker_response.correlation_id;
                 let record = BaseRecord::to("r2ps-responses")
                     .key(key)
                     .payload(&output_json);
@@ -36,7 +36,10 @@ impl WorkerResponseSpiPort for WorkerResponseKafkaSender {
                 match self.producer.send(record) {
                     Ok(_) => {
                         // Message enqueued successfully
-                        debug!("Message sent: key='{}' request_id='{}'", key, request_id);
+                        debug!(
+                            "Message sent: key='{}' correlation_id='{}'",
+                            key, correlation_id
+                        );
                         Ok(())
                     }
                     Err((err, _)) => {

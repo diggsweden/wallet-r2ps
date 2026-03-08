@@ -50,7 +50,7 @@ impl WorkerRequestUseCase for WorkerService {
             response_context,
         } = self.input(hsm_worker_request)?;
 
-        let request_id = response_context.request_id.clone();
+        let correlation_id = response_context.correlation_id.clone();
         let request_type = response_context.request_type;
 
         let operation_result = self
@@ -74,19 +74,21 @@ impl WorkerRequestUseCase for WorkerService {
         let finished_elapsed = start.elapsed();
 
         info!(
-            "Responding to request id {} ({:?}, took {}/{} ms)",
-            request_id,
+            "Responding to correlation id {} ({:?}, took {}/{} ms)",
+            correlation_id,
             request_type,
             processing_elapsed.as_millis(),
             finished_elapsed.as_millis()
         );
 
-        Ok(request_id)
+        Ok(correlation_id)
     }
 }
 
 struct ResponseContext {
-    request_id: String,
+    correlation_id: String,
+    client_id: Option<String>,
+    request_id: Option<String>,
     request_type: OperationId,
     session_key: Option<SessionKey>,
     device_public_key: EcPublicJwk,
@@ -103,6 +105,8 @@ impl WorkerService {
         hsm_worker_request: HsmWorkerRequest,
     ) -> Result<WorkerInput, WorkerRequestError> {
         let HsmWorkerRequest {
+            correlation_id,
+            client_id,
             request_id,
             state_jws,
             outer_request_jws,
@@ -127,10 +131,13 @@ impl WorkerService {
             .public_key
             .clone();
 
-        let outer_request =
-            OuterRequest::from_jws(outer_request_jws.as_str(), self.jose.as_ref(), &device_public_key)?;
+        let outer_request = OuterRequest::from_jws(
+            outer_request_jws.as_str(),
+            self.jose.as_ref(),
+            &device_public_key,
+        )?;
 
-        info!("Received request id {}", request_id);
+        info!("Received correlation id {}", correlation_id);
 
         // TODO: Use JOSE 'aud' (audience) claim in the validation done inside decode_service_request_jws() instead
         if outer_request.context != "hsm" {
@@ -142,19 +149,20 @@ impl WorkerService {
             .as_ref()
             .and_then(|id| self.session_key_spi_port.get(id));
 
-        let inner_request = outer_request.decrypt_inner(self.jose.as_ref(), session_key.as_ref())?;
+        let inner_request =
+            outer_request.decrypt_inner(self.jose.as_ref(), session_key.as_ref())?;
 
         debug!("Inner request: {:#?}", inner_request);
 
         let request_type = inner_request.request_type;
 
         info!(
-            "Processing request id {} of type {:?}",
-            request_id, request_type
+            "Processing correlation id {} of type {:?}",
+            correlation_id, request_type
         );
 
         let operation_context = OperationContext {
-            request_id: request_id.clone(),
+            correlation_id: correlation_id.clone(),
             state,
             outer_request: outer_request.clone(),
             inner_request,
@@ -163,6 +171,8 @@ impl WorkerService {
         };
 
         let response_context = ResponseContext {
+            correlation_id,
+            client_id,
             request_id,
             request_type,
             session_key,
@@ -238,6 +248,8 @@ impl WorkerService {
             .transpose()?;
 
         Ok(WorkerResponse {
+            correlation_id: context.correlation_id,
+            client_id: context.client_id,
             request_id: context.request_id,
             http_status: 200,
             state_jws: new_state_jws,

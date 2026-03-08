@@ -9,5 +9,5 @@ import java.util.UUID;
 public interface R2psResponseSinkSpiPort {
   void storeResponse(R2psResponse r2psResponse);
 
-  Optional<R2psResponse> loadResponse(UUID requestId);
+  Optional<R2psResponse> loadResponse(UUID correlationId);
 }

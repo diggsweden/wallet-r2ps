@@ -1,7 +1,6 @@
 name: r2ps-dev
 
 services:
-
   r2ps-rest-api:
     build:
       context: .
@@ -11,12 +10,8 @@ services:
       - "9012:8000"
     restart: on-failure
     depends_on:
-      kafka-1:
-        condition: service_healthy
-      kafka-2:
-        condition: service_healthy
-      kafka-3:
-        condition: service_healthy
+      init-kafka:
+        condition: service_completed_successfully
     environment:
       SPRING_KAFKA_BOOTSTRAP_SERVERS: "kafka-1:19092,kafka-2:19092,kafka-3:19092"
       SPRING_DATA_REDIS_HOST: "valkey"
@@ -26,6 +21,26 @@ services:
       SPRING_DATA_REDIS_DATABASE: 0
       TZ: "Europe/Stockholm"
     env_file: .env
+    networks:
+      - wallet-network
+
+  wallet-bff-ws:
+    build:
+      context: ./wallet-bff-ws
+      dockerfile: Containerfile
+    ports:
+      - "8089:8088"
+    restart: on-failure
+    depends_on:
+      init-kafka:
+        condition: service_completed_successfully
+    env_file: ./wallet-bff-ws/.env
+    environment:
+      KAFKA__BROKERS: "kafka-1:19092,kafka-2:19092,kafka-3:19092"
+      KAFKA__CONSUMER__GROUP_ID: "wallet-bff-ws-group"
+      REDIS__HOST: "valkey"
+      REDIS__PORT: "6379"
+      REDIS__DB: "0"
     networks:
       - wallet-network
 
@@ -51,7 +66,7 @@ services:
     image: valkey/valkey:8.0.2-alpine3.21
     ports:
       - 6379:6379
-    command: [ "valkey-server", "/usr/local/etc/valkey/valkey.conf" ]
+    command: ["valkey-server", "/usr/local/etc/valkey/valkey.conf"]
     volumes:
       - ./config/valkey.conf:/usr/local/etc/valkey/valkey.conf
     networks:
@@ -71,7 +86,7 @@ services:
       KAFKA_DEFAULT_REPLICATION_FACTOR: 3
       KAFKA_MIN_INSYNC_REPLICAS: 2
       KAFKA_LOG_DIRS: /tmp/kraft-combined-logs
-      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'false'
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
 
   kafka-1:
     <<: *kafka-common

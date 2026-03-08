@@ -25,14 +25,14 @@ public class R2psResponseValKeySink implements R2psResponseSinkSpiPort {
 
   @Override
   public void storeResponse(R2psResponse r2psResponse) {
-    redisTemplate.opsForValue().set(r2psResponse.requestId().toString(), r2psResponse,
+    redisTemplate.opsForValue().set(r2psResponse.correlationId().toString(), r2psResponse,
         config.getKafka().rest()
             .responseTtlSeconds(),
         TimeUnit.SECONDS);
   }
 
   @Override
-  public Optional<R2psResponse> loadResponse(UUID requestId) {
-    return Optional.ofNullable(redisTemplate.opsForValue().get(requestId.toString()));
+  public Optional<R2psResponse> loadResponse(UUID correlationId) {
+    return Optional.ofNullable(redisTemplate.opsForValue().get(correlationId.toString()));
   }
 }

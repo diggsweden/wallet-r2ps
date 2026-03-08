@@ -87,6 +87,8 @@ impl WorkerRequestKafkaReceiver {
                         debug!("Received message: key='{:?}'", key);
 
                         let hsm_worker_request = HsmWorkerRequest {
+                            correlation_id: hsm_worker_request_dto.correlation_id,
+                            client_id: hsm_worker_request_dto.client_id,
                             request_id: hsm_worker_request_dto.request_id,
                             state_jws: hsm_worker_request_dto.state_jws,
                             outer_request_jws: hsm_worker_request_dto.outer_request_jws,

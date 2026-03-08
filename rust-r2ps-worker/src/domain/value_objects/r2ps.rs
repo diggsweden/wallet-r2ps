@@ -50,8 +50,14 @@ pub enum Status {
 #[cfg_attr(feature = "openapi", derive(ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct HsmWorkerRequestDto {
-    /// Unique identifier for this request (used for correlation)
-    pub request_id: String,
+    /// Server-generated correlation identifier (UUID) for tracking this request
+    pub correlation_id: String,
+    /// WebSocket client identifier for response routing (absent for HTTP requests)
+    #[serde(default)]
+    pub client_id: Option<String>,
+    /// Client-generated request identifier from WebSocket clients (absent for REST API requests)
+    #[serde(default)]
+    pub request_id: Option<String>,
     /// JWS-encoded device state (DeviceHsmState)
     pub state_jws: TypedJws<DeviceHsmState>,
     /// JWS-encoded outer request envelope (OuterRequest)
@@ -63,8 +69,14 @@ pub struct HsmWorkerRequestDto {
 #[cfg_attr(feature = "openapi", derive(ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct R2psResponseDto {
-    /// Correlation ID matching the original request
-    pub request_id: String,
+    /// Server-generated correlation identifier matching the original request
+    pub correlation_id: String,
+    /// WebSocket client identifier echoed back for response routing
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub client_id: Option<String>,
+    /// Client-generated request identifier echoed from the request
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<String>,
     pub http_status: u16,
     /// JWS-encoded updated device state (DeviceHsmState)
     pub state_jws: TypedJws<DeviceHsmState>,
@@ -77,8 +89,12 @@ pub struct R2psResponseDto {
 #[cfg_attr(feature = "openapi", derive(ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct HsmWorkerRequest {
-    /// Unique identifier for this request
-    pub request_id: String,
+    /// Server-generated correlation identifier (UUID) for tracking this request
+    pub correlation_id: String,
+    /// WebSocket client identifier for response routing (absent for HTTP requests)
+    pub client_id: Option<String>,
+    /// Client-generated request identifier from WebSocket clients (absent for REST API requests)
+    pub request_id: Option<String>,
     /// JWS-encoded device state (DeviceHsmState)
     pub state_jws: TypedJws<DeviceHsmState>,
     /// JWS-encoded outer request envelope (OuterRequest)
@@ -91,8 +107,14 @@ pub struct HsmWorkerRequest {
 #[cfg_attr(feature = "openapi", derive(ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct WorkerResponse {
-    /// Correlation ID matching the original request
-    pub request_id: String,
+    /// Server-generated correlation identifier matching the original request
+    pub correlation_id: String,
+    /// WebSocket client identifier echoed back for response routing
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub client_id: Option<String>,
+    /// Client-generated request identifier echoed from the request
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<String>,
     pub http_status: u16,
     /// JWS-encoded updated device state (DeviceHsmState)
     pub state_jws: Option<TypedJws<DeviceHsmState>>,

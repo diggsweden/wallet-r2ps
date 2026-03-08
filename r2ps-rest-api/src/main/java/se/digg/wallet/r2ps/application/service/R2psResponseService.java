@@ -32,9 +32,9 @@ public class R2psResponseService implements R2psResponseUseCase {
   @Override
   public void r2psResponseReady(R2psResponse r2psResponse) {
     Optional<PendingRequestContext> ctxOpt =
-        pendingRequestContextSpiPort.load(r2psResponse.requestId().toString());
+        pendingRequestContextSpiPort.load(r2psResponse.correlationId().toString());
     if (ctxOpt.isEmpty()) {
-      log.warn("No pending context for requestId: {}, ignoring", r2psResponse.requestId());
+      log.warn("No pending context for correlationId: {}, ignoring", r2psResponse.correlationId());
       return;
     }
     if (r2psResponse.stateJws().isPresent()) {
@@ -45,21 +45,21 @@ public class R2psResponseService implements R2psResponseUseCase {
   }
 
   @Override
-  public Optional<R2psResponse> waitForR2psResponse(UUID requestId, long timeoutMillis) {
+  public Optional<R2psResponse> waitForR2psResponse(UUID correlationId, long timeoutMillis) {
     long endTime = System.currentTimeMillis() + timeoutMillis;
 
     try {
       while (System.currentTimeMillis() < endTime) {
-        Optional<R2psResponse> r2psResponse = r2psResponseSinkSpiPort.loadResponse(requestId);
+        Optional<R2psResponse> r2psResponse = r2psResponseSinkSpiPort.loadResponse(correlationId);
         if (r2psResponse.isPresent()) {
-          log.info("Got r2psResponseDto for {}", requestId);
+          log.info("Got r2psResponse for {}", correlationId);
           return r2psResponse;
         }
         sleep(100); // poll interval
       }
     } catch (InterruptedException e) {
-      log.info("Interrupted while waiting for register wallet response for requestId: {}",
-          requestId);
+      log.info("Interrupted while waiting for response for correlationId: {}",
+          correlationId);
     }
     return Optional.empty();
   }

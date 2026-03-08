@@ -143,24 +143,24 @@ public class R2psRequestController {
       return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
     }
 
-    UUID requestId = UUID.randomUUID();
-    pendingRequestContextSpiPort.save(requestId.toString(),
+    UUID correlationId = UUID.randomUUID();
+    pendingRequestContextSpiPort.save(correlationId.toString(),
         new PendingRequestContext(deviceId.toString(), R2psDeviceStateValKey.DEFAULT_TTL_SECONDS));
 
     HsmWorkerRequest hsmWorkerRequest =
-        new HsmWorkerRequest(requestId, stateJws, bffRequest.getOuterRequestJws());
+        new HsmWorkerRequest(correlationId, deviceId.toString(), null, stateJws, bffRequest.getOuterRequestJws());
     log.info("Sending service request:\n{}", objectMapper.writeValueAsString(hsmWorkerRequest));
     requestMessageSpiPort.send(hsmWorkerRequest, deviceId);
 
     if (syncResponseSupport) {
-      log.info("Waiting for synchronous response for requestId: {}", requestId);
-      return taskResponse(requestId);
+      log.info("Waiting for synchronous response for correlationId: {}", correlationId);
+      return taskResponse(correlationId);
     }
 
-    URI location = urlFormatter.responseEventsUrl(requestId);
+    URI location = urlFormatter.responseEventsUrl(correlationId);
     AsyncResponseDto<String> responseBody =
         new AsyncResponseDto<>(
-            requestId,
+            correlationId,
             AsyncResponseStatus.PENDING,
             Optional.empty(),
             Optional.of(location),

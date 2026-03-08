@@ -19,7 +19,7 @@ use session::SessionEndOperation;
 
 #[derive(Debug)]
 pub struct OperationContext {
-    pub request_id: String,
+    pub correlation_id: String,
     pub state: crate::domain::DeviceHsmState,
     pub outer_request: crate::domain::value_objects::r2ps::OuterRequest,
     pub inner_request: crate::domain::value_objects::r2ps::InnerRequest,
