@@ -1,5 +1,5 @@
 [book]
-title = "R2PS HSM Worker - Domain Model"
+title = "Remote Signing HSM Worker - Domain Model"
 authors = ["DIGG"]
 language = "en"
 src = "src"
@@ -11,3 +11,4 @@ build-dir = "book"
 default-theme = "light"
 preferred-dark-theme = "navy"
 git-repository-url = "https://github.com/diggsweden/wallet-r2ps"
+additional-js = ["mermaid.min.js", "mermaid-init.js"]

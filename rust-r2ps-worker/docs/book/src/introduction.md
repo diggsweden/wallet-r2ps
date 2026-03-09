@@ -1,6 +1,6 @@
 # Introduction
 
-This documentation describes the domain model for the R2PS (Remote to Phone Signing) HSM Worker service.
+This documentation describes the domain model for the Remote Signing HSM Worker service.
 
 ## Purpose
 

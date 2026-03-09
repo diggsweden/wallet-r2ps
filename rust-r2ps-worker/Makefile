@@ -11,7 +11,9 @@ openapi.json: src/lib.rs src/domain/**/*.rs src/generate_openapi.rs Cargo.toml
 ## Build mdbook documentation from OpenAPI schema
 docs: docs/book/book/index.html
 
-docs/book/book/index.html: openapi.json docs/openapi_to_markdown.py docs/book/src/introduction.md docs/book/src/api-reference/README.md
+GUIDE_PAGES := $(wildcard docs/book/src/introduction.md docs/book/src/architecture.md docs/book/src/protocol-flow.md docs/book/src/operations.md docs/book/src/security.md)
+
+docs/book/book/index.html: openapi.json docs/openapi_to_markdown.py docs/book/src/api-reference/README.md $(GUIDE_PAGES)
 	@mkdir -p docs/book/src/api-reference
 	python3 docs/openapi_to_markdown.py openapi.json docs/book/src/api-reference
 	cd docs/book && mdbook build

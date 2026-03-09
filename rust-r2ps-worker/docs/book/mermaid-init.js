@@ -16,6 +16,14 @@
         }
     }
 
+    // mdbook renders ```mermaid blocks as <pre><code class="language-mermaid">.
+    // Mermaid.js expects <pre class="mermaid">.  Convert them before init.
+    document.querySelectorAll('pre > code.language-mermaid').forEach((codeEl) => {
+        const preEl = codeEl.parentElement;
+        preEl.className = 'mermaid';
+        preEl.textContent = codeEl.textContent;
+    });
+
     const theme = lastThemeWasLight ? 'default' : 'dark';
     mermaid.initialize({ startOnLoad: true, theme });
 

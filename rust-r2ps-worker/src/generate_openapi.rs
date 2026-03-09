@@ -28,7 +28,7 @@ use utoipa::OpenApi;
         domain::HsmWorkerRequestDto,
         domain::R2psResponseDto,
         domain::HsmWorkerRequest,
-        domain::WorkerResponseJws,
+        domain::WorkerResponse,
         domain::OuterRequest,
         domain::OuterResponse,
         domain::InnerRequest,
