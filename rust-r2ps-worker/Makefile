@@ -47,4 +47,4 @@ check:
 	}; \
 	run fmt cargo fmt; \
 	run test cargo test -q; \
-	run clippy cargo clippy -q -- -D warnings;
+	run clippy cargo clippy -q --all-targets -- -D warnings;

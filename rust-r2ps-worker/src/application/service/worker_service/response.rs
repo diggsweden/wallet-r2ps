@@ -15,7 +15,7 @@ use std::sync::Arc;
 /// Carries a `WorkerError` with whatever context was available when the error occurred.
 pub struct ProcessError {
     pub error: WorkerError,
-    pub context: Option<ResponseContext>,
+    pub context: Option<Box<ResponseContext>>,
 }
 
 /// Responsible for constructing and signing responses.

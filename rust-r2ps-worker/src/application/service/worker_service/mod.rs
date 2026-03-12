@@ -115,7 +115,7 @@ impl WorkerService {
             .dispatch(operation_context)
             .map_err(|err| ProcessError {
                 error: WorkerError::Inner(err),
-                context: Some(response_context.clone()),
+                context: Some(Box::new(response_context.clone())),
             })?;
 
         // Encode
@@ -123,7 +123,7 @@ impl WorkerService {
             .encode_response(operation_result, &response_context)
             .map_err(|error| ProcessError {
                 error,
-                context: Some(response_context),
+                context: Some(Box::new(response_context)),
             })
     }
 }

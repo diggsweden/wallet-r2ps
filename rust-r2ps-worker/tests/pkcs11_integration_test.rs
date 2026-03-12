@@ -35,7 +35,7 @@ fn get_hsm() -> &'static Mutex<HsmWrapper> {
 #[test]
 fn gen_ecc_key() -> Result<(), Box<dyn std::error::Error>> {
     let hsm_wrapper = get_hsm().lock()?;
-    let result = hsm_wrapper.generate_key(&"foobar", &Curve::P256)?;
+    let result = hsm_wrapper.generate_key("foobar", &Curve::P256)?;
     println!("{:?}", result);
 
     Ok(())
@@ -47,7 +47,7 @@ fn gen_ecc_key_wrap_unwrap_sign() -> Result<(), Box<dyn std::error::Error>> {
     let message = "foobar";
     let hsm_key = hsm_wrapper.generate_key(message, &Curve::P256)?;
     let digest = Sha256::digest(message);
-    let signature = hsm_wrapper.sign(&hsm_key, &digest.to_vec());
+    let signature = hsm_wrapper.sign(&hsm_key, &digest);
 
     let ec_public_jwk = &hsm_key.public_key_jwk;
     let x_bytes = BASE64_URL_SAFE_NO_PAD.decode(&ec_public_jwk.x)?;
@@ -60,7 +60,7 @@ fn gen_ecc_key_wrap_unwrap_sign() -> Result<(), Box<dyn std::error::Error>> {
     let verifying_key = VerifyingKey::from_sec1_bytes(&sec1_bytes).map_err(|e| e.to_string())?;
 
     // Parse the signature (r || s, 64 bytes for P-256)
-    let result = match Signature::from_slice(&signature?.to_bytes()) {
+    let result = match Signature::from_slice(signature?.to_bytes()) {
         Ok(signature) => verifying_key.verify_prehash(&digest, &signature).is_ok(),
         Err(error) => {
             println!("{:?}", error);
