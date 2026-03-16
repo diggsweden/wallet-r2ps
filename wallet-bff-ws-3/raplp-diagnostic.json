@@ -1,0 +1,265 @@
+{
+  "timeStamp": "2026-03-06 15:57:54",
+  "result": [
+    {
+      "Notering": "Godkända regler - RAP-LP",
+      "regler": [
+        {
+          "id": "UFN.05",
+          "område": "URL Format och namngivning",
+          "status": "OK"
+        },
+        {
+          "id": "VER.06",
+          "område": "Versionhantering",
+          "status": "OK"
+        },
+        {
+          "id": "DOK.08",
+          "område": "Dokumentation",
+          "status": "OK"
+        },
+        {
+          "id": "DOK.09",
+          "område": "Dokumentation",
+          "status": "OK"
+        },
+        {
+          "id": "DOK.17",
+          "område": "Dokumentation",
+          "status": "OK"
+        },
+        {
+          "id": "DOK.03",
+          "område": "Dokumentation",
+          "status": "OK"
+        },
+        {
+          "id": "DOK.07",
+          "område": "Dokumentation",
+          "status": "OK"
+        },
+        {
+          "id": "DOK.11",
+          "område": "Dokumentation",
+          "status": "OK"
+        },
+        {
+          "id": "DOK.06",
+          "område": "Dokumentation",
+          "status": "OK"
+        },
+        {
+          "id": "AME.05",
+          "område": "API Message",
+          "status": "OK"
+        },
+        {
+          "id": "UFN.07",
+          "område": "URL Format och namngivning",
+          "status": "OK"
+        },
+        {
+          "id": "DOK.15",
+          "område": "Dokumentation",
+          "status": "OK"
+        },
+        {
+          "id": "UFN.08",
+          "område": "URL Format och namngivning",
+          "status": "OK"
+        },
+        {
+          "id": "UFN.09",
+          "område": "URL Format och namngivning",
+          "status": "OK"
+        },
+        {
+          "id": "RES.06",
+          "område": "Resurser",
+          "status": "OK"
+        },
+        {
+          "id": "MOG.01",
+          "område": "Mognad",
+          "status": "OK"
+        },
+        {
+          "id": "ARQ.03",
+          "område": "API Request",
+          "status": "OK"
+        },
+        {
+          "id": "DOK.19",
+          "område": "Dokumentation",
+          "status": "OK"
+        },
+        {
+          "id": "ARQ.01",
+          "område": "API Request",
+          "status": "OK"
+        },
+        {
+          "id": "AME.01",
+          "område": "API Message",
+          "status": "OK"
+        },
+        {
+          "id": "AME.02",
+          "område": "API Message",
+          "status": "OK"
+        },
+        {
+          "id": "DOK.20",
+          "område": "Dokumentation",
+          "status": "OK"
+        },
+        {
+          "id": "FOR.02",
+          "område": "Förutsättningar",
+          "status": "OK"
+        },
+        {
+          "id": "RES.02",
+          "område": "Resurser",
+          "status": "OK"
+        },
+        {
+          "id": "AME.07",
+          "område": "API Message",
+          "status": "OK"
+        }
+      ]
+    },
+    {
+      "Notering": "Ej Godkända regler - RAP-LP",
+      "regler": [
+        {
+          "id": "MOG.02",
+          "område": "Mognad",
+          "status": "EJ OK"
+        },
+        {
+          "id": "AME.04",
+          "område": "API Message",
+          "status": "EJ OK"
+        }
+      ]
+    },
+    {
+      "Notering": "Ej tillämpade regler - RAP-LP",
+      "regler": [
+        {
+          "id": "UFN.01",
+          "område": "URL Format och namngivning",
+          "status": "N/A"
+        },
+        {
+          "id": "UFN.02",
+          "område": "URL Format och namngivning",
+          "status": "N/A"
+        },
+        {
+          "id": "SAK.01",
+          "område": "Säkerhet",
+          "status": "N/A"
+        },
+        {
+          "id": "SAK.09",
+          "område": "Säkerhet",
+          "status": "N/A"
+        },
+        {
+          "id": "SAK.10",
+          "område": "Säkerhet",
+          "status": "N/A"
+        },
+        {
+          "id": "SAK.15",
+          "område": "Säkerhet",
+          "status": "N/A"
+        },
+        {
+          "id": "SAK.16",
+          "område": "Säkerhet",
+          "status": "N/A"
+        },
+        {
+          "id": "SAK.18",
+          "område": "Säkerhet",
+          "status": "N/A"
+        },
+        {
+          "id": "VER.05",
+          "område": "Versionhantering",
+          "status": "N/A"
+        },
+        {
+          "id": "FNS.01",
+          "område": "Filtrering, paginering och sökparametrar",
+          "status": "N/A"
+        },
+        {
+          "id": "FNS.03",
+          "område": "Filtrering, paginering och sökparametrar",
+          "status": "N/A"
+        },
+        {
+          "id": "FNS.05",
+          "område": "Filtrering, paginering och sökparametrar",
+          "status": "N/A"
+        },
+        {
+          "id": "FNS.06",
+          "område": "Filtrering, paginering och sökparametrar",
+          "status": "N/A"
+        },
+        {
+          "id": "FNS.07",
+          "område": "Filtrering, paginering och sökparametrar",
+          "status": "N/A"
+        },
+        {
+          "id": "FNS.08",
+          "område": "Filtrering, paginering och sökparametrar",
+          "status": "N/A"
+        },
+        {
+          "id": "FNS.09",
+          "område": "Filtrering, paginering och sökparametrar",
+          "status": "N/A"
+        },
+        {
+          "id": "ARQ.05",
+          "område": "API Request",
+          "status": "N/A"
+        },
+        {
+          "id": "DOK.01",
+          "område": "Dokumentation",
+          "status": "N/A"
+        },
+        {
+          "id": "DOT.02",
+          "område": "Datum- och tidsformat",
+          "status": "N/A"
+        },
+        {
+          "id": "DOT.04",
+          "område": "Datum- och tidsformat",
+          "status": "N/A"
+        },
+        {
+          "id": "FEL.01",
+          "område": "Felhantering",
+          "status": "N/A"
+        },
+        {
+          "id": "FEL.02",
+          "område": "Felhantering",
+          "status": "N/A"
+        }
+      ]
+    }
+  ]
+}

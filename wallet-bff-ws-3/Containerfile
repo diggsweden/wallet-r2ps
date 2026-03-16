@@ -1,0 +1,141 @@
+# syntax=docker/dockerfile:1
+#
+# Multi-stage Containerfile for wallet-bff-ws
+#
+# Uses distroless runtime for minimal image size and attack surface.
+#
+# Supports both debug and release profiles via --target:
+#   docker build --target runtime-release -t wallet-bff-ws .
+#   docker build --target runtime-debug   -t wallet-bff-ws:debug .
+#
+# Multi-architecture builds (amd64 + arm64):
+#   docker buildx build --platform linux/amd64,linux/arm64 \
+#     --target runtime-release -t wallet-bff-ws .
+
+# ============================================================================
+# Stage 1: Chef — Cargo dependency caching layer
+# ============================================================================
+# Using cargo-chef for efficient Docker layer caching of Rust dependencies.
+# This avoids recompiling all dependencies when only source code changes.
+FROM rust:1.88-bookworm AS chef
+
+RUN cargo install cargo-chef
+
+# Install build dependencies for rdkafka (cmake-build feature) and OpenSSL
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    cmake \
+    libssl-dev \
+    libsasl2-dev \
+    libzstd-dev \
+    pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+
+# ============================================================================
+# Stage 2: Planner — Generate dependency recipe
+# ============================================================================
+FROM chef AS planner
+
+COPY Cargo.toml Cargo.lock ./
+COPY src ./src
+
+RUN cargo chef prepare --recipe-path recipe.json
+
+# ============================================================================
+# Stage 3: Builder (Debug)
+# ============================================================================
+FROM chef AS builder-debug
+
+COPY --from=planner /build/recipe.json recipe.json
+
+# Build dependencies only (cached unless Cargo.toml/Cargo.lock change)
+RUN cargo chef cook --recipe-path recipe.json
+
+# Copy source and build both binaries
+COPY Cargo.toml Cargo.lock ./
+COPY src ./src
+
+RUN cargo build --bin wallet-bff-ws --bin healthcheck
+
+# ============================================================================
+# Stage 4: Builder (Release)
+# ============================================================================
+FROM chef AS builder-release
+
+COPY --from=planner /build/recipe.json recipe.json
+
+# Build dependencies only (cached unless Cargo.toml/Cargo.lock change)
+RUN cargo chef cook --release --recipe-path recipe.json
+
+# Copy source and build both binaries with optimizations
+COPY Cargo.toml Cargo.lock ./
+COPY src ./src
+
+RUN cargo build --release --bin wallet-bff-ws --bin healthcheck
+
+# ============================================================================
+# Stage 5: Library collector
+# ============================================================================
+# Collects the dynamic libraries needed at runtime that are not present in
+# distroless cc-debian12. The distroless image already provides glibc,
+# libgcc_s, libstdc++, libssl3, and libcrypto3. We only need to copy
+# libsasl2 and libzstd.
+#
+# Libraries are staged into /runtime-libs/ and mounted into the runtime
+# container at /app/lib/, discoverable via LD_LIBRARY_PATH.
+# ============================================================================
+FROM chef AS lib-collector
+
+RUN LIBDIR="/usr/lib/$(dpkg-architecture -qDEB_HOST_MULTIARCH)" && \
+    LIBDIR2="/lib/$(dpkg-architecture -qDEB_HOST_MULTIARCH)" && \
+    mkdir -p /runtime-libs && \
+    cp -L ${LIBDIR}/libsasl2.so.2 /runtime-libs/ && \
+    cp -L ${LIBDIR}/libzstd.so.1 /runtime-libs/ && \
+    cp -L ${LIBDIR2}/libz.so.1 /runtime-libs/
+
+# ============================================================================
+# Stage 6: Runtime (Debug) — distroless
+# ============================================================================
+FROM gcr.io/distroless/cc-debian12:nonroot AS runtime-debug
+
+WORKDIR /app
+
+# Extra shared libraries not present in distroless base
+COPY --from=lib-collector /runtime-libs/ /app/lib/
+ENV LD_LIBRARY_PATH=/app/lib
+
+# Application binaries
+COPY --from=builder-debug /build/target/debug/wallet-bff-ws /app/wallet-bff-ws
+COPY --from=builder-debug /build/target/debug/healthcheck /app/healthcheck
+
+EXPOSE 8088
+
+# Exec form — no shell required (compatible with distroless)
+HEALTHCHECK --interval=10s --timeout=3s --start-period=15s --retries=3 \
+    CMD ["/app/healthcheck"]
+
+ENTRYPOINT ["/app/wallet-bff-ws"]
+
+# ============================================================================
+# Stage 7: Runtime (Release) — distroless, default target
+# ============================================================================
+FROM gcr.io/distroless/cc-debian12:nonroot AS runtime-release
+
+WORKDIR /app
+
+# Extra shared libraries not present in distroless base
+COPY --from=lib-collector /runtime-libs/ /app/lib/
+ENV LD_LIBRARY_PATH=/app/lib
+
+# Application binaries
+COPY --from=builder-release /build/target/release/wallet-bff-ws /app/wallet-bff-ws
+COPY --from=builder-release /build/target/release/healthcheck /app/healthcheck
+
+EXPOSE 8088
+
+# Exec form — no shell required (compatible with distroless)
+HEALTHCHECK --interval=10s --timeout=3s --start-period=15s --retries=3 \
+    CMD ["/app/healthcheck"]
+
+ENTRYPOINT ["/app/wallet-bff-ws"]
