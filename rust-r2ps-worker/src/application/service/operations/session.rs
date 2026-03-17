@@ -10,9 +10,7 @@ impl ServiceOperation for SessionEndOperation {
             return Err(ServiceRequestError::UnknownSession);
         }
 
-        let payload = PakeResponse {
-            data: None,
-        };
+        let payload = PakeResponse { data: None };
 
         Ok(OperationResult {
             state: None,

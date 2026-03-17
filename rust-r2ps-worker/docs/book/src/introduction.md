@@ -1,24 +1,23 @@
 # Introduction
 
-This documentation describes the domain model for the R2PS (Remote to Phone Signing) HSM Worker service.
+The HSM Worker is a multi-threaded Rust service that processes cryptographic operations for wallet devices. It manages device state, OPAQUE-based PIN authentication, and HSM-backed key operations (generation, signing, deletion).
 
-## Purpose
+## What it does
 
-The HSM Worker processes cryptographic operations for remote signing, managing device state and HSM-backed keys. This service communicates via Kafka, receiving requests and sending responses in a structured format.
+- **Device lifecycle**: Initialize device state, register and change PINs via OPAQUE PAKE
+- **Authentication**: PIN-based authentication using the OPAQUE protocol, which derives a shared session key without ever transmitting the PIN
+- **HSM key management**: Generate, list, delete EC keys on a PKCS#11 HSM (SoftHSM in dev, hardware HSM in production)
+- **ECDSA signing**: Sign payloads using HSM-held private keys
 
-## Documentation Structure
+## How it communicates
 
-- **API Reference**: Detailed specifications of all data types used in the protocol
-  - Request/Response DTOs
-  - Protocol envelopes
-  - State management types
-  - Supporting types and enums
+The worker is event-driven. It consumes commands from Kafka, processes them against server-owned device state in PostgreSQL, and publishes responses back through Kafka via a transactional outbox.
 
-## Key Concepts
+All request and response payloads use a two-layer JWS/JWE envelope for integrity and confidentiality. The outer layer is JWS-signed for authentication; the inner layer is JWE-encrypted using either a session key (for authenticated operations) or the device's public key (for unauthenticated operations like state initialization).
 
-- **JWS (JSON Web Signature)**: Signed payloads ensuring integrity and authenticity
-- **JWE (JSON Web Encryption)**: Encrypted payloads ensuring confidentiality
-- **Device State**: Persistent state encoded as JWS, containing keys and metadata
-- **Outer/Inner Layers**: Protocol uses nested envelopes for signed and encrypted data
+## Documentation structure
 
-For detailed type specifications, see the [API Reference](api-reference/index.md).
+- **[Architecture](architecture/overview.md)** -- Hexagonal design, request pipeline, state management, security model, and threading
+- **[Operations](operations/README.md)** -- All supported operations and their characteristics
+- **[Configuration](configuration.md)** -- Environment variables and CLI commands
+- **[API Reference](api-reference/README.md)** -- Detailed type specifications for the protocol

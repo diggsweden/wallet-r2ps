@@ -1,7 +1,7 @@
 use crate::application::service::operations::hsm::MessageVector;
 use crate::application::service::operations::hsm::SignatureVector;
 use crate::define_byte_vector;
-use crate::domain::{DeviceHsmState, EcPublicJwk};
+use crate::domain::EcPublicJwk;
 use base64::DecodeError;
 use serde::{Deserialize, Serialize};
 use std::string::FromUtf8Error;
@@ -15,7 +15,7 @@ use uuid::Uuid;
 use super::typed_jwe::TypedJwe;
 use super::typed_jws::TypedJws;
 
-/// A unique session identifier (UUID v4) used to track an active R2PS session.
+/// A unique session identifier (UUID v4).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "openapi", derive(ToSchema))]
 #[cfg_attr(feature = "openapi", schema(value_type = String, format = "uuid"))]
@@ -37,50 +37,58 @@ impl SessionId {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "openapi", derive(ToSchema))]
 pub enum Status {
-    /// Operation completed successfully
     #[serde(rename = "OK")]
     Ok,
-    /// Operation failed
     #[serde(rename = "ERROR")]
     Error,
 }
 
-/// DTO for HSM worker requests received from Kafka.
+/// DTO for HSM worker requests received from Kafka (command topic).
+/// State is now server-side — no `state_jws` field.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct HsmWorkerRequestDto {
-    /// Unique identifier for this request (used for correlation)
-    pub request_id: String,
-    /// JWS-encoded device state (DeviceHsmState)
-    pub state_jws: TypedJws<DeviceHsmState>,
+    /// Server-generated correlation ID
+    pub correlation_id: String,
+    /// Device identifier
+    pub device_id: String,
+    /// Client-generated request ID (WebSocket clients only)
+    pub request_id: Option<String>,
+    /// Optimistic concurrency version
+    pub state_version: Option<u64>,
     /// JWS-encoded outer request envelope (OuterRequest)
     pub outer_request_jws: TypedJws<OuterRequest>,
 }
 
-/// An HSM worker request containing the device state and the client's outer request.
+/// An HSM worker request — state is now server-owned.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct HsmWorkerRequest {
-    /// Unique identifier for this request
-    pub request_id: String,
-    /// JWS-encoded device state (DeviceHsmState)
-    pub state_jws: TypedJws<DeviceHsmState>,
+    /// Server-generated correlation ID
+    pub correlation_id: String,
+    /// Device identifier
+    pub device_id: String,
+    /// Client-generated request ID (WebSocket clients only)
+    pub request_id: Option<String>,
+    /// Optimistic concurrency version
+    pub state_version: Option<u64>,
     /// JWS-encoded outer request envelope (OuterRequest)
     pub outer_request_jws: TypedJws<OuterRequest>,
 }
 
-/// The worker's response containing updated state and the service response,
-/// sent back via Kafka as a JWS-encoded message.
+/// The worker's response — no state_jws, state is server-side.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct WorkerResponse {
     /// Correlation ID matching the original request
-    pub request_id: String,
-    /// JWS-encoded updated device state (DeviceHsmState)
-    pub state_jws: Option<TypedJws<DeviceHsmState>>,
+    pub correlation_id: String,
+    /// Device identifier for Kafka partition key affinity
+    pub device_id: String,
+    /// Client-generated request ID (WebSocket clients only)
+    pub request_id: Option<String>,
     /// JWS-encoded service response (OuterResponse)
     pub outer_response_jws: Option<TypedJws<OuterResponse>>,
     /// The result status of the operation
@@ -90,32 +98,23 @@ pub struct WorkerResponse {
 }
 
 /// The outer request envelope, verified via JWS using the device's public key.
-/// Contains the protocol version, session binding, and an encrypted inner payload.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[cfg_attr(feature = "openapi", derive(ToSchema))]
 pub struct OuterRequest {
-    /// Protocol version
     pub version: u32,
-    /// Session identifier (absent for initial requests like registration/authentication start)
     pub session_id: Option<SessionId>,
-    /// Request context, currently always "hsm"
     pub context: String,
-    /// JWE-encrypted inner request payload (JWE compact serialization)
     pub inner_jwe: Option<TypedJwe<InnerRequest>>,
 }
 
-/// The decrypted inner request payload, containing the operation type and request-specific data.
+/// The decrypted inner request payload.
 #[derive(Debug, Deserialize, Serialize)]
 #[cfg_attr(feature = "openapi", derive(ToSchema))]
 pub struct InnerRequest {
-    /// Protocol version
     pub version: u32,
-    /// The operation to perform
     #[serde(rename = "type")]
     pub request_type: OperationId,
-    /// Monotonically increasing counter for replay protection
     pub request_counter: u32,
-    /// Operation-specific request data (serialized JSON)
     pub data: Option<String>,
 }
 
@@ -123,44 +122,40 @@ pub struct InnerRequest {
 #[derive(Debug, Deserialize, Serialize)]
 #[cfg_attr(feature = "openapi", derive(ToSchema))]
 pub struct InnerResponse {
-    /// Protocol version
     pub version: u32,
-    /// Operation-specific response data (serialized JSON)
     pub data: Option<String>,
-    /// Time until the session expires, as an ISO 8601 duration (e.g. "PT300S")
     #[cfg_attr(feature = "openapi", schema(value_type = Option<String>, format = "duration"))]
     pub expires_in: Option<iso8601_duration::Duration>,
-    /// The result status of the operation
     pub status: Status,
-    /// Error message if the operation failed (serialized JSON)
     pub error_message: Option<String>,
+    /// The current HSM state version so clients can track state version
+    pub hsm_state_version: Option<u64>,
 }
 
 /// The outer response envelope, signed as a JWS by the server.
-/// Contains the session binding and an encrypted inner response payload.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[cfg_attr(feature = "openapi", derive(ToSchema))]
 pub struct OuterResponse {
-    /// Protocol version
     pub version: u32,
-    /// Session identifier
     pub session_id: Option<SessionId>,
-    /// JWE-encrypted inner response payload (JWE compact serialization)
     pub inner_jwe: Option<TypedJwe<InnerResponse>>,
-    /// The result status of the operation
     pub status: Status,
-    /// Error message if the operation failed (serialized JSON)
     pub error_message: Option<String>,
 }
 
 impl InnerResponse {
-    pub fn ok(data: String, expires_in: Option<iso8601_duration::Duration>) -> Self {
+    pub fn ok(
+        data: String,
+        expires_in: Option<iso8601_duration::Duration>,
+        hsm_state_version: Option<u64>,
+    ) -> Self {
         Self {
             version: 1,
             data: Some(data),
             expires_in,
             status: Status::Ok,
             error_message: None,
+            hsm_state_version,
         }
     }
 
@@ -171,6 +166,7 @@ impl InnerResponse {
             expires_in: None,
             status: Status::Error,
             error_message: Some(error_message),
+            hsm_state_version: None,
         }
     }
 }
@@ -215,44 +211,28 @@ impl InnerResponseData {
 }
 
 /// Identifies the operation requested by the client.
-/// Determines how the inner request data is interpreted and which service handles it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(ToSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum OperationId {
-    /// Begin OPAQUE authentication (PAKE evaluate phase)
+    /// Initialize device state (creates version 0)
+    StateInit,
     AuthenticateStart,
-    /// Complete OPAQUE authentication (PAKE finalize phase)
     AuthenticateFinish,
-    /// Begin OPAQUE registration (PAKE evaluate phase)
     RegisterStart,
-    /// Complete OPAQUE registration (PAKE finalize phase)
     RegisterFinish,
-    /// Begin changing the device PIN (PAKE evaluate phase, session required)
     ChangePinStart,
-    /// Complete changing the device PIN (PAKE finalize phase, session required)
     ChangePinFinish,
-    /// Sign data using an HSM-managed key
     HsmSign,
-    /// Perform ECDH key agreement using an HSM-managed key
     HsmEcdh,
-    /// Generate a new key pair in the HSM
     HsmGenerateKey,
-    /// Delete an HSM-managed key
     HsmDeleteKey,
-    /// List all HSM-managed keys for this device
     HsmListKeys,
-    /// End the current session
     EndSession,
-    /// Store data (reserved)
     Store,
-    /// Retrieve stored data (reserved)
     Retrieve,
-    /// Write a log entry
     Log,
-    /// Retrieve log entries
     GetLog,
-    /// Retrieve server/worker information
     Info,
 }
 
@@ -261,9 +241,7 @@ pub enum OperationId {
 #[cfg_attr(feature = "openapi", derive(ToSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum EncryptOption {
-    /// Encrypted with the session key (AES-256-GCM, dir)
     Session,
-    /// Encrypted with the device's public key (ECDH-ES)
     Device,
 }
 
@@ -296,7 +274,20 @@ impl OperationId {
             OperationId::Log => EncryptOption::Session,
             OperationId::GetLog => EncryptOption::Session,
             OperationId::Info => EncryptOption::Session,
+            OperationId::StateInit => EncryptOption::Device,
         }
+    }
+
+    /// Returns true for operations that mutate device state.
+    pub fn mutates_state(&self) -> bool {
+        matches!(
+            self,
+            OperationId::StateInit
+                | OperationId::RegisterFinish
+                | OperationId::HsmGenerateKey
+                | OperationId::HsmDeleteKey
+                | OperationId::ChangePinFinish
+        )
     }
 }
 
@@ -307,7 +298,7 @@ pub fn to_iso8601_duration(d: Duration) -> iso8601_duration::Duration {
 
 define_byte_vector!(PakePayloadVector);
 
-/// Response from a PAKE (Password-Authenticated Key Exchange) operation.
+/// Response from a PAKE operation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(ToSchema))]
 pub struct PakeResponse {
@@ -320,99 +311,75 @@ pub struct PakeResponse {
 #[derive(Serialize, Deserialize, Debug, Clone, Display)]
 #[cfg_attr(feature = "openapi", derive(ToSchema))]
 pub enum Curve {
-    /// NIST P-256 (secp256r1)
     #[serde(rename = "P-256")]
     #[strum(serialize = "P-256")]
     P256,
-    /// NIST P-384 (secp384r1)
     #[serde(rename = "P-384")]
     #[strum(serialize = "P-384")]
     P384,
-    /// NIST P-521 (secp521r1)
     #[serde(rename = "P-521")]
     #[strum(serialize = "P-521")]
     P521,
 }
-/// Request data for the HsmGenerateKey operation.
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[cfg_attr(feature = "openapi", derive(ToSchema))]
 pub struct CreateKeyServiceData {
-    /// The elliptic curve to use for key generation
     pub curve: Curve,
 }
 
-/// Response data from the HsmGenerateKey operation.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[cfg_attr(feature = "openapi", derive(ToSchema))]
 pub struct CreateKeyServiceDataResponse {
-    /// The public key of the newly generated key pair
     pub public_key: EcPublicJwk,
 }
 
-/// Request data for the HsmDeleteKey operation.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[cfg_attr(feature = "openapi", derive(ToSchema))]
 pub struct DeleteKeyServiceData {
-    /// Key identifier of the HSM key to delete
     pub hsm_kid: String,
 }
 
-/// Response data from the HsmListKeys operation.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[cfg_attr(feature = "openapi", derive(ToSchema))]
 pub struct ListKeysResponse {
-    /// List of keys managed by the HSM for this device
     pub key_info: Vec<KeyInfo>,
 }
 
-/// Response data from the HsmSign operation.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[cfg_attr(feature = "openapi", derive(ToSchema))]
 pub struct SignatureResponse {
-    /// The computed signature (base64-encoded)
     #[cfg_attr(feature = "openapi", schema(value_type = String, format = "byte"))]
     pub signature: SignatureVector,
 }
 
-/// Information about a single HSM-managed key.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[cfg_attr(feature = "openapi", derive(ToSchema))]
 pub struct KeyInfo {
-    /// Timestamp when this key was created (ISO 8601)
     pub created_at: Option<String>,
-    /// The public key in EC JWK format
     pub public_key: EcPublicJwk,
 }
 
-/// Request data for the HsmListKeys operation.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[cfg_attr(feature = "openapi", derive(ToSchema))]
 pub struct ListKeysRequest {}
 
-/// Request data for the HsmSign operation.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[cfg_attr(feature = "openapi", derive(ToSchema))]
 pub struct SignRequest {
-    /// Key identifier of the HSM key to sign with
     pub hsm_kid: String,
-    /// The message to sign (base64-encoded)
     #[cfg_attr(feature = "openapi", schema(value_type = String, format = "byte"))]
     pub message: MessageVector,
 }
 
-/// The current phase of the PAKE protocol exchange.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(ToSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum PakeState {
-    /// Server evaluates the client's PAKE message
     Evaluate,
-    /// Server finalizes the PAKE exchange
     Finalize,
 }
 
-/// Request payload for PAKE (Password-Authenticated Key Exchange) operations
-/// (RegisterStart, RegisterFinish, AuthenticateStart, AuthenticateFinish, PinChange).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(ToSchema))]
 pub struct PakeRequest {
@@ -428,9 +395,7 @@ pub struct PakeRequest {
     pub data: PakePayloadVector,
 }
 
-// TODO: Move this to operations/authentication.rs?
 impl PakeRequest {
-    /// Creates a PakeRequest from an InnerRequest
     pub fn from_inner_request(inner_request: InnerRequest) -> Result<Self, ServiceRequestError> {
         let data = inner_request
             .data
@@ -443,49 +408,66 @@ impl PakeRequest {
     }
 }
 
+// === New DTOs for state-init and state versioning ===
+
+/// Command DTO for state initialization from BFF (no JWS envelope).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StateInitCommandDto {
+    pub correlation_id: String,
+    pub device_id: String,
+    pub context: String,
+    pub public_key: EcPublicJwk,
+}
+
+/// Inner request for state-init (extracted from the command).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+pub struct StateInitInnerRequest {
+    pub public_key: EcPublicJwk,
+}
+
+/// Inner response for state-init.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+pub struct StateInitInnerResponse {
+    pub dev_authorization_code: String,
+    pub device_id: String,
+}
+
+/// Event for the state-versions audit topic.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StateVersionEvent {
+    pub device_id: String,
+    pub version: u64,
+    pub command_type: String,
+    pub correlation_id: String,
+    pub timestamp: String,
+}
+
 /// Errors that can occur during service request processing.
 #[derive(Debug, Clone, Serialize, Deserialize, Display)]
 #[cfg_attr(feature = "openapi", derive(ToSchema))]
 pub enum ServiceRequestError {
-    /// JWS signature verification or encoding failed
     JwsError,
-    /// JWE encryption or decryption failed
     JweError,
-    /// The PAKE request payload is malformed
     InvalidPakeRequest,
-    /// The registration request is invalid
     InvalidRegistrationRequest,
-    /// OPAQUE server registration start failed
     ServerRegistrationStartFailed,
-    /// OPAQUE server login start failed
     ServerLoginStartFailed,
-    /// OPAQUE server login finish failed
     ServerLoginFinishFailed,
-    /// Failed to serialize the response
     SerializeResponseError,
-    /// Failed to serialize the device state
     SerializeStateError,
-    /// The service request format is invalid
     InvalidServiceRequestFormat,
-    /// The stored password file could not be deserialized
     InvalidSerializedPasswordFile,
-    /// The authentication request is invalid
     InvalidAuthenticateRequest,
-    /// The referenced key was not found
     UnknownKey,
-    /// The session does not exist or has expired
     UnknownSession,
-    /// The client/device is not recognized
     UnknownClient,
-    /// The client's public key is invalid
     InvalidClientPublicKey,
-    /// A public key parameter is invalid
     InvalidPublicKey,
-    /// A key with the same identifier already exists
     DuplicateKey,
-    /// The referenced HSM key was not found
     HsmKeyNotFound,
-    /// The request context is not supported
     UnsupportedContext,
     /// The operation is not permitted in the current session state
     InvalidOperation,
@@ -493,6 +475,16 @@ pub enum ServiceRequestError {
     InternalServerError,
     InvalidAuthorizationCode,
     Unknown,
+    /// Optimistic concurrency conflict
+    ConcurrencyConflict,
+    /// Device already exists (state-init duplicate)
+    ClientAlreadyExists,
+    /// Device state not found in DB
+    StateNotFound,
+    /// Database error
+    DatabaseError,
+    /// Tamper detection: DB rollback detected
+    TamperDetected,
 }
 
 impl From<DecodeError> for ServiceRequestError {
@@ -511,8 +503,12 @@ impl From<FromUtf8Error> for ServiceRequestError {
 #[derive(Debug)]
 #[cfg_attr(feature = "openapi", derive(ToSchema))]
 pub enum WorkerRequestError {
-    /// Failed to connect to a required service
     ConnectionError,
-    /// Failed to build a safe error response
     ResponseBuildError,
+    /// Optimistic concurrency conflict
+    ConcurrencyConflict,
+    /// Database error
+    DatabaseError(String),
+    /// Tamper detection failure
+    TamperDetected,
 }

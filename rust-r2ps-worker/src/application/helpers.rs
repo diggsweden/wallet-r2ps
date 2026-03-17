@@ -77,7 +77,7 @@ macro_rules! define_byte_vector_base {
             where
                 S: serde::Serializer,
             {
-                use base64::{Engine as _, engine::general_purpose::STANDARD};
+                use base64::{engine::general_purpose::STANDARD, Engine as _};
                 serializer.serialize_str(&STANDARD.encode(&self.0))
             }
         }
@@ -87,7 +87,7 @@ macro_rules! define_byte_vector_base {
             where
                 D: serde::Deserializer<'de>,
             {
-                use base64::{Engine as _, engine::general_purpose::STANDARD};
+                use base64::{engine::general_purpose::STANDARD, Engine as _};
                 let s = String::deserialize(deserializer)?;
                 let bytes = STANDARD.decode(&s).map_err(serde::de::Error::custom)?;
                 Ok($name(bytes))

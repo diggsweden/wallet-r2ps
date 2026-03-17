@@ -1,6 +1,6 @@
 use crate::domain::ServiceRequestError;
 use problem_details::ProblemDetails;
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 use std::fmt;
 
 /// Errors only reported to the calling microservice — nothing sent to client.

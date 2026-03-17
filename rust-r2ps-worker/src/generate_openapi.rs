@@ -1,23 +1,23 @@
 use rust_r2ps_worker::domain;
 use utoipa::OpenApi;
 
-/// OpenAPI documentation for the R2PS HSM Worker domain model.
+/// OpenAPI documentation for the HSM Worker domain model.
 ///
 /// This struct registers all domain value object schemas so they can be
 /// exported as an OpenAPI specification via `cargo run --bin generate_openapi`.
 #[derive(OpenApi)]
 #[openapi(
     info(
-        title = "R2PS HSM Worker - Domain Model",
+        title = "HSM Worker - Domain Model",
         version = "0.1.0",
-        description = "Schema definitions for the R2PS (Remote to Phone Signing) HSM Worker domain model.\n\nThis document describes the data types used in the communication protocol between the R2PS REST API and the HSM Worker service, including request/response envelopes, PAKE authentication payloads, HSM key management types, and device state management."
+        description = "Schema definitions for the HSM Worker domain model.\n\nThis document describes the data types used in the communication protocol between the BFF and the HSM Worker service, including request/response envelopes, PAKE authentication payloads, HSM key management types, and device state management."
     ),
     components(schemas(
         // HSM key types
         domain::EcPublicJwk,
         domain::HsmKey,
         domain::WrappedPrivateKey,
-        // R2PS protocol types
+        // Protocol types
         domain::SessionId,
         domain::Status,
         domain::OperationId,
@@ -26,9 +26,8 @@ use utoipa::OpenApi;
         domain::Curve,
         // Request/response envelopes
         domain::HsmWorkerRequestDto,
-        domain::R2psResponseDto,
         domain::HsmWorkerRequest,
-        domain::WorkerResponseJws,
+        domain::WorkerResponse,
         domain::OuterRequest,
         domain::OuterResponse,
         domain::InnerRequest,
@@ -49,8 +48,8 @@ use utoipa::OpenApi;
         domain::ServiceRequestError,
         domain::WorkerRequestError,
         // State initialization
-        domain::StateInitRequest,
-        domain::StateInitResponse,
+        domain::StateInitInnerRequest,
+        domain::StateInitInnerResponse,
         // Client/device state
         domain::DeviceHsmState,
         domain::DeviceKeyEntry,

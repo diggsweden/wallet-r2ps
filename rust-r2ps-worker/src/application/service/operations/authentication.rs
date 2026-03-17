@@ -1,8 +1,6 @@
 use super::{OperationContext, OperationResult, ServiceOperation, SessionTransition};
 use crate::application::port::outgoing::pake_port;
-use crate::application::port::outgoing::session_state_spi_port::{
-    OngoingOperation, SessionState,
-};
+use crate::application::port::outgoing::session_state_spi_port::{OngoingOperation, SessionState};
 use crate::domain;
 use std::sync::Arc;
 use tracing::warn;
@@ -117,9 +115,7 @@ impl ServiceOperation for AuthenticateFinishOperation {
                 pake_err_to_service_err(e)
             })?;
 
-        let payload = domain::PakeResponse {
-            data: None,
-        };
+        let payload = domain::PakeResponse { data: None };
 
         Ok(OperationResult {
             state: None,
@@ -233,9 +229,7 @@ impl ServiceOperation for RegisterFinishOperation {
             pake_payload.authorization.as_deref(),
         )?;
 
-        let payload = domain::PakeResponse {
-            data: None,
-        };
+        let payload = domain::PakeResponse { data: None };
 
         Ok(OperationResult {
             state: Some(new_state),
@@ -338,9 +332,7 @@ impl ServiceOperation for PinChangeFinishOperation {
         let mut new_state = context.state;
         new_state.set_password_file(&context.device_kid, password_file_entry, None)?;
 
-        let payload = domain::PakeResponse {
-            data: None,
-        };
+        let payload = domain::PakeResponse { data: None };
 
         Ok(OperationResult {
             state: Some(new_state),

@@ -5,7 +5,6 @@ import se.digg.wallet.r2ps.application.dto.AsyncResponseDto;
 import se.digg.wallet.r2ps.infrastructure.config.Config;
 
 import java.net.URI;
-import java.util.UUID;
 
 @Service
 public class UrlFormatterService {
@@ -19,15 +18,13 @@ public class UrlFormatterService {
     return responseEventsUrl(asyncResponseDto.correlationId());
   }
 
-  public URI responseEventsUrl(UUID correlationId) {
+  public URI responseEventsUrl(String correlationId) {
     return URI.create(
-        String.format(config.getKafka().rest().responseEventsTemplateUrl(),
-            correlationId.toString()));
+        String.format(config.getKafka().rest().responseEventsTemplateUrl(), correlationId));
   }
 
-  public URI responseWalletUrl(UUID correlationId) {
+  public URI responseWalletUrl(String correlationId) {
     return URI.create(
-        String.format(config.getKafka().rest().responseWalletTemplateUrl(),
-            correlationId.toString()));
+        String.format(config.getKafka().rest().responseWalletTemplateUrl(), correlationId));
   }
 }

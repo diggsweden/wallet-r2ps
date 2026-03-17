@@ -1,10 +1,10 @@
-use base64::Engine;
 use base64::prelude::BASE64_URL_SAFE_NO_PAD;
+use base64::Engine;
 use josekit::jwe::alg::direct::DirectJweAlgorithm;
-use josekit::jwe::{self, ECDH_ES, JweHeader};
+use josekit::jwe::{self, JweHeader, ECDH_ES};
 use josekit::jwk::Jwk;
-use josekit::jws::ES256;
 use josekit::jws::alg::ecdsa::{EcdsaJwsSigner, EcdsaJwsVerifier};
+use josekit::jws::ES256;
 use josekit::jwt;
 use pem::Pem;
 use tracing::{debug, error};
@@ -104,6 +104,23 @@ impl JosePort for JoseAdapter {
             .get("kid")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string()))
+    }
+
+    fn peek_jwk(&self, jws: &str) -> Result<Option<EcPublicJwk>, JoseError> {
+        let header_bytes = BASE64_URL_SAFE_NO_PAD
+            .decode(jws.split('.').next().unwrap_or(""))
+            .map_err(|_| JoseError::VerifyError)?;
+        let header: serde_json::Value =
+            serde_json::from_slice(&header_bytes).map_err(|_| JoseError::VerifyError)?;
+
+        match header.get("jwk") {
+            Some(jwk_value) => {
+                let ec_jwk: EcPublicJwk =
+                    serde_json::from_value(jwk_value.clone()).map_err(|_| JoseError::InvalidKey)?;
+                Ok(Some(ec_jwk))
+            }
+            None => Ok(None),
+        }
     }
 
     fn jwe_encrypt(&self, payload: &[u8], key: JweEncryptionKey<'_>) -> Result<String, JoseError> {

@@ -1,11 +1,10 @@
 package se.digg.wallet.r2ps.application.port.in;
 
 import java.util.Optional;
-import java.util.UUID;
 import se.digg.wallet.r2ps.domain.model.R2psResponse;
 
 public interface R2psResponseUseCase {
   void r2psResponseReady(R2psResponse r2psResponse);
 
-  Optional<R2psResponse> waitForR2psResponse(UUID correlationId, long timeoutMillis);
+  Optional<R2psResponse> waitForR2psResponse(String correlationId, long timeoutMillis);
 }

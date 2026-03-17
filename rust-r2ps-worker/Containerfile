@@ -9,10 +9,10 @@ RUN apt-get update && apt-get install -y \
     libsofthsm2 \
     && rm -rf /var/lib/apt/lists/*
 
-RUN mkdir -p /myuser/softhsm/tokens
+RUN mkdir -p /myuser/softhsm/tokens /myuser/data
 
 RUN useradd -m myuser
-RUN chown -R myuser:myuser /myuser/softhsm
+RUN chown -R myuser:myuser /myuser
 
 COPY softhsm/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
@@ -44,7 +44,7 @@ RUN cargo build --release
 FROM runtime-softhsm
 
 # Copy the binary from builder
-COPY --from=builder /app/target/release/rust-r2ps-worker /rust-r2ps-worker
+COPY --from=builder /app/target/release/hsm-worker /hsm-worker
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
-CMD ["/rust-r2ps-worker"]
+CMD ["/hsm-worker"]

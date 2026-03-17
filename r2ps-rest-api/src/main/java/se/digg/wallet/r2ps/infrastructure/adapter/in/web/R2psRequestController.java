@@ -5,7 +5,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.nimbusds.jose.JWSObject;
 import java.net.URI;
 import java.text.ParseException;
-import java.time.Duration;
 import java.util.Optional;
 import java.util.UUID;
 import org.slf4j.Logger;
@@ -24,22 +23,14 @@ import se.digg.wallet.r2ps.application.dto.AsyncResponseStatus;
 import se.digg.wallet.r2ps.application.dto.PendingRequestContext;
 import se.digg.wallet.r2ps.application.port.in.R2psResponseUseCase;
 import se.digg.wallet.r2ps.application.port.out.PendingRequestContextSpiPort;
-import se.digg.wallet.r2ps.application.port.out.R2psDeviceStateSpiPort;
-import se.digg.wallet.r2ps.application.port.out.R2psResponseSinkSpiPort;
 import se.digg.wallet.r2ps.application.port.out.RequestMessageSpiPort;
 import se.digg.wallet.r2ps.application.port.out.StateInitRequestSpiPort;
-import se.digg.wallet.r2ps.application.service.R2psResponseService;
 import se.digg.wallet.r2ps.commons.dto.BffRequest;
 import se.digg.wallet.r2ps.commons.dto.NewStateRequestDto;
 import se.digg.wallet.r2ps.commons.dto.NewStateResponseDto;
-import se.digg.wallet.r2ps.commons.exception.ServiceRequestHandlingException;
-import se.digg.wallet.r2ps.domain.model.EcPublicJwk;
 import se.digg.wallet.r2ps.domain.model.HsmWorkerRequest;
 import se.digg.wallet.r2ps.domain.model.R2psResponse;
-import se.digg.wallet.r2ps.domain.model.StateInitRequest;
-import se.digg.wallet.r2ps.domain.model.StateInitResponse;
-import se.digg.wallet.r2ps.infrastructure.adapter.in.messaging.StateInitResponseCache;
-import se.digg.wallet.r2ps.infrastructure.adapter.out.R2psDeviceStateValKey;
+import se.digg.wallet.r2ps.domain.model.StateInitCommandDto;
 import se.digg.wallet.r2ps.infrastructure.config.Config;
 import se.digg.wallet.r2ps.infrastructure.service.UrlFormatterService;
 
@@ -48,10 +39,8 @@ public class R2psRequestController {
 
   private static final Logger log = LoggerFactory.getLogger(R2psRequestController.class);
   private final ObjectMapper objectMapper;
-  private final R2psDeviceStateSpiPort r2psDeviceStateSpiPort;
   private final RequestMessageSpiPort requestMessageSpiPort;
   private final StateInitRequestSpiPort stateInitRequestSpiPort;
-  private final StateInitResponseCache stateInitResponseCache;
   private final PendingRequestContextSpiPort pendingRequestContextSpiPort;
   private final R2psResponseUseCase r2psResponseUseCase;
   private final UrlFormatterService urlFormatter;
@@ -61,29 +50,25 @@ public class R2psRequestController {
 
   public R2psRequestController(
       ObjectMapper objectMapper,
-      final R2psDeviceStateSpiPort r2psDeviceStateSpiPort,
       final RequestMessageSpiPort requestMessageSpiPort,
       final StateInitRequestSpiPort stateInitRequestSpiPort,
-      final StateInitResponseCache stateInitResponseCache,
       final PendingRequestContextSpiPort pendingRequestContextSpiPort,
-      R2psResponseSinkSpiPort r2psResponseSinkSpiPort,
+      R2psResponseUseCase r2psResponseUseCase,
       UrlFormatterService urlFormatter,
       Config config) {
     this.objectMapper = objectMapper;
-    this.r2psDeviceStateSpiPort = r2psDeviceStateSpiPort;
     this.requestMessageSpiPort = requestMessageSpiPort;
     this.stateInitRequestSpiPort = stateInitRequestSpiPort;
-    this.stateInitResponseCache = stateInitResponseCache;
     this.pendingRequestContextSpiPort = pendingRequestContextSpiPort;
+    this.r2psResponseUseCase = r2psResponseUseCase;
     this.urlFormatter = urlFormatter;
     syncResponseSupport = config.getKafka().rest().serveSync();
     maxResponseTimeoutInMillis = config.getKafka().rest().syncTimeoutMs();
-    r2psResponseUseCase = new R2psResponseService(r2psResponseSinkSpiPort, r2psDeviceStateSpiPort,
-        pendingRequestContextSpiPort);
   }
 
   @GetMapping("/task/{correlationId}")
-  public ResponseEntity<AsyncResponseDto<String>> taskResponse(@PathVariable UUID correlationId) {
+  public ResponseEntity<AsyncResponseDto<String>> taskResponse(
+      @PathVariable String correlationId) {
 
     Optional<R2psResponse> r2psResponse =
         r2psResponseUseCase.waitForR2psResponse(correlationId, maxResponseTimeoutInMillis);
@@ -100,7 +85,7 @@ public class R2psRequestController {
       return ResponseEntity.accepted().location(location).body(responseBody);
     }
 
-    if (!r2psResponse.get().status().equals("OK")) {
+    if (!"OK".equals(r2psResponse.get().status())) {
       Optional<AsyncResponseError> errorPayload = parseErrorPayload(r2psResponse.get());
 
       AsyncResponseDto<String> registerResponseDto =
@@ -136,31 +121,28 @@ public class R2psRequestController {
     }
 
     UUID deviceId = UUID.fromString(bffRequest.getClientId());
-    String stateJws = r2psDeviceStateSpiPort.load(deviceId.toString());
+    String correlationId = UUID.randomUUID().toString();
 
-    if (stateJws == null) {
-      log.info("No state found for deviceId: {}", deviceId);
-      return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
-    }
+    // Save pending context mapping correlationId -> deviceId
+    pendingRequestContextSpiPort.save(correlationId,
+        new PendingRequestContext(deviceId.toString()));
 
-    UUID requestId = UUID.randomUUID();
-    pendingRequestContextSpiPort.save(requestId.toString(),
-        new PendingRequestContext(deviceId.toString(), R2psDeviceStateValKey.DEFAULT_TTL_SECONDS));
-
+    // Build command — no stateJws, state is server-owned
     HsmWorkerRequest hsmWorkerRequest =
-        new HsmWorkerRequest(requestId, stateJws, bffRequest.getOuterRequestJws());
-    log.info("Sending service request:\n{}", objectMapper.writeValueAsString(hsmWorkerRequest));
+        new HsmWorkerRequest(correlationId, deviceId.toString(), null, null,
+            bffRequest.getOuterRequestJws());
+    log.info("Sending service request: correlationId={}, deviceId={}", correlationId, deviceId);
     requestMessageSpiPort.send(hsmWorkerRequest, deviceId);
 
     if (syncResponseSupport) {
-      log.info("Waiting for synchronous response for requestId: {}", requestId);
-      return taskResponse(requestId);
+      log.info("Waiting for synchronous response for correlationId: {}", correlationId);
+      return taskResponse(correlationId);
     }
 
-    URI location = urlFormatter.responseEventsUrl(requestId);
+    URI location = urlFormatter.responseEventsUrl(correlationId);
     AsyncResponseDto<String> responseBody =
         new AsyncResponseDto<>(
-            requestId,
+            correlationId,
             AsyncResponseStatus.PENDING,
             Optional.empty(),
             Optional.of(location),
@@ -184,6 +166,9 @@ public class R2psRequestController {
   }
 
   /**
+   * Creates a new device state via the worker. Sends a StateInitCommandDto to r2ps-requests
+   * and waits for the response via the standard Redis polling mechanism.
+   *
    * DEV-ONLY: overwrite and NewStateRequestDto.clientId must be removed before production.
    */
   @PostMapping(
@@ -192,29 +177,46 @@ public class R2psRequestController {
       consumes = MediaType.APPLICATION_JSON_VALUE)
   public ResponseEntity<NewStateResponseDto> newState(@RequestBody NewStateRequestDto request)
       throws Exception {
-    long ttlSeconds = parseTtl(request.ttl());
 
     // DEV-ONLY: allow caller to supply an existing clientId for overwrite; otherwise generate one
     String clientId = (request.clientId() != null && request.overwrite())
         ? request.clientId()
         : UUID.randomUUID().toString();
 
-    if (!request.overwrite() && r2psDeviceStateSpiPort.load(clientId) != null) {
-      return ResponseEntity.ok(new NewStateResponseDto("OK", clientId, null));
+    String correlationId = UUID.randomUUID().toString();
+
+    // Save pending context
+    pendingRequestContextSpiPort.save(correlationId, new PendingRequestContext(clientId));
+
+    // Build state-init command
+    StateInitCommandDto command = new StateInitCommandDto(
+        correlationId, clientId, "state-init", request.publicKey());
+
+    stateInitRequestSpiPort.send(command, UUID.fromString(clientId));
+    log.info("Sent state-init command for clientId={}, correlationId={}", clientId, correlationId);
+
+    // Wait for response via Redis polling (same mechanism as service requests)
+    Optional<R2psResponse> response =
+        r2psResponseUseCase.waitForR2psResponse(correlationId, 5000);
+
+    if (response.isEmpty()) {
+      throw new RuntimeException("State initialization timeout for client: " + clientId);
     }
 
-    StateInitResponse initResponse = sendStateInitRequest(clientId, request.publicKey(), ttlSeconds);
-    log.info("New state created for clientId: {}, dev_authorization_code: {}",
-        clientId, initResponse.devAuthorizationCode());
-
-    return ResponseEntity.ok(new NewStateResponseDto("OK", clientId, initResponse.devAuthorizationCode()));
-  }
-
-  private long parseTtl(String iso8601) {
-    if (iso8601 == null) {
-      return R2psDeviceStateValKey.DEFAULT_TTL_SECONDS;
+    R2psResponse r2psResponse = response.get();
+    if (!"OK".equals(r2psResponse.status())) {
+      log.error("State-init failed for clientId={}: {}", clientId, r2psResponse.errorMessage());
+      return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+          .body(new NewStateResponseDto("ERROR", clientId, null));
     }
-    return Duration.parse(iso8601).toSeconds();
+
+    // Pass through the outer response JWS (contains JWE-encrypted InnerResponse with
+    // dev_authorization_code, device_id, and hsm_state_version)
+    String serviceResponseJws = r2psResponse.outerResponseJws().orElse(null);
+
+    log.info("New state created for clientId={}", clientId);
+
+    return ResponseEntity.ok(new NewStateResponseDto("OK", clientId, serviceResponseJws));
   }
 
   private void logServiceRequest(final String serviceRequest) {
@@ -232,36 +234,6 @@ public class R2psRequestController {
   }
 
   private Optional<AsyncResponseError> parseErrorPayload(R2psResponse r2psResponse) {
-    // TODO this should look at the error_message
-//    try {
-//      ServiceRequestHandlingException serviceRequestHandlingException =
-//          objectMapper.readValue(
-//              r2psResponse.outerResponseJws(), ServiceRequestHandlingException.class);
-//      if (serviceRequestHandlingException != null) {
-//        log.info("Parsed error payload: {}", serviceRequestHandlingException.getMessage());
-//        return Optional.of(
-//            new AsyncResponseError(
-//                serviceRequestHandlingException.getMessage(),
-//                serviceRequestHandlingException.getErrorCode().getResponseCode()));
-//      }
-//    } catch (JsonProcessingException e) {
-//      log.debug("Could not parse error payload", e);
-//    }
     return Optional.empty();
-  }
-
-  private StateInitResponse sendStateInitRequest(String clientId, EcPublicJwk publicKey,
-      long ttlSeconds) throws Exception {
-    String requestId = UUID.randomUUID().toString();
-
-    pendingRequestContextSpiPort.save(requestId, new PendingRequestContext(clientId, ttlSeconds));
-
-    StateInitRequest request = new StateInitRequest(requestId, publicKey);
-    stateInitRequestSpiPort.send(request, UUID.fromString(clientId));
-    log.info("Sent state init request for clientId: {}, requestId: {}", clientId, requestId);
-
-    return stateInitResponseCache.waitForResponse(requestId, Duration.ofSeconds(5))
-        .orElseThrow(() -> new RuntimeException(
-            "State initialization timeout for client: " + clientId));
   }
 }

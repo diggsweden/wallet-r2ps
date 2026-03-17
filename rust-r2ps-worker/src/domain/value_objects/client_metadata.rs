@@ -1,16 +1,34 @@
 use crate::domain::{EcPublicJwk, HsmKey, ServiceRequestError};
-use serde::{Deserialize, Serialize};
+use base64::prelude::BASE64_URL_SAFE_NO_PAD;
+use base64::Engine;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 #[cfg(feature = "openapi")]
 use utoipa::ToSchema;
 
+/// Custom serde module for Vec<u8> using base64url-no-pad encoding for deterministic hashing.
+mod base64url_bytes {
+    use super::*;
+
+    pub fn serialize<S: Serializer>(bytes: &[u8], serializer: S) -> Result<S::Ok, S::Error> {
+        let encoded = BASE64_URL_SAFE_NO_PAD.encode(bytes);
+        serializer.serialize_str(&encoded)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<u8>, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        BASE64_URL_SAFE_NO_PAD
+            .decode(&s)
+            .map_err(serde::de::Error::custom)
+    }
+}
+
 /// An OPAQUE server registration file, containing the server's share of the password credential.
-/// Stored as raw bytes; serialization format is opaque to the domain layer.
+/// Serialized as base64url-no-pad for deterministic hashing.
 #[derive(Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(ToSchema))]
 #[cfg_attr(feature = "openapi", schema(value_type = String, format = "byte"))]
-pub struct PasswordFile(pub Vec<u8>);
+pub struct PasswordFile(#[serde(with = "base64url_bytes")] pub Vec<u8>);
 
-// A distinct type with a suitable debug implementation
 impl std::fmt::Debug for PasswordFile {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "PasswordFile({} bytes)", self.0.len())
@@ -28,24 +46,17 @@ impl PasswordFile {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(ToSchema))]
 pub struct PasswordFileEntry {
-    /// The OPAQUE server registration data
     pub password_file: PasswordFile,
-    /// The server identifier this credential is bound to
     pub server_identifier: String,
-    /// ISO 8601 timestamp of when this entry was created
     pub created_at: String,
 }
 
 /// A registered device key with its associated OPAQUE password files.
-/// Each device can have multiple password file entries (e.g. after PIN changes).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(ToSchema))]
 pub struct DeviceKeyEntry {
-    /// The device's EC public key as a JWK (JSON Web Key) object
     pub public_key: EcPublicJwk,
-    /// Ordered list of OPAQUE password file entries (latest is last)
     pub password_files: Vec<PasswordFileEntry>,
-    /// One-time authorization code for initial device registration
     pub dev_authorization_code: Option<String>,
 }
 
@@ -55,44 +66,36 @@ impl DeviceKeyEntry {
     }
 }
 
-/// The complete persisted state for a device, encoded as a JWS and passed
-/// between the REST API and the HSM worker on every request.
-/// Contains all registered device keys and HSM-managed key pairs.
+/// The complete persisted state for a device.
+/// Now server-owned in PostgreSQL with monotonic versioning and hash chain integrity.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(ToSchema))]
 pub struct DeviceHsmState {
-    /// State schema version for forward compatibility
-    pub version: u32,
+    /// Monotonic state version, incremented per mutation (0 = genesis)
+    pub version: u64,
     pub device_keys: Vec<DeviceKeyEntry>,
-    /// HSM-managed key pairs belonging to this device
     pub hsm_keys: Vec<HsmKey>,
 }
 
 impl DeviceHsmState {
     pub fn serialize(&self) -> Result<Vec<u8>, ServiceRequestError> {
-        match serde_json::to_vec(&self) {
-            Ok(payload_vec) => Ok(payload_vec),
-            Err(_) => Err(ServiceRequestError::SerializeStateError),
-        }
+        serde_json::to_vec(&self).map_err(|_| ServiceRequestError::SerializeStateError)
     }
 
     // === Device key methods ===
 
-    /// Find device key entry by kid
     pub fn find_device_key(&self, kid: &str) -> Option<&DeviceKeyEntry> {
         self.device_keys
             .iter()
             .find(|entry| entry.kid() == Some(kid))
     }
 
-    /// Find mutable device key entry by kid
     pub fn find_device_key_mut(&mut self, kid: &str) -> Option<&mut DeviceKeyEntry> {
         self.device_keys
             .iter_mut()
             .find(|entry| entry.kid() == Some(kid))
     }
 
-    /// Add device key entry, ensuring no duplicate kid
     pub fn add_device_key(&mut self, entry: DeviceKeyEntry) -> Result<(), ServiceRequestError> {
         let kid = entry.kid().ok_or(ServiceRequestError::InvalidPublicKey)?;
 
@@ -108,7 +111,6 @@ impl DeviceHsmState {
         Ok(())
     }
 
-    /// Remove device key entry by kid
     pub fn remove_device_key(&mut self, kid: &str) -> Result<DeviceKeyEntry, ServiceRequestError> {
         let pos = self
             .device_keys
@@ -121,12 +123,10 @@ impl DeviceHsmState {
 
     // === HSM key methods ===
 
-    /// Find HSM key by kid
     pub fn find_hsm_key(&self, kid: &str) -> Option<&HsmKey> {
         self.hsm_keys.iter().find(|key| key.kid() == kid)
     }
 
-    /// Add HSM key, ensuring no duplicate kid
     pub fn add_hsm_key(&mut self, key: HsmKey) -> Result<(), ServiceRequestError> {
         let kid = key.kid();
 
@@ -142,7 +142,6 @@ impl DeviceHsmState {
         Ok(())
     }
 
-    /// Remove HSM key by kid
     pub fn remove_hsm_key(&mut self, kid: &str) -> Result<HsmKey, ServiceRequestError> {
         let pos = self
             .hsm_keys
@@ -155,16 +154,12 @@ impl DeviceHsmState {
 
     // === Higher-level convenience methods ===
 
-    /// Gets the latest password file for a given kid
     pub fn get_password_file(&self, kid: &str) -> Option<&PasswordFile> {
         self.find_device_key(kid)
             .and_then(|entry| entry.password_files.last())
             .map(|pf_entry| &pf_entry.password_file)
     }
 
-    /// Replaces the password file list with a single new entry for the client key with the given kid.
-    /// If `authorization_code` is provided, it must match `dev_authorization_code` on the entry,
-    /// after which that code is cleared (consumed).
     pub fn set_password_file(
         &mut self,
         kid: &str,
