@@ -1,13 +1,13 @@
-use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::Engine;
 use std::collections::HashMap;
 use std::str::FromStr;
 
 use josekit::jwk::Jwk;
 use p256::PublicKey;
 use pem::Pem;
-use spki::EncodePublicKey;
 use spki::der::pem::LineEnding;
+use spki::EncodePublicKey;
 
 pub fn ed25519_public_key_to_jwk(public_key: &[u8]) -> Result<Jwk, Box<dyn std::error::Error>> {
     // Create JWK manually for Ed25519 (OKP key type)

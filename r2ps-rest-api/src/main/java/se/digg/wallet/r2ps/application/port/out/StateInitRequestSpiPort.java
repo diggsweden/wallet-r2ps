@@ -1,8 +1,8 @@
 package se.digg.wallet.r2ps.application.port.out;
 
 import java.util.UUID;
-import se.digg.wallet.r2ps.domain.model.StateInitRequest;
+import se.digg.wallet.r2ps.domain.model.StateInitCommandDto;
 
 public interface StateInitRequestSpiPort {
-  void send(StateInitRequest request, UUID deviceId);
+  void send(StateInitCommandDto command, UUID deviceId);
 }

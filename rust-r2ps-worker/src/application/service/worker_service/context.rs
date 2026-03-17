@@ -4,7 +4,9 @@ use crate::domain::{EcPublicJwk, OperationId};
 
 #[derive(Debug, Clone)]
 pub struct ResponseContext {
-    pub request_id: String,
+    pub correlation_id: String,
+    pub device_id: String,
+    pub request_id: Option<String>,
     pub request_type: OperationId,
     pub session_key: Option<SessionKey>,
     pub device_public_key: EcPublicJwk,

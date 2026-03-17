@@ -1,6 +1,9 @@
 pub mod hsm_wrapper;
 pub mod jose_adapter;
+pub mod kafka_response_publisher;
+pub mod moka_state_cache;
 pub mod opaque_pake_adapter;
-pub mod r2ps_response_kafka_message_sender;
+pub mod outbox_relay;
+pub mod postgres_state_repository;
+pub mod redb_tamper_cache;
 pub mod session_key_memory_cache;
-pub mod state_init_response_kafka_sender;

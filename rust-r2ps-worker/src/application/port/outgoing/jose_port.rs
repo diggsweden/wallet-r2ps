@@ -28,4 +28,7 @@ pub trait JosePort: Send + Sync {
     fn jwe_encrypt(&self, payload: &[u8], key: JweEncryptionKey<'_>) -> Result<String, JoseError>;
     fn jwe_decrypt(&self, jwe: &str, key: JweDecryptionKey<'_>) -> Result<Vec<u8>, JoseError>;
     fn peek_kid(&self, compact: &str) -> Result<Option<String>, JoseError>;
+
+    /// Extract the JWK from a JWS header (if present in the `jwk` field).
+    fn peek_jwk(&self, jws: &str) -> Result<Option<EcPublicJwk>, JoseError>;
 }

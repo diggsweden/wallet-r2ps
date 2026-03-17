@@ -7,8 +7,7 @@ use crate::application::service::worker_service::error::{
 use crate::application::session_key_spi_port::SessionKeySpiPort;
 use crate::domain::value_objects::r2ps::{InnerResponse, OuterResponse, Status};
 use crate::domain::{
-    DeviceHsmState, EncryptOption, SessionId, TypedJwe, TypedJws, WorkerRequestError,
-    WorkerResponse,
+    EncryptOption, SessionId, TypedJwe, TypedJws, WorkerRequestError, WorkerResponse,
 };
 use std::sync::Arc;
 
@@ -19,8 +18,6 @@ pub struct ProcessError {
 }
 
 /// Responsible for constructing and signing responses.
-/// This includes encrypting inner payloads (JWE) based on the operation's
-/// encryption policy (Session vs. Device) and wrapping them in signed outer responses (JWS).
 pub struct ResponseBuilder {
     jose: Arc<dyn jose_port::JosePort>,
     session_key_spi_port: Arc<dyn SessionKeySpiPort + Send + Sync>,
@@ -42,17 +39,17 @@ impl ResponseBuilder {
         &self,
         operation_result: OperationResult,
         context: &ResponseContext,
+        hsm_state_version: Option<u64>,
     ) -> Result<WorkerResponse, WorkerError> {
-        let inner_response = self.build_inner_response(&operation_result)?;
+        let inner_response = self.build_inner_response(&operation_result, hsm_state_version)?;
         let inner_jwe = self.encrypt_inner_response(&inner_response, context)?;
         let outer_response_jws =
             self.build_outer_response_jws(inner_jwe, operation_result.session_id)?;
 
-        let new_state_jws = self.encode_state_jws(operation_result.state)?;
-
         Ok(WorkerResponse {
+            correlation_id: context.correlation_id.clone(),
+            device_id: context.device_id.clone(),
             request_id: context.request_id.clone(),
-            state_jws: new_state_jws,
             outer_response_jws: Some(outer_response_jws),
             status: Status::Ok,
             error_message: None,
@@ -62,6 +59,7 @@ impl ResponseBuilder {
     fn build_inner_response(
         &self,
         operation_result: &OperationResult,
+        hsm_state_version: Option<u64>,
     ) -> Result<InnerResponse, UpstreamError> {
         let encoded_result = operation_result
             .data
@@ -76,7 +74,7 @@ impl ResponseBuilder {
         let serialized_data = String::from_utf8(encoded_result)
             .map_err(|_| UpstreamError::EncodeFailed("serialize_inner_response_failed"))?;
 
-        Ok(operation_result.to_inner_response(serialized_data, ttl))
+        Ok(operation_result.to_inner_response(serialized_data, ttl, hsm_state_version))
     }
 
     fn build_outer_response_jws(
@@ -87,40 +85,37 @@ impl ResponseBuilder {
         OuterResponse::ok(inner_jwe, session_id).sign(self.jose.as_ref())
     }
 
-    fn encode_state_jws(
-        &self,
-        state: Option<DeviceHsmState>,
-    ) -> Result<Option<TypedJws<DeviceHsmState>>, UpstreamError> {
-        state
-            .map(|state| {
-                state
-                    .sign(self.jose.as_ref())
-                    .map_err(|_| UpstreamError::EncodeFailed("state_sign_failed"))
-            })
-            .transpose()
-    }
-
     pub fn build_error_response(
         &self,
-        request_id: &str,
+        correlation_id: &str,
+        device_id: &str,
+        request_id: Option<&str>,
         process_err: ProcessError,
     ) -> Result<WorkerResponse, WorkerRequestError> {
         let ProcessError { error, context } = process_err;
-        let problem_json = error.to_problem_details_json(request_id);
+        let problem_json = error.to_problem_details_json(correlation_id);
 
         match error {
-            WorkerError::Upstream(_) => {
-                Ok(self.build_upstream_only_error_response(request_id, problem_json))
-            }
-            WorkerError::Outer(_) => {
-                self.build_outer_error_worker_response(request_id, problem_json)
-            }
+            WorkerError::Upstream(_) => Ok(self.build_upstream_only_error_response(
+                correlation_id,
+                device_id,
+                request_id,
+                problem_json,
+            )),
+            WorkerError::Outer(_) => self.build_outer_error_worker_response(
+                correlation_id,
+                device_id,
+                request_id,
+                problem_json,
+            ),
             WorkerError::Inner(_) => {
                 let context = context
                     .as_ref()
                     .ok_or(WorkerRequestError::ResponseBuildError)?;
                 match self.encrypt_inner_response(&InnerResponse::error(problem_json), context) {
                     Ok(inner_jwe) => self.sign_and_wrap_outer_response(
+                        correlation_id,
+                        device_id,
                         request_id,
                         OuterResponse::ok(inner_jwe, None),
                     ),
@@ -132,20 +127,30 @@ impl ResponseBuilder {
 
     fn build_outer_error_worker_response(
         &self,
-        request_id: &str,
+        correlation_id: &str,
+        device_id: &str,
+        request_id: Option<&str>,
         problem_json: String,
     ) -> Result<WorkerResponse, WorkerRequestError> {
-        self.sign_and_wrap_outer_response(request_id, OuterResponse::error(problem_json))
+        self.sign_and_wrap_outer_response(
+            correlation_id,
+            device_id,
+            request_id,
+            OuterResponse::error(problem_json),
+        )
     }
 
     pub fn build_upstream_only_error_response(
         &self,
-        request_id: &str,
+        correlation_id: &str,
+        device_id: &str,
+        request_id: Option<&str>,
         problem_json: String,
     ) -> WorkerResponse {
         WorkerResponse {
-            request_id: request_id.to_string(),
-            state_jws: None,
+            correlation_id: correlation_id.to_string(),
+            device_id: device_id.to_string(),
+            request_id: request_id.map(|s| s.to_string()),
             outer_response_jws: None,
             status: Status::Error,
             error_message: Some(problem_json),
@@ -176,13 +181,16 @@ impl ResponseBuilder {
 
     fn sign_and_wrap_outer_response(
         &self,
-        request_id: &str,
+        correlation_id: &str,
+        device_id: &str,
+        request_id: Option<&str>,
         outer_response: OuterResponse,
     ) -> Result<WorkerResponse, WorkerRequestError> {
         match outer_response.sign(self.jose.as_ref()) {
             Ok(outer_response_jws) => Ok(WorkerResponse {
-                request_id: request_id.to_string(),
-                state_jws: None,
+                correlation_id: correlation_id.to_string(),
+                device_id: device_id.to_string(),
+                request_id: request_id.map(|s| s.to_string()),
                 outer_response_jws: Some(outer_response_jws),
                 status: Status::Ok,
                 error_message: None,

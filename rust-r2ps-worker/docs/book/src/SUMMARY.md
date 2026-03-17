@@ -2,11 +2,27 @@
 
 [Introduction](introduction.md)
 
+# Architecture
+
+- [Overview](architecture/overview.md)
+- [Request Processing Pipeline](architecture/pipeline.md)
+- [State Management](architecture/state-management.md)
+- [Security Model](architecture/security.md)
+- [Threading Model](architecture/threading.md)
+
+# Operations
+
+- [Operations](operations/README.md)
+
+# Configuration
+
+- [Configuration](configuration.md)
+
 # API Reference
 
 - [API Reference](api-reference/README.md)
   - [HsmWorkerRequestDto](api-reference/hsm-worker-request-dto.md)
-  - [WorkerResponseJws](api-reference/worker-response-jws.md)
+  - [WorkerResponse](api-reference/worker-response.md)
   - [DeviceHsmState](api-reference/device-hsm-state.md)
   - [OuterRequest](api-reference/outer-request.md)
   - [OuterResponse](api-reference/outer-response.md)

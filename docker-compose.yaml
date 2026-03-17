@@ -1,7 +1,6 @@
 name: r2ps-dev
 
 services:
-
   r2ps-rest-api:
     build:
       context: .
@@ -29,6 +28,26 @@ services:
     networks:
       - wallet-network
 
+  postgres:
+    image: postgres:17-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: r2ps
+      POSTGRES_USER: r2ps
+      POSTGRES_PASSWORD: secret
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./config/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U r2ps -d r2ps"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - wallet-network
+
   rust-r2ps-worker:
     build:
       context: ./rust-r2ps-worker
@@ -39,11 +58,20 @@ services:
     environment:
       RUST_LOG: info
       KAFKA_BOOTSTRAP_SERVERS: "kafka-1:19092,kafka-2:19092,kafka-3:19092"
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: r2ps
+      POSTGRES_USER: r2ps
+      POSTGRES_PASSWORD: secret
+      STATE_CACHE_PATH: /myuser/data/tamper-cache.redb
     volumes:
       - softhsm-tokens:/myuser/softhsm/tokens:rw
+      - state-cache:/myuser/data:rw
     depends_on:
       init-kafka:
         condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
     networks:
       - wallet-network
 
@@ -51,7 +79,7 @@ services:
     image: valkey/valkey:8.0.2-alpine3.21
     ports:
       - 6379:6379
-    command: [ "valkey-server", "/usr/local/etc/valkey/valkey.conf" ]
+    command: ["valkey-server", "/usr/local/etc/valkey/valkey.conf"]
     volumes:
       - ./config/valkey.conf:/usr/local/etc/valkey/valkey.conf
     networks:
@@ -71,7 +99,7 @@ services:
       KAFKA_DEFAULT_REPLICATION_FACTOR: 3
       KAFKA_MIN_INSYNC_REPLICAS: 2
       KAFKA_LOG_DIRS: /tmp/kraft-combined-logs
-      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'false'
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
 
   kafka-1:
     <<: *kafka-common
@@ -165,6 +193,12 @@ services:
 volumes:
   softhsm-tokens:
     name: softhsm-tokens
+    driver: local
+  pgdata:
+    name: pgdata
+    driver: local
+  state-cache:
+    name: state-cache
     driver: local
 
 networks:

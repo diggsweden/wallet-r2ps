@@ -9,8 +9,7 @@ use std::sync::Arc;
 use tracing::info;
 
 /// Handles the decoding of HsmWorkerRequests.
-/// This includes verifying the device state JWS, peeking at the outer JWS header
-/// for the device public key, and decrypting the inner JWE payload.
+/// State is now loaded externally (from DB or cache) and passed in.
 pub struct RequestDecoder {
     jose: Arc<dyn jose_port::JosePort>,
     session_key_spi_port: Arc<dyn SessionKeySpiPort + Send + Sync>,
@@ -28,19 +27,19 @@ impl RequestDecoder {
     }
 
     /// Decodes an `HsmWorkerRequest` into its validated and decrypted parts.
-    /// Returns a `WorkerInput` containing both the `OperationContext` (for business logic)
-    /// and the `ResponseContext` (for later encoding).
+    /// State is provided externally (loaded from DB or cache).
     pub fn decode_request(
         &self,
         hsm_worker_request: HsmWorkerRequest,
+        state: DeviceHsmState,
     ) -> Result<WorkerInput, WorkerError> {
         let HsmWorkerRequest {
+            correlation_id,
+            device_id,
             request_id,
-            state_jws,
             outer_request_jws,
+            state_version: _,
         } = hsm_worker_request;
-
-        let state = self.decode_state(state_jws.as_str())?;
 
         let (device_kid, device_public_key, outer_request) =
             self.decode_outer_request(outer_request_jws.as_str(), &state)?;
@@ -54,12 +53,13 @@ impl RequestDecoder {
             outer_request.decrypt_inner(self.jose.as_ref(), session_key.as_ref())?;
 
         info!(
-            "Processing request id {} of type {:?}",
-            request_id, inner_request.request_type
+            "Processing correlation_id {} of type {:?}",
+            correlation_id, inner_request.request_type
         );
 
         let operation_context = OperationContext {
-            request_id: request_id.clone(),
+            correlation_id: correlation_id.clone(),
+            device_id: device_id.clone(),
             state,
             outer_request,
             inner_request,
@@ -68,6 +68,8 @@ impl RequestDecoder {
         };
 
         let response_context = ResponseContext {
+            correlation_id,
+            device_id,
             request_id,
             request_type: operation_context.inner_request.request_type,
             session_key,
@@ -78,11 +80,6 @@ impl RequestDecoder {
             operation_context,
             response_context,
         })
-    }
-
-    fn decode_state(&self, state_jws: &str) -> Result<DeviceHsmState, UpstreamError> {
-        DeviceHsmState::from_jws(state_jws, self.jose.as_ref())
-            .map_err(|_| UpstreamError::InvalidStateJws)
     }
 
     fn decode_outer_request(
@@ -105,7 +102,7 @@ impl RequestDecoder {
         let outer_request =
             OuterRequest::from_jws(outer_request_jws, self.jose.as_ref(), &device_public_key)?;
 
-        if outer_request.context != "hsm" {
+        if outer_request.context != "hsm" && outer_request.context != "state-init" {
             return Err(OuterError::UnsupportedContext.into());
         }
 

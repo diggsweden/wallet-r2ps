@@ -16,7 +16,7 @@ from typing import Dict, Any, List, Set, Optional, Tuple
 # Types to document (top-level types that will get their own pages)
 TYPES_TO_DOCUMENT = [
     "HsmWorkerRequestDto",
-    "WorkerResponseJws",
+    "WorkerResponse",
     "DeviceHsmState",
     "OuterRequest",
     "OuterResponse",

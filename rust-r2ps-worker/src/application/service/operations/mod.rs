@@ -1,6 +1,7 @@
 pub mod authentication;
 pub mod hsm;
 pub mod session;
+pub mod state_init;
 
 use crate::application::hsm_spi_port::HsmSpiPort;
 use crate::application::port::outgoing::pake_port::PakePort;
@@ -16,15 +17,17 @@ use authentication::{
 };
 use hsm::{HsmDeleteKeyOperation, HsmGenerateKeyOperation, HsmListKeysOperation, HsmSignOperation};
 use session::SessionEndOperation;
+use state_init::StateInitOperation;
 
 #[derive(Debug)]
 pub struct OperationContext {
-    pub request_id: String,
+    pub correlation_id: String,
+    pub device_id: String,
     pub state: crate::domain::DeviceHsmState,
     pub outer_request: crate::domain::value_objects::r2ps::OuterRequest,
     pub inner_request: crate::domain::value_objects::r2ps::InnerRequest,
     pub session_id: Option<SessionId>,
-    pub device_kid: String, // kid from OuterRequest JWS header
+    pub device_kid: String,
 }
 
 pub struct OperationResult {
@@ -34,15 +37,19 @@ pub struct OperationResult {
 }
 
 impl OperationResult {
-    /// Creates an InnerResponse from this OperationResult with the serialized response data
     pub fn to_inner_response(
         &self,
         serialized_data: String,
         ttl: Option<std::time::Duration>,
+        hsm_state_version: Option<u64>,
     ) -> crate::domain::value_objects::r2ps::InnerResponse {
-        use crate::domain::value_objects::r2ps::{InnerResponse, to_iso8601_duration};
+        use crate::domain::value_objects::r2ps::{to_iso8601_duration, InnerResponse};
 
-        InnerResponse::ok(serialized_data, ttl.map(to_iso8601_duration))
+        InnerResponse::ok(
+            serialized_data,
+            ttl.map(to_iso8601_duration),
+            hsm_state_version,
+        )
     }
 }
 
@@ -64,10 +71,10 @@ pub struct OperationDispatcher {
     hsm_delete_key_op: HsmDeleteKeyOperation,
     hsm_list_keys_op: HsmListKeysOperation,
     session_end_op: SessionEndOperation,
+    state_init_op: StateInitOperation,
 }
 
 impl OperationDispatcher {
-    /// Creates a new OperationDispatcher with all operation handlers initialized
     pub fn from_dependencies(
         pake_port: Arc<dyn PakePort>,
         session_key_spi_port: Arc<dyn SessionKeySpiPort + Send + Sync>,
@@ -91,6 +98,7 @@ impl OperationDispatcher {
             hsm_delete_key_op: HsmDeleteKeyOperation,
             hsm_list_keys_op: HsmListKeysOperation,
             session_end_op: SessionEndOperation::new(session_key_spi_port.clone()),
+            state_init_op: StateInitOperation,
         }
     }
 
@@ -105,6 +113,7 @@ impl OperationDispatcher {
         debug!("Requested Operation: {:?}", request_type);
 
         let result = match request_type {
+            OperationId::StateInit => self.state_init_op.execute(context),
             OperationId::AuthenticateStart => self.authenticate_start_op.execute(context),
             OperationId::AuthenticateFinish => self.authenticate_finish_op.execute(context),
             OperationId::RegisterStart => self.register_start_op.execute(context),

@@ -16,8 +16,7 @@ import org.springframework.kafka.support.serializer.JsonDeserializer;
 import org.springframework.kafka.support.serializer.JsonSerializer;
 import se.digg.wallet.r2ps.domain.command.Command;
 import se.digg.wallet.r2ps.domain.model.HsmWorkerRequest;
-import se.digg.wallet.r2ps.domain.model.StateInitRequest;
-import se.digg.wallet.r2ps.domain.model.StateInitResponse;
+import se.digg.wallet.r2ps.domain.model.StateInitCommandDto;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -33,92 +32,62 @@ public class KafkaProducerConfig {
   @Bean
   public ProducerFactory<String, String> producerFactoryString() {
     Map<String, Object> configProps = new HashMap<>(kafkaProperties.buildProducerProperties(null));
-    configProps.put(
-        ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG,
-        StringSerializer.class);
-    configProps.put(
-        ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG,
-        String.class);
+    configProps.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
+    configProps.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, String.class);
     return new DefaultKafkaProducerFactory<>(configProps);
   }
 
   @Bean
   public ProducerFactory<String, HsmWorkerRequest> producerFactoryR2psRequest() {
     Map<String, Object> configProps = new HashMap<>(kafkaProperties.buildProducerProperties(null));
-    configProps.put(
-        ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG,
-        StringSerializer.class);
-    configProps.put(
-        ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG,
-        JsonSerializer.class);
+    configProps.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
+    configProps.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, JsonSerializer.class);
     return new DefaultKafkaProducerFactory<>(configProps);
   }
 
   @Bean
   public ProducerFactory<String, Command> producerFactoryCommand() {
     Map<String, Object> configProps = new HashMap<>(kafkaProperties.buildProducerProperties(null));
-    configProps.put(
-        ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG,
-        StringSerializer.class);
-    configProps.put(
-        ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG,
-        JsonSerializer.class);
+    configProps.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
+    configProps.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, JsonSerializer.class);
     return new DefaultKafkaProducerFactory<>(configProps);
   }
 
   @Bean
   public ConsumerFactory<String, HsmWorkerRequest> consumerFactoryR2psRequest() {
     Map<String, Object> configProps = new HashMap<>(kafkaProperties.buildProducerProperties(null));
-    configProps.put(
-        ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG,
-        StringDeserializer.class);
-    configProps.put(
-        ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG,
-        JsonDeserializer.class);
-    // JSON Deserializer configuration
+    configProps.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
+    configProps.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, JsonDeserializer.class);
     configProps.put(JsonDeserializer.TRUSTED_PACKAGES, "*");
     configProps.put(JsonDeserializer.VALUE_DEFAULT_TYPE, HsmWorkerRequest.class.getName());
     configProps.put(JsonDeserializer.USE_TYPE_INFO_HEADERS, false);
     return new DefaultKafkaConsumerFactory<>(configProps, new StringDeserializer(),
-        new JsonDeserializer<>(
-            HsmWorkerRequest.class, false));
+        new JsonDeserializer<>(HsmWorkerRequest.class, false));
   }
 
   @Bean
   public ConsumerFactory<String, Command> consumerFactoryCommand() {
     Map<String, Object> configProps = new HashMap<>(kafkaProperties.buildProducerProperties(null));
-    configProps.put(
-        ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG,
-        StringDeserializer.class);
-    configProps.put(
-        ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG,
-        JsonDeserializer.class);
-    // JSON Deserializer configuration
+    configProps.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
+    configProps.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, JsonDeserializer.class);
     configProps.put(JsonDeserializer.TRUSTED_PACKAGES, "*");
     configProps.put(JsonDeserializer.VALUE_DEFAULT_TYPE, HsmWorkerRequest.class.getName());
     configProps.put(JsonDeserializer.USE_TYPE_INFO_HEADERS, false);
     return new DefaultKafkaConsumerFactory<>(configProps, new StringDeserializer(),
-        new JsonDeserializer<>(
-            Command.class, false));
+        new JsonDeserializer<>(Command.class, false));
   }
 
   @Bean
   public ConsumerFactory<String, String> consumerFactoryString() {
     Map<String, Object> configProps = new HashMap<>(kafkaProperties.buildProducerProperties(null));
-    configProps.put(
-        ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG,
-        StringDeserializer.class);
-    configProps.put(
-        ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG,
-        StringDeserializer.class);
-    // JSON Deserializer configuration
+    configProps.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
+    configProps.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
     configProps.put(JsonDeserializer.TRUSTED_PACKAGES, "*");
     configProps.put(JsonDeserializer.VALUE_DEFAULT_TYPE, String.class.getName());
     configProps.put(JsonDeserializer.USE_TYPE_INFO_HEADERS, false);
     return new DefaultKafkaConsumerFactory<>(configProps, new StringDeserializer(),
         new StringDeserializer());
   }
-
 
   @Bean
   public KafkaTemplate<String, HsmWorkerRequest> kafkaTemplateR2psRequest(
@@ -132,45 +101,24 @@ public class KafkaProducerConfig {
     return new KafkaTemplate<>(producerFactory);
   }
 
-
   @Bean
   public KafkaTemplate<String, String> kafkaTemplateString(
       ProducerFactory<String, String> producerFactory) {
     return new KafkaTemplate<>(producerFactory);
   }
 
-  // State initialization beans
+  // State initialization command beans (sent to r2ps-requests, same topic as HsmWorkerRequest)
   @Bean
-  public ProducerFactory<String, StateInitRequest> producerFactoryStateInitRequest() {
+  public ProducerFactory<String, StateInitCommandDto> producerFactoryStateInitCommand() {
     Map<String, Object> configProps = new HashMap<>(kafkaProperties.buildProducerProperties(null));
-    configProps.put(
-        ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG,
-        StringSerializer.class);
-    configProps.put(
-        ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG,
-        JsonSerializer.class);
+    configProps.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
+    configProps.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, JsonSerializer.class);
     return new DefaultKafkaProducerFactory<>(configProps);
   }
 
   @Bean
-  public ConsumerFactory<String, StateInitResponse> consumerFactoryStateInitResponse() {
-    Map<String, Object> configProps = new HashMap<>(kafkaProperties.buildProducerProperties(null));
-    configProps.put(
-        ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG,
-        StringDeserializer.class);
-    configProps.put(
-        ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG,
-        JsonDeserializer.class);
-    configProps.put(JsonDeserializer.TRUSTED_PACKAGES, "*");
-    configProps.put(JsonDeserializer.VALUE_DEFAULT_TYPE, StateInitResponse.class.getName());
-    configProps.put(JsonDeserializer.USE_TYPE_INFO_HEADERS, false);
-    return new DefaultKafkaConsumerFactory<>(configProps, new StringDeserializer(),
-        new JsonDeserializer<>(StateInitResponse.class, false));
-  }
-
-  @Bean
-  public KafkaTemplate<String, StateInitRequest> kafkaTemplateStateInitRequest(
-      ProducerFactory<String, StateInitRequest> producerFactory) {
+  public KafkaTemplate<String, StateInitCommandDto> kafkaTemplateStateInitCommand(
+      ProducerFactory<String, StateInitCommandDto> producerFactory) {
     return new KafkaTemplate<>(producerFactory);
   }
 }

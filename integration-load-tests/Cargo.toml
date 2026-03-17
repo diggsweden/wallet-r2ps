@@ -1,0 +1,55 @@
+[package]
+name = "integration-load-tests"
+version = "0.1.0"
+edition = "2021"
+license = "EUPL-1.2"
+description = "Integration and load testing tool for the R2PS wallet system"
+
+[[bin]]
+name = "integration-load-tests"
+path = "src/main.rs"
+
+[dependencies]
+# OPAQUE protocol (must match rust-r2ps-worker + opaque-ke-wasm)
+opaque-ke = { version = "4.0.1", features = ["std"] }
+p256 = { version = "0.13", features = ["hash2curve", "voprf", "ecdh", "jwk", "ecdsa", "pem"] }
+elliptic-curve = { version = "0.13", features = ["sec1", "jwk"] }
+voprf = "0.5.0"
+sha2 = "0.10"
+hkdf = "0.12"
+rand = "0.8"
+
+# JOSE (JWS / JWE) — same version as rust-r2ps-worker
+josekit = "0.10.3"
+
+# HTTP client
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Compression
+flate2 = "1"
+
+# Base64 encoding
+base64 = "0.22"
+
+# UUID
+uuid = { version = "1", features = ["v4"] }
+
+# Error handling
+anyhow = "1"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# PEM parsing
+pem = "3"
