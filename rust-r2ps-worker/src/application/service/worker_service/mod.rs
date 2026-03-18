@@ -407,8 +407,8 @@ impl WorkerService {
     /// read-only and mutating operations). Cache hits skip this check because
     /// they were already tamper-checked when first loaded from the database.
     fn check_tamper(&self, device_id: &str, state: &DeviceHsmState) -> Result<(), WorkerError> {
-        if let Some(cached_version) = self.tamper_cache.get(device_id) {
-            if state.version < cached_version {
+        if let Some(cached_version) = self.tamper_cache.get(device_id)
+            && state.version < cached_version {
                 error!(
                     "Tamper detected for device {}: DB version {} < cache version {}",
                     device_id, state.version, cached_version
@@ -417,7 +417,6 @@ impl WorkerService {
                     crate::domain::ServiceRequestError::TamperDetected,
                 ));
             }
-        }
         Ok(())
     }
 
