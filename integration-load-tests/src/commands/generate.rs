@@ -68,7 +68,10 @@ pub async fn run(args: GenerateArgs) -> Result<()> {
             }
         }
         if (completed + failed) % args.concurrency.max(1) == 0 || completed + failed == args.count {
-            println!("  Progress: {}/{} (failed: {})", completed, args.count, failed);
+            println!(
+                "  Progress: {}/{} (failed: {})",
+                completed, args.count, failed
+            );
         }
     }
 
@@ -83,9 +86,7 @@ pub async fn run(args: GenerateArgs) -> Result<()> {
 
     println!(
         "\nDone: {} clients written to {} (failed: {})",
-        completed,
-        args.output,
-        failed,
+        completed, args.output, failed,
     );
 
     Ok(())
@@ -101,7 +102,8 @@ async fn generate_one_client(
     let device_key = keygen::generate_ec_p256_keypair();
     let pin_stretch_key = keygen::generate_ec_p256_keypair();
 
-    let device_jwk = build_device_jwk(&device_key.x, &device_key.y, &device_key.d, &device_key.kid)?;
+    let device_jwk =
+        build_device_jwk(&device_key.x, &device_key.y, &device_key.d, &device_key.kid)?;
 
     let public_key = EcPublicJwk {
         kty: "EC".to_string(),

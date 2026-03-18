@@ -1,3 +1,4 @@
+use crate::application::WorkerPorts;
 use crate::application::hsm_spi_port::HsmSpiPort;
 use crate::application::jose_port::{JosePort, JweDecryptionKey};
 use crate::application::pake_port::{PakeError, PakePort, RegistrationResult};
@@ -11,21 +12,20 @@ use crate::application::port::outgoing::state_repository_port::{
     OutboxEntry, StateError, StateRepository, VersionedState,
 };
 use crate::application::service::operations::OperationResult;
+use crate::application::service::worker_service::WorkerService;
 use crate::application::service::worker_service::context::ResponseContext;
 use crate::application::service::worker_service::error::{OuterError, UpstreamError, WorkerError};
 use crate::application::service::worker_service::response::{ProcessError, ResponseBuilder};
-use crate::application::service::worker_service::WorkerService;
-use crate::application::WorkerPorts;
 use crate::domain::value_objects::r2ps::{InnerResponse, OperationId, PakePayloadVector, Status};
 use crate::domain::{Curve, DeviceHsmState, EcPublicJwk, HsmKey, InnerResponseData, SessionId};
 use crate::infrastructure::adapters::outgoing::jose_adapter::JoseAdapter;
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use cryptoki::error::Error as CryptokiError;
 use josekit::jws::alg::ecdsa::EcdsaJwsVerifier;
+use p256::SecretKey;
 use p256::elliptic_curve::sec1::ToEncodedPoint;
 use p256::pkcs8::EncodePrivateKey;
-use p256::SecretKey;
 use spki::EncodePublicKey;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -317,10 +317,12 @@ mod error_handling {
         assert_eq!(response.correlation_id, correlation_id);
         assert!(response.outer_response_jws.is_none());
         assert_eq!(response.status, Status::Error);
-        assert!(response
-            .error_message
-            .as_ref()
-            .is_some_and(|msg| msg.contains("UnknownDevice")));
+        assert!(
+            response
+                .error_message
+                .as_ref()
+                .is_some_and(|msg| msg.contains("UnknownDevice"))
+        );
     }
 
     #[test]
@@ -351,9 +353,11 @@ mod error_handling {
         assert!(outer_response.session_id.is_none());
         assert!(outer_response.inner_jwe.is_none());
         assert_eq!(outer_response.status, Status::Error);
-        assert!(outer_response
-            .error_message
-            .is_some_and(|msg| msg.contains("UnsupportedContext")));
+        assert!(
+            outer_response
+                .error_message
+                .is_some_and(|msg| msg.contains("UnsupportedContext"))
+        );
     }
 
     #[test]
@@ -404,9 +408,11 @@ mod error_handling {
         assert!(inner_response.data.is_none());
         assert!(inner_response.expires_in.is_none());
         assert_eq!(inner_response.status, Status::Error);
-        assert!(inner_response
-            .error_message
-            .is_some_and(|msg| msg.contains("Unknown")));
+        assert!(
+            inner_response
+                .error_message
+                .is_some_and(|msg| msg.contains("Unknown"))
+        );
     }
 }
 

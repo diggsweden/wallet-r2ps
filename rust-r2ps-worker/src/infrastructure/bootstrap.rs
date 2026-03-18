@@ -1,4 +1,5 @@
 use crate::application::{OpaqueConfig, WorkerPorts, WorkerService};
+use crate::infrastructure::KafkaConfig;
 use crate::infrastructure::adapters::incoming::state_snapshot_consumer::StateSnapshotConsumer;
 use crate::infrastructure::adapters::outgoing::jose_adapter::JoseAdapter;
 use crate::infrastructure::adapters::outgoing::kafka_response_publisher::KafkaResponsePublisher;
@@ -11,9 +12,8 @@ use crate::infrastructure::adapters::outgoing::session_state_memory_cache::Sessi
 use crate::infrastructure::config::app_config::AppConfig;
 use crate::infrastructure::config::load_pem_from_base64;
 use crate::infrastructure::hsm_wrapper::HsmWrapper;
-use crate::infrastructure::KafkaConfig;
-use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 pub struct BuiltServices {
     pub worker_service: WorkerService,

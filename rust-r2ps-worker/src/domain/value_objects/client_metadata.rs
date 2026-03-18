@@ -1,6 +1,6 @@
 use crate::domain::{EcPublicJwk, HsmKey, ServiceRequestError};
-use base64::prelude::BASE64_URL_SAFE_NO_PAD;
 use base64::Engine;
+use base64::prelude::BASE64_URL_SAFE_NO_PAD;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 #[cfg(feature = "openapi")]
 use utoipa::ToSchema;

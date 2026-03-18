@@ -1,10 +1,10 @@
 use crate::application::WorkerRequestUseCase;
-use crate::infrastructure::bootstrap::build_services;
-use crate::infrastructure::config::app_config::AppConfig;
 use crate::infrastructure::KafkaConfig;
 use crate::infrastructure::WorkerRequestKafkaReceiver;
-use std::sync::atomic::{AtomicBool, Ordering};
+use crate::infrastructure::bootstrap::build_services;
+use crate::infrastructure::config::app_config::AppConfig;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
 use tracing::{debug, info};
@@ -67,8 +67,8 @@ pub fn run() {
 /// Bootstrap the state-snapshot Kafka topic from PostgreSQL data.
 pub fn bootstrap_snapshot(device_id_filter: Option<String>) {
     use postgres::{Client, NoTls};
-    use rdkafka::producer::{BaseProducer, BaseRecord, Producer};
     use rdkafka::ClientConfig;
+    use rdkafka::producer::{BaseProducer, BaseRecord, Producer};
 
     let app_config = AppConfig::new().unwrap();
     let pg_config = app_config.postgres_config();

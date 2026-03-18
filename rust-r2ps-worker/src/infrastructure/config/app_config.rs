@@ -1,5 +1,5 @@
 use crate::application::OpaqueConfig;
-use crate::infrastructure::{hsm_wrapper::Pkcs11Config, KafkaConfig};
+use crate::infrastructure::{KafkaConfig, hsm_wrapper::Pkcs11Config};
 use config::{Config, ConfigError, Environment};
 use serde::Deserialize;
 

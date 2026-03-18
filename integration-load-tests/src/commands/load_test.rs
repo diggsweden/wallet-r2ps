@@ -111,7 +111,15 @@ pub async fn run(args: LoadTestArgs) -> Result<()> {
         let args = args.clone();
 
         let handle = tokio::spawn(async move {
-            worker_loop(worker_id, &envelope, &server_pubkey, &args, &stats, &running).await;
+            worker_loop(
+                worker_id,
+                &envelope,
+                &server_pubkey,
+                &args,
+                &stats,
+                &running,
+            )
+            .await;
         });
         handles.push(handle);
     }
@@ -136,7 +144,10 @@ async fn worker_loop(
     let rest = match RestClient::new(&args.bff_url) {
         Ok(r) => r,
         Err(e) => {
-            eprintln!("[worker {}] Failed to create REST client: {:#}", worker_id, e);
+            eprintln!(
+                "[worker {}] Failed to create REST client: {:#}",
+                worker_id, e
+            );
             return;
         }
     };

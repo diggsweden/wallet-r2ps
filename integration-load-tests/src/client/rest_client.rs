@@ -12,7 +12,9 @@ use anyhow::{bail, Context, Result};
 use reqwest::Client;
 use std::time::Duration;
 
-use crate::protocol::types::{BffNewStateRequest, BffNewStateResponse, BffRequest, BffSyncResponse};
+use crate::protocol::types::{
+    BffNewStateRequest, BffNewStateResponse, BffRequest, BffSyncResponse,
+};
 
 pub struct RestClient {
     client: Client,

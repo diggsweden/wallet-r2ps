@@ -1,9 +1,9 @@
 use postgres::fallible_iterator::FallibleIterator;
 use postgres::{Client, NoTls};
-use rdkafka::producer::{BaseProducer, BaseRecord, Producer};
 use rdkafka::ClientConfig;
-use std::sync::atomic::{AtomicBool, Ordering};
+use rdkafka::producer::{BaseProducer, BaseRecord, Producer};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 use tracing::{debug, error, info, warn};

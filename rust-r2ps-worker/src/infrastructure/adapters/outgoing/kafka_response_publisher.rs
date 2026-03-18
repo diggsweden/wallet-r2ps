@@ -1,6 +1,6 @@
 use crate::application::port::outgoing::response_publisher_port::ResponsePublisher;
-use rdkafka::producer::{BaseProducer, BaseRecord};
 use rdkafka::ClientConfig;
+use rdkafka::producer::{BaseProducer, BaseRecord};
 use std::time::Duration;
 use tracing::{debug, error};
 

@@ -12,7 +12,9 @@ use josekit::jwk::Jwk;
 
 use crate::crypto::{opaque_client, pin_stretch};
 use crate::protocol::message_builder::{build_pake_request_jws, build_session_request_jws};
-use crate::protocol::response_parser::{unwrap_device_response, unwrap_pake_response, unwrap_session_response};
+use crate::protocol::response_parser::{
+    unwrap_device_response, unwrap_pake_response, unwrap_session_response,
+};
 use crate::protocol::types::{
     BffNewStateRequest, DeviceInitData, EcPublicJwk, GenerateKeyPayload, HsmGenerateKeyResponse,
     PakeRequest, SignRequestPayload,
@@ -65,7 +67,8 @@ impl AccessMechanismClient {
         let client_id = resp.client_id;
 
         // Unwrap the init response JWS to get the authorization code
-        let init_response = unwrap_device_response(&resp.service_response_jws, &self.device_private_key)?;
+        let init_response =
+            unwrap_device_response(&resp.service_response_jws, &self.device_private_key)?;
         if init_response.status != "OK" {
             bail!("Device init failed: status={}", init_response.status);
         }
@@ -112,7 +115,9 @@ impl AccessMechanismClient {
         if resp.status != "COMPLETE" {
             bail!("Registration start failed: {:?}", resp);
         }
-        let result_jws = resp.result.context("No result in registration start response")?;
+        let result_jws = resp
+            .result
+            .context("No result in registration start response")?;
 
         // Extract OPAQUE response bytes
         let pake_resp = unwrap_pake_response(&result_jws, &self.device_private_key)?;
@@ -253,7 +258,9 @@ impl AccessMechanismClient {
         if resp.status != "COMPLETE" {
             bail!("HSM generate key failed: {:?}", resp);
         }
-        let result_jws = resp.result.context("No result in HSM generate key response")?;
+        let result_jws = resp
+            .result
+            .context("No result in HSM generate key response")?;
 
         let session_resp = unwrap_session_response(&result_jws, session_key)?;
         if session_resp.status != "OK" {
@@ -302,9 +309,7 @@ impl AccessMechanismClient {
         if resp.status != "COMPLETE" {
             bail!("HSM sign failed: {:?}", resp);
         }
-        let result_jws = resp
-            .result
-            .context("No result in HSM sign response")?;
+        let result_jws = resp.result.context("No result in HSM sign response")?;
 
         // Verify the inner response status
         let session_resp = unwrap_session_response(&result_jws, session_key)?;
@@ -318,13 +323,12 @@ impl AccessMechanismClient {
 
 /// Load a server public key from a PEM file and return it as a josekit Jwk.
 pub fn load_server_public_key_pem(pem_path: &str) -> Result<Jwk> {
-    let pem_content =
-        std::fs::read_to_string(pem_path).with_context(|| format!("Failed to read PEM file: {}", pem_path))?;
+    let pem_content = std::fs::read_to_string(pem_path)
+        .with_context(|| format!("Failed to read PEM file: {}", pem_path))?;
 
-    let jwk = Jwk::from_bytes(
-        pem_to_jwk_bytes(&pem_content).context("Failed to convert PEM to JWK")?,
-    )
-    .context("Failed to parse JWK")?;
+    let jwk =
+        Jwk::from_bytes(pem_to_jwk_bytes(&pem_content).context("Failed to convert PEM to JWK")?)
+            .context("Failed to parse JWK")?;
 
     Ok(jwk)
 }
@@ -334,10 +338,7 @@ fn pem_to_jwk_bytes(pem_str: &str) -> Result<Vec<u8>> {
     use p256::elliptic_curve::sec1::ToEncodedPoint;
     use p256::PublicKey;
 
-    let public_key = PublicKey::from_sec1_bytes(
-        &pem_to_sec1_bytes(pem_str)?,
-    )
-    .or_else(|_| {
+    let public_key = PublicKey::from_sec1_bytes(&pem_to_sec1_bytes(pem_str)?).or_else(|_| {
         // Try parsing as SPKI PEM
         let pk: PublicKey = pem_str
             .parse()

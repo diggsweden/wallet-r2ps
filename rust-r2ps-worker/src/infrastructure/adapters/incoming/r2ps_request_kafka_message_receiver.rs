@@ -3,9 +3,9 @@ use crate::domain::{HsmWorkerRequest, HsmWorkerRequestDto, StateInitCommandDto};
 use crate::infrastructure::KafkaConfig;
 use rdkafka::consumer::{BaseConsumer, Consumer};
 use rdkafka::{ClientConfig, Message};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::thread::{spawn, JoinHandle};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread::{JoinHandle, spawn};
 use std::time::Duration;
 use tracing::{debug, error, info, warn};
 

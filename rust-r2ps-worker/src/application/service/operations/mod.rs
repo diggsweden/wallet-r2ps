@@ -47,7 +47,7 @@ impl OperationResult {
         ttl: Option<std::time::Duration>,
         hsm_state_version: Option<u64>,
     ) -> crate::domain::value_objects::r2ps::InnerResponse {
-        use crate::domain::value_objects::r2ps::{to_iso8601_duration, InnerResponse};
+        use crate::domain::value_objects::r2ps::{InnerResponse, to_iso8601_duration};
 
         InnerResponse::ok(
             serialized_data,
