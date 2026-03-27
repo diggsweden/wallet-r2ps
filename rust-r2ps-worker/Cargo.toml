@@ -17,6 +17,10 @@ required-features = ["openapi"]
 name = "rust-r2ps-worker"
 path = "src/main.rs"
 
+[[bin]]
+name = "digg-hsm-keytool"
+path = "src/bin/digg_hsm_keytool.rs"
+
 [features]
 openapi = ["dep:utoipa"]
 
@@ -54,6 +58,7 @@ chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1.18.1", features = ["v4", "serde"] }
 digest = "0.10.7"
 hex = "0.4.3"
+clap = { version = "4", features = ["derive"] }
 utoipa = { version = "5", features = ["uuid"], optional = true }
 spki = "0"
 iso8601-duration = { version = "0.2.0", features = ["serde"] }

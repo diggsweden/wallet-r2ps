@@ -136,6 +136,26 @@ impl HsmWrapper {
         }
     }
 
+    /// Create a persistent AES-256 wrapping key in the HSM.
+    /// Called only by `digg-hsm-keytool create-wrapping-key`, never by the service.
+    pub fn create_aes_wrapping_key(&self, label: &str) -> Result<(), Error> {
+        let aes_template = vec![
+            Attribute::Token(true),
+            Attribute::Private(true),
+            Attribute::ValueLen(32.into()), // 256-bit
+            Attribute::Encrypt(true),
+            Attribute::Decrypt(true),
+            Attribute::Wrap(true),
+            Attribute::Unwrap(true),
+            Attribute::Label(label.as_bytes().to_vec()),
+        ];
+        let session = self.pkcs11.open_rw_session(self.slot)?;
+        session.login(UserType::User, self.user_pin.as_ref())?;
+        session.generate_key(&Mechanism::AesKeyGen, &aes_template)?;
+        session.close();
+        Ok(())
+    }
+
     pub fn wrap_private_key(
         &self,
         session: &Session,
