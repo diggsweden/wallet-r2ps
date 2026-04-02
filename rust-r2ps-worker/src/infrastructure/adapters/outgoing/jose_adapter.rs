@@ -1,43 +1,74 @@
 use base64::Engine;
 use base64::prelude::BASE64_URL_SAFE_NO_PAD;
 use josekit::jwe::alg::direct::DirectJweAlgorithm;
+use josekit::jwe::alg::ecdh_es::EcdhEsJweDecrypter;
 use josekit::jwe::{self, ECDH_ES, JweHeader};
 use josekit::jwk::Jwk;
 use josekit::jws::ES256;
 use josekit::jws::alg::ecdsa::{EcdsaJwsSigner, EcdsaJwsVerifier};
 use josekit::jwt;
-use pem::Pem;
+use p256::SecretKey;
+use p256::pkcs8::EncodePrivateKey;
+use p256::pkcs8::EncodePublicKey;
 use tracing::{debug, error};
 
 use crate::application::port::outgoing::jose_port::{
     JoseError, JosePort, JweDecryptionKey, JweEncryptionKey,
 };
 use crate::domain::EcPublicJwk;
+use crate::infrastructure::config::jose_utils;
 
 pub struct JoseAdapter {
     signer: EcdsaJwsSigner,
     verifier: EcdsaJwsVerifier,
-    server_private_key: Pem,
+    decrypter: EcdhEsJweDecrypter,
+    public_key: EcPublicJwk,
+    kid: String,
 }
 
 impl JoseAdapter {
-    pub fn new(server_public_pem: &Pem, server_private_pem: &Pem) -> Result<Self, JoseError> {
-        let private_pem_str = pem::encode(server_private_pem);
-        let signer = ES256.signer_from_pem(&private_pem_str).map_err(|e| {
+    pub fn new(secret_key: SecretKey) -> Result<Self, JoseError> {
+        let private_pem = secret_key.to_pkcs8_pem(Default::default()).map_err(|e| {
+            error!("Failed to encode private key as PKCS8 PEM: {:?}", e);
+            JoseError::InvalidKey
+        })?;
+
+        let signer = ES256.signer_from_pem(private_pem.as_bytes()).map_err(|e| {
             error!("Failed to create JWS signer: {:?}", e);
             JoseError::InvalidKey
         })?;
 
-        let public_pem_str = pem::encode(server_public_pem);
-        let verifier = ES256.verifier_from_pem(&public_pem_str).map_err(|e| {
-            error!("Failed to create JWS verifier: {:?}", e);
-            JoseError::InvalidKey
-        })?;
+        let public_pem = secret_key
+            .public_key()
+            .to_public_key_pem(Default::default())
+            .map_err(|e| {
+                error!("Failed to encode public key as SPKI PEM: {:?}", e);
+                JoseError::InvalidKey
+            })?;
+
+        let verifier = ES256
+            .verifier_from_pem(public_pem.as_bytes())
+            .map_err(|e| {
+                error!("Failed to create JWS verifier: {:?}", e);
+                JoseError::InvalidKey
+            })?;
+
+        let decrypter = ECDH_ES
+            .decrypter_from_pem(private_pem.as_bytes())
+            .map_err(|e| {
+                error!("Failed to create JWE decrypter: {:?}", e);
+                JoseError::InvalidKey
+            })?;
+
+        let public_key = jose_utils::ec_public_key_from_secret(&secret_key);
+        let kid = public_key.kid.clone();
 
         Ok(Self {
             signer,
             verifier,
-            server_private_key: server_private_pem.clone(),
+            decrypter,
+            public_key,
+            kid,
         })
     }
 }
@@ -64,7 +95,8 @@ impl JosePort for JoseAdapter {
             error!("Failed to create JwtPayload: {:?}", e);
             JoseError::SignError
         })?;
-        let header = josekit::jws::JwsHeader::new();
+        let mut header = josekit::jws::JwsHeader::new();
+        header.set_key_id(&self.kid);
         jwt::encode_with_signer(&payload, &header, &self.signer).map_err(|e| {
             error!("Failed to encode JWS: {:?}", e);
             JoseError::SignError
@@ -153,14 +185,8 @@ impl JosePort for JoseAdapter {
     ) -> Result<Vec<u8>, JoseError> {
         match key {
             JweDecryptionKey::Device => {
-                let decrypter = ECDH_ES
-                    .decrypter_from_pem(pem::encode(&self.server_private_key))
+                let (payload, header) = jwe::deserialize_compact(jwe_str, &self.decrypter)
                     .map_err(|e| {
-                        error!("Failed to create device decrypter: {:?}", e);
-                        JoseError::DecryptError
-                    })?;
-                let (payload, header) =
-                    jwe::deserialize_compact(jwe_str, &decrypter).map_err(|e| {
                         error!("Device JWE decryption failed: {:?}", e);
                         JoseError::DecryptError
                     })?;
@@ -183,5 +209,13 @@ impl JosePort for JoseAdapter {
                 Ok(payload)
             }
         }
+    }
+
+    fn jws_public_key(&self) -> &EcPublicJwk {
+        &self.public_key
+    }
+
+    fn jws_kid(&self) -> &str {
+        &self.kid
     }
 }

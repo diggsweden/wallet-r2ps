@@ -5,7 +5,7 @@ use cryptoki::object::ObjectClass;
 use rust_r2ps_worker::application::port::outgoing::hsm_spi_port::HsmSpiPort;
 use rust_r2ps_worker::domain::value_objects::r2ps::Curve;
 use rust_r2ps_worker::infrastructure::adapters::outgoing::hsm_wrapper::{HsmWrapper, Pkcs11Config};
-use rust_r2ps_worker::infrastructure::config::key_derivation;
+use rust_r2ps_worker::infrastructure::config::{jose_utils, key_derivation};
 
 #[derive(Parser)]
 #[command(name = "digg-hsm-keytool", about = "Manage DIGG wallet HSM keys")]
@@ -83,7 +83,7 @@ fn main() {
 
     match cli.command {
         Command::CreateWrappingKey { label, force } => {
-            // Open without wrap_key_alias so we can inspect before creating.
+            // Open without wrap_key_alias to inspect (check/delete) before creating.
             let hsm_bare = open_hsm(
                 hsm_lib.clone(),
                 slot_token_label.clone(),
@@ -145,7 +145,7 @@ fn main() {
                 test_domain_sep
             );
             let secret = derive_secret(&hsm, &label, &test_domain_sep);
-            let kid = key_derivation::ec_kid_from_secret(&secret);
+            let kid = jose_utils::ec_kid_from_secret(&secret);
             println!("Derivation OK — test KID: {}", kid);
             println!();
             println!("Root key label: {}", label);
@@ -253,7 +253,7 @@ fn main() {
                     let secret = derive_secret(&hsm, &root_key_label, &domain_sep);
                     println!(
                         "    derived key KID: {}",
-                        key_derivation::ec_kid_from_secret(&secret)
+                        jose_utils::ec_kid_from_secret(&secret)
                     );
                 }
             }
@@ -273,24 +273,18 @@ fn main() {
             let jws_secret = derive_secret(&hsm, &root_key_label, &jws_domain_sep);
             let opaque_secret = derive_secret(&hsm, &root_key_label, &opaque_domain_sep);
 
-            let jws_kid = key_derivation::ec_kid_from_secret(&jws_secret);
-            let opaque_kid = key_derivation::ec_kid_from_secret(&opaque_secret);
+            let jws_jwk = jose_utils::ec_public_key_from_secret(&jws_secret);
+            let opaque_jwk = jose_utils::ec_public_key_from_secret(&opaque_secret);
 
             println!("JWS public key:");
             println!("  domain_sep : {}", jws_domain_sep);
-            println!("  kid        : {}", jws_kid);
-            println!(
-                "  jwk        : {}",
-                public_key_jwk_json(&jws_secret, &jws_kid)
-            );
+            println!("  kid        : {}", jws_jwk.kid);
+            println!("  jwk        : {}", public_key_jwk_json(&jws_secret));
             println!();
             println!("OPAQUE public key:");
             println!("  domain_sep : {}", opaque_domain_sep);
-            println!("  kid        : {}", opaque_kid);
-            println!(
-                "  jwk        : {}",
-                public_key_jwk_json(&opaque_secret, &opaque_kid)
-            );
+            println!("  kid        : {}", opaque_jwk.kid);
+            println!("  jwk        : {}", public_key_jwk_json(&opaque_secret));
         }
     }
 }
@@ -370,16 +364,10 @@ fn check_derivation(
     Ok(())
 }
 
-fn public_key_jwk_json(secret: &p256::SecretKey, kid: &str) -> String {
-    use base64::Engine;
-    use base64::prelude::BASE64_URL_SAFE_NO_PAD;
-    use p256::elliptic_curve::sec1::ToEncodedPoint;
-
-    let point = secret.public_key().as_affine().to_encoded_point(false);
-    let x = BASE64_URL_SAFE_NO_PAD.encode(point.x().expect("x"));
-    let y = BASE64_URL_SAFE_NO_PAD.encode(point.y().expect("y"));
+fn public_key_jwk_json(secret: &p256::SecretKey) -> String {
+    let jwk = jose_utils::ec_public_key_from_secret(secret);
     format!(
-        r#"{{"kty":"EC","crv":"P-256","x":"{}","y":"{}","kid":"{}"}}"#,
-        x, y, kid
+        r#"{{"kty":"{}","crv":"{}","x":"{}","y":"{}","kid":"{}"}}"#,
+        jwk.kty, jwk.crv, jwk.x, jwk.y, jwk.kid
     )
 }

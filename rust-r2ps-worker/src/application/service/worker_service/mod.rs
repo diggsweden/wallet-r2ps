@@ -20,7 +20,7 @@ use crate::application::port::outgoing::session_state_spi_port::{
 };
 use crate::application::service::operations::OperationDispatcher;
 use crate::application::{
-    WorkerPorts, WorkerRequestId, WorkerRequestUseCase, WorkerResponseSpiPort, jose_port,
+    WorkerPorts, WorkerRequestId, WorkerRequestUseCase, WorkerResponseSpiPort,
 };
 use crate::domain::{HsmWorkerRequest, WorkerRequestError, WorkerResponse};
 use std::sync::Arc;
@@ -40,11 +40,11 @@ pub struct WorkerService {
 }
 
 impl WorkerService {
-    pub fn new(jose: Arc<dyn jose_port::JosePort>, ports: WorkerPorts) -> Self {
+    pub fn new(ports: WorkerPorts, legacy_key_mode: bool) -> Self {
         let operation_dispatcher = OperationDispatcher::from_dependencies(ports.pake, ports.hsm);
 
-        let request_decoder = RequestDecoder::new(jose.clone());
-        let response_builder = ResponseBuilder::new(jose);
+        let request_decoder = RequestDecoder::new(ports.jose.clone(), legacy_key_mode);
+        let response_builder = ResponseBuilder::new(ports.jose);
 
         Self {
             worker_response_spi_port: ports.worker_response,
@@ -188,23 +188,19 @@ impl WorkerService {
 
 #[cfg(test)]
 fn setup_crypto() -> (
-    Arc<dyn jose_port::JosePort>,
+    Arc<dyn crate::application::jose_port::JosePort>,
     josekit::jws::alg::ecdsa::EcdsaJwsVerifier,
 ) {
     use crate::infrastructure::adapters::outgoing::jose_adapter::JoseAdapter;
     use p256::SecretKey;
-    use p256::pkcs8::EncodePrivateKey;
-    use spki::EncodePublicKey;
+    use p256::pkcs8::EncodePublicKey;
 
     let secret_key = SecretKey::random(&mut rand::thread_rng());
-    let private_pem_string = secret_key.to_pkcs8_pem(Default::default()).unwrap();
     let public_key_pem = secret_key
         .public_key()
         .to_public_key_pem(Default::default())
         .unwrap();
-    let server_private_key = pem::parse(private_pem_string.as_bytes()).unwrap();
-    let server_public_key = pem::parse(public_key_pem.as_bytes()).unwrap();
-    let jose = Arc::new(JoseAdapter::new(&server_public_key, &server_private_key).unwrap());
+    let jose = Arc::new(JoseAdapter::new(secret_key).unwrap());
     let verifier = josekit::jws::ES256
         .verifier_from_pem(public_key_pem.as_bytes())
         .unwrap();

@@ -19,14 +19,19 @@ pub struct PartialRequest {
 
 pub struct RequestDecoder {
     jose: Arc<dyn jose_port::JosePort>,
+    /// True in HSM mode: clients must include server_kid in every request.
+    /// False in legacy mode: SERVER_PRIVATE_KEY is stable, so clients may omit it.
+    kid_required: bool,
 }
 
 impl RequestDecoder {
-    pub fn new(jose: Arc<dyn jose_port::JosePort>) -> Self {
-        Self { jose }
+    pub fn new(jose: Arc<dyn jose_port::JosePort>, legacy_key_mode: bool) -> Self {
+        Self {
+            jose,
+            kid_required: !legacy_key_mode,
+        }
     }
 
-    /// Phase 1: Verify state JWS and outer request JWS, extract session_id.
     /// Phase 1: Verify state JWS and outer request JWS, extract session_id.
     /// Pure — no side effects. Caller uses session_id to read session state.
     pub fn decode_outer(
@@ -62,6 +67,16 @@ impl RequestDecoder {
 
         if outer_request.context != "hsm" {
             return Err(OuterError::UnsupportedContext.into());
+        }
+
+        match &outer_request.server_kid {
+            Some(kid) if kid != self.jose.jws_kid() => {
+                return Err(UpstreamError::UnknownServerKid.into());
+            }
+            None if self.kid_required => {
+                return Err(UpstreamError::ServerKidRequired.into());
+            }
+            _ => {}
         }
 
         Ok(PartialRequest {

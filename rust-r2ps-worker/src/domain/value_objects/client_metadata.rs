@@ -24,14 +24,14 @@ impl PasswordFile {
 }
 
 /// A timestamped OPAQUE password file entry, binding a password credential
-/// to a specific server identifier.
+/// to a specific OPAQUE server keypair.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(ToSchema))]
 pub struct PasswordFileEntry {
     /// The OPAQUE server registration data
     pub password_file: PasswordFile,
-    /// The server identifier this credential is bound to
-    pub server_identifier: String,
+    /// Domain separator of the OPAQUE server keypair active at registration time
+    pub opaque_domain_separator: String,
     /// ISO 8601 timestamp of when this entry was created
     pub created_at: String,
 }
@@ -156,6 +156,12 @@ impl DeviceHsmState {
         self.find_device_key(kid)
             .and_then(|entry| entry.password_files.last())
             .map(|pf_entry| &pf_entry.password_file)
+    }
+
+    /// Gets the latest password file entry (including opaque_domain_separator) for a given kid
+    pub fn get_password_file_entry(&self, kid: &str) -> Option<&PasswordFileEntry> {
+        self.find_device_key(kid)
+            .and_then(|entry| entry.password_files.last())
     }
 
     /// Replaces the password file list with a single new entry for the client key with the given kid.

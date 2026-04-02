@@ -13,11 +13,11 @@ pub fn debug_log_payload(payload: &[u8], context: &str) {
 /// as a quoted truncated hex string: `Name("deadbeef...")`.
 #[macro_export]
 macro_rules! define_byte_vector {
-    ($name:ident) => {
-        $crate::define_byte_vector!($name, full);
+    ($(#[$attr:meta])* $name:ident) => {
+        $crate::define_byte_vector!($(#[$attr])* $name, full);
     };
-    ($name:ident, $max_bytes:literal) => {
-        $crate::define_byte_vector_base!($name);
+    ($(#[$attr:meta])* $name:ident, $max_bytes:literal) => {
+        $crate::define_byte_vector_base!($(#[$attr])* $name);
 
         impl std::fmt::Debug for $name {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -31,8 +31,8 @@ macro_rules! define_byte_vector {
             }
         }
     };
-    ($name:ident, full) => {
-        $crate::define_byte_vector_base!($name);
+    ($(#[$attr:meta])* $name:ident, full) => {
+        $crate::define_byte_vector_base!($(#[$attr])* $name);
 
         impl std::fmt::Debug for $name {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -44,7 +44,8 @@ macro_rules! define_byte_vector {
 
 #[macro_export]
 macro_rules! define_byte_vector_base {
-    ($name:ident) => {
+    ($(#[$attr:meta])* $name:ident) => {
+        $(#[$attr])*
         #[derive(Clone)]
         pub struct $name(Vec<u8>);
 

@@ -3,7 +3,7 @@ use crate::domain::value_objects::r2ps::{InnerRequest, OperationId};
 use josekit::jwe::ECDH_ES;
 use josekit::jwe::JweHeader;
 use p256::SecretKey;
-use p256::pkcs8::{EncodePrivateKey, EncodePublicKey};
+use p256::pkcs8::EncodePublicKey;
 use rstest::{fixture, rstest};
 
 use super::jose_adapter::JoseAdapter;
@@ -16,17 +16,12 @@ struct JoseFixture {
 #[fixture]
 fn jose() -> JoseFixture {
     let secret_key = SecretKey::random(&mut rand::thread_rng());
-    let private_pem_str = secret_key.to_pkcs8_pem(Default::default()).unwrap();
     let public_pem_str = secret_key
         .public_key()
         .to_public_key_pem(Default::default())
         .unwrap();
     JoseFixture {
-        adapter: JoseAdapter::new(
-            &pem::parse(public_pem_str.as_bytes()).unwrap(),
-            &pem::parse(private_pem_str.as_bytes()).unwrap(),
-        )
-        .unwrap(),
+        adapter: JoseAdapter::new(secret_key).unwrap(),
         public_pem: public_pem_str.to_string(),
     }
 }

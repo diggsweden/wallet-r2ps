@@ -1,4 +1,5 @@
 use crate::application::hsm_spi_port::HsmSpiPort;
+use crate::application::port::outgoing::hsm_spi_port::DerivedSecret;
 use crate::domain::{Curve, EcPublicJwk, HsmKey, WrappedPrivateKey};
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -83,8 +84,10 @@ impl HsmWrapper {
             user_pin,
         };
 
-        // verify that wrapping key is initialized - otherwise create one TODO other method...
-        result.aes_wrapping_key(&session)?;
+        // verify that wrapping key is present — the keytool is responsible for creating it
+        if !result.wrap_key_alias.is_empty() {
+            result.aes_wrapping_key(&session)?;
+        }
 
         Ok(result)
     }
@@ -115,6 +118,53 @@ impl HsmWrapper {
         )
     }
 
+    pub fn exists_by_label(&self, class: ObjectClass, label: &str) -> Result<bool, Error> {
+        let session = self.pkcs11.open_ro_session(self.slot)?;
+        session.login(UserType::User, self.user_pin.as_ref())?;
+        let handles = session.find_objects(&[
+            Attribute::Class(class),
+            Attribute::Label(label.as_bytes().to_vec()),
+        ])?;
+        session.close();
+        Ok(!handles.is_empty())
+    }
+
+    /// Find and destroy all objects matching class + label in a single RW session.
+    pub fn destroy_objects_by_label(&self, class: ObjectClass, label: &str) -> Result<(), Error> {
+        let session = self.pkcs11.open_rw_session(self.slot)?;
+        session.login(UserType::User, self.user_pin.as_ref())?;
+        let handles = session.find_objects(&[
+            Attribute::Class(class),
+            Attribute::Label(label.as_bytes().to_vec()),
+        ])?;
+        for handle in handles {
+            session.destroy_object(handle)?;
+        }
+        session.close();
+        Ok(())
+    }
+
+    /// Create a persistent HMAC-SHA512 root key in the HSM for key derivation ceremonies.
+    /// Called by `digg-hsm-keytool`, not by the service at startup.
+    pub fn create_hmac_root_key(&self, label: &str) -> Result<(), Error> {
+        let template = vec![
+            Attribute::Class(ObjectClass::SECRET_KEY),
+            Attribute::KeyType(KeyType::GENERIC_SECRET),
+            Attribute::ValueLen(64.into()), // 512-bit key for HMAC-SHA512
+            Attribute::Token(true),
+            Attribute::Private(true),
+            Attribute::Sensitive(true),
+            Attribute::Extractable(false),
+            Attribute::Sign(true),
+            Attribute::Label(label.as_bytes().to_vec()),
+        ];
+        let session = self.pkcs11.open_rw_session(self.slot)?;
+        session.login(UserType::User, self.user_pin.as_ref())?;
+        session.generate_key(&Mechanism::GenericSecretKeyGen, &template)?;
+        session.close();
+        Ok(())
+    }
+
     pub fn aes_wrapping_key(&self, session: &Session) -> Result<ObjectHandle, Error> {
         let aes_template = vec![
             Attribute::Token(true),
@@ -127,13 +177,20 @@ impl HsmWrapper {
             Attribute::Label(self.wrap_key_alias.clone()),
         ];
 
-        match session.find_objects(&aes_template)?.first() {
-            Some(aes_key) => Ok(aes_key.to_owned()),
-            None => {
-                warn!("No wrapping key found... generate new aes wrapping key");
-                session.generate_key(&Mechanism::AesKeyGen, &aes_template)
-            }
-        }
+        session
+            .find_objects(&aes_template)?
+            .into_iter()
+            .next()
+            .ok_or_else(|| {
+                error!(
+                    "AES wrapping key '{}' not found — run digg-hsm-keytool create-wrapping-key",
+                    String::from_utf8_lossy(&self.wrap_key_alias)
+                );
+                Error::Pkcs11(
+                    cryptoki::error::RvError::KeyHandleInvalid,
+                    cryptoki::context::Function::FindObjects,
+                )
+            })
     }
 
     /// Create a persistent AES-256 wrapping key in the HSM.
@@ -273,8 +330,39 @@ impl HsmSpiPort for HsmWrapper {
         Ok(HsmKey {
             wrapped_private_key,
             public_key_jwk,
+            wrap_key_label: String::from_utf8_lossy(&self.wrap_key_alias).into_owned(),
             created_at: chrono::Utc::now(),
         })
+    }
+
+    fn derive_key(
+        &self,
+        root_key_label: &str,
+        domain_separator: &str,
+    ) -> Result<DerivedSecret, Error> {
+        let session = self.pkcs11.open_ro_session(self.slot)?;
+        session.login(UserType::User, self.user_pin.as_ref())?;
+
+        let root_key = session
+            .find_objects(&[
+                Attribute::Class(ObjectClass::SECRET_KEY),
+                Attribute::Label(root_key_label.as_bytes().to_vec()),
+            ])?
+            .into_iter()
+            .next()
+            .ok_or(Error::Pkcs11(
+                cryptoki::error::RvError::KeyHandleInvalid,
+                cryptoki::context::Function::FindObjects,
+            ))?;
+
+        let hmac = session.sign(
+            &Mechanism::Sha512Hmac,
+            root_key,
+            domain_separator.as_bytes(),
+        )?;
+
+        session.close();
+        Ok(DerivedSecret::new(hmac))
     }
 
     fn sign(&self, key: &HsmKey, sign_payload: &[u8]) -> Result<Vec<u8>, Error> {

@@ -61,6 +61,7 @@ fn base_context(state: DeviceHsmState, inner_request: InnerRequest) -> Operation
             session_id: None,
             context: "auth".to_string(),
             inner_jwe: None,
+            server_kid: None,
         },
         inner_request,
         session_id: None,
@@ -187,13 +188,13 @@ fn register_finish_inner_request(auth_code: &str) -> InnerRequest {
 fn register_finish_consumes_auth_code_and_replaces_password_file() {
     const AUTH_CODE: &str = "secret-code";
     const NEW_PF_BYTES: &[u8] = &[0xDE, 0xAD, 0xBE, 0xEF];
-    const SERVER_ID: &str = "test-server";
+    const OPAQUE_DOMAIN_SEP: &str = "rk-202501_opaque-202501";
 
     let mut mock = MockPakePort::new();
     mock.expect_registration_finish().once().returning(|_| {
         Ok(RegistrationResult {
             password_file: crate::domain::PasswordFile(NEW_PF_BYTES.to_vec()),
-            server_identifier: SERVER_ID.to_string(),
+            opaque_domain_separator: OPAQUE_DOMAIN_SEP.to_string(),
         })
     });
     let op = RegisterFinishOperation::new(Arc::new(mock));
@@ -214,7 +215,10 @@ fn register_finish_consumes_auth_code_and_replaces_password_file() {
     );
     assert_eq!(device_key.password_files.len(), 1);
     assert_eq!(device_key.password_files[0].password_file.0, NEW_PF_BYTES);
-    assert_eq!(device_key.password_files[0].server_identifier, SERVER_ID);
+    assert_eq!(
+        device_key.password_files[0].opaque_domain_separator,
+        OPAQUE_DOMAIN_SEP
+    );
 }
 
 #[test]
@@ -225,7 +229,7 @@ fn register_finish_reuse_of_consumed_auth_code_fails() {
     mock.expect_registration_finish().once().returning(|_| {
         Ok(RegistrationResult {
             password_file: crate::domain::PasswordFile(vec![0x01]),
-            server_identifier: "s".to_string(),
+            opaque_domain_separator: "rk-202501_opaque-202501".to_string(),
         })
     });
     let op = RegisterFinishOperation::new(Arc::new(mock));
@@ -255,13 +259,13 @@ fn register_finish_reuse_of_consumed_auth_code_fails() {
 #[test]
 fn pin_change_finish_replaces_password_file_and_ends_session() {
     const NEW_PF_BYTES: &[u8] = &[0xCA, 0xFE, 0xBA, 0xBE];
-    const SERVER_ID: &str = "pin-change-server";
+    const OPAQUE_DOMAIN_SEP: &str = "rk-202501_opaque-202501";
 
     let mut mock = MockPakePort::new();
     mock.expect_registration_finish().once().returning(|_| {
         Ok(RegistrationResult {
             password_file: crate::domain::PasswordFile(vec![0xCA, 0xFE, 0xBA, 0xBE]),
-            server_identifier: "pin-change-server".to_string(),
+            opaque_domain_separator: "rk-202501_opaque-202501".to_string(),
         })
     });
     let op = PinChangeFinishOperation::new(Arc::new(mock));
@@ -286,7 +290,10 @@ fn pin_change_finish_replaces_password_file_and_ends_session() {
     let device_key = new_state.find_device_key("device-key-1").unwrap();
     assert_eq!(device_key.password_files.len(), 1);
     assert_eq!(device_key.password_files[0].password_file.0, NEW_PF_BYTES);
-    assert_eq!(device_key.password_files[0].server_identifier, SERVER_ID);
+    assert_eq!(
+        device_key.password_files[0].opaque_domain_separator,
+        OPAQUE_DOMAIN_SEP
+    );
 }
 
 #[rstest]

@@ -1,5 +1,6 @@
 use crate::application::port::outgoing::session_state_spi_port::{PendingLoginState, SessionKey};
 use crate::domain;
+use crate::domain::value_objects::client_metadata::PasswordFileEntry;
 use crate::domain::value_objects::r2ps::PakePayloadVector;
 
 #[derive(Debug)]
@@ -13,7 +14,8 @@ pub enum PakeError {
 
 pub struct RegistrationResult {
     pub password_file: domain::PasswordFile,
-    pub server_identifier: String,
+    /// Domain separator of the OPAQUE server keypair used at registration time
+    pub opaque_domain_separator: String,
 }
 
 #[cfg_attr(test, mockall::automock)]
@@ -29,7 +31,7 @@ pub trait PakePort: Send + Sync {
     fn authentication_start(
         &self,
         request_bytes: &[u8],
-        password_file_bytes: &[u8],
+        password_file_entry: &PasswordFileEntry,
         client_id: &str,
     ) -> Result<(PakePayloadVector, PendingLoginState), PakeError>;
 

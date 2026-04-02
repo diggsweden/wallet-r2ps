@@ -47,6 +47,10 @@ pub struct StateInitResponse {
     pub request_id: String,
     pub state_jws: String,
     pub dev_authorization_code: String,
+    #[serde(default)]
+    pub server_jws_public_key: Option<EcPublicJwk>,
+    #[serde(default)]
+    pub opaque_server_id: Option<String>,
 }
 
 /// Pending request metadata stored in Redis, linking a requestId to the device state key.
@@ -108,6 +112,10 @@ pub struct NewStateResponseDto {
     pub client_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dev_authorization_code: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub server_jws_public_key: Option<EcPublicJwk>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub opaque_server_id: Option<String>,
 }
 
 /// Generic async response envelope matching the Java AsyncResponseDto.

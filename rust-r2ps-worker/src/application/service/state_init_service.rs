@@ -8,6 +8,7 @@ use uuid::Uuid;
 pub struct StateInitService {
     response_spi_port: Arc<dyn StateInitResponseSpiPort + Send + Sync>,
     jose: Arc<dyn JosePort>,
+    opaque_server_id: String,
 }
 
 #[derive(Debug)]
@@ -22,10 +23,12 @@ impl StateInitService {
     pub fn new(
         response_spi_port: Arc<dyn StateInitResponseSpiPort + Send + Sync>,
         jose: Arc<dyn JosePort>,
+        opaque_server_id: String,
     ) -> Self {
         Self {
             response_spi_port,
             jose,
+            opaque_server_id,
         }
     }
 
@@ -69,6 +72,9 @@ impl StateInitService {
             request_id: request.request_id.clone(),
             state_jws,
             dev_authorization_code: dev_auth_code,
+            server_jws_public_key: self.jose.jws_public_key().clone(),
+            server_jws_kid: self.jose.jws_kid().to_owned(),
+            opaque_server_id: self.opaque_server_id.clone(),
         };
 
         // 6. Send response via Kafka

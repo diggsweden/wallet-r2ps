@@ -323,6 +323,8 @@ pub async fn create_state(
             status: "OK".to_string(),
             client_id,
             dev_authorization_code: None,
+            server_jws_public_key: None,
+            opaque_server_id: None,
         };
         return Json(dto).into_response();
     }
@@ -380,6 +382,8 @@ pub async fn create_state(
                 status: "OK".to_string(),
                 client_id,
                 dev_authorization_code: Some(resp.dev_authorization_code),
+                server_jws_public_key: resp.server_jws_public_key,
+                opaque_server_id: resp.opaque_server_id,
             };
             Json(dto).into_response()
         }

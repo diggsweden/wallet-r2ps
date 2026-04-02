@@ -53,7 +53,17 @@ fn test_valid_initialization_pipeline() {
     mock_jose
         .expect_jws_sign()
         .returning(|_| Ok("mocked.jws.signature".to_string()));
-    let service = StateInitService::new(mock_spi.clone(), Arc::new(mock_jose));
+    mock_jose
+        .expect_jws_public_key()
+        .return_const(create_valid_jwk());
+    mock_jose
+        .expect_jws_kid()
+        .return_const("mock-kid".to_string());
+    let service = StateInitService::new(
+        mock_spi.clone(),
+        Arc::new(mock_jose),
+        "mock-opaque-id".to_string(),
+    );
 
     let request = StateInitRequest {
         request_id: "test-req-123".to_string(),
@@ -87,7 +97,11 @@ fn test_initialization_fails_on_signing_error() {
     mock_jose
         .expect_jws_sign()
         .returning(|_| Err(JoseError::SignError));
-    let service = StateInitService::new(mock_spi.clone(), Arc::new(mock_jose));
+    let service = StateInitService::new(
+        mock_spi.clone(),
+        Arc::new(mock_jose),
+        "mock-opaque-id".to_string(),
+    );
 
     let request = StateInitRequest {
         request_id: "test-req-123".to_string(),
@@ -114,7 +128,17 @@ fn test_initialization_fails_on_spi_send_error() {
     mock_jose
         .expect_jws_sign()
         .returning(|_| Ok("mocked.jws.signature".to_string()));
-    let service = StateInitService::new(mock_spi.clone(), Arc::new(mock_jose));
+    mock_jose
+        .expect_jws_public_key()
+        .return_const(create_valid_jwk());
+    mock_jose
+        .expect_jws_kid()
+        .return_const("mock-kid".to_string());
+    let service = StateInitService::new(
+        mock_spi.clone(),
+        Arc::new(mock_jose),
+        "mock-opaque-id".to_string(),
+    );
 
     let request = StateInitRequest {
         request_id: "test-req-123".to_string(),
@@ -146,7 +170,11 @@ fn test_strict_jwk_validation_rejection(
         responses: Mutex::new(Vec::new()),
         fail: false,
     });
-    let service = StateInitService::new(mock_spi.clone(), Arc::new(MockJosePort::new()));
+    let service = StateInitService::new(
+        mock_spi.clone(),
+        Arc::new(MockJosePort::new()),
+        "mock-opaque-id".to_string(),
+    );
 
     let request = StateInitRequest {
         request_id: "test-req-123".to_string(),

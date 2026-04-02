@@ -39,6 +39,7 @@ cryptoki = "0.10.0"
 opaque-ke = { version = "4.0.1", features = ["std"] }
 rand = "0.8"
 sha2 = "0.10.9"
+hkdf = "0.12"
 josekit = "0.10.3"
 base64 = "0.22.1"
 p256 = { version = "0.13", default-features = false, features = [

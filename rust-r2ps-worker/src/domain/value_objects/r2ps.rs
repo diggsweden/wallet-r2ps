@@ -100,6 +100,9 @@ pub struct OuterRequest {
     pub session_id: Option<SessionId>,
     /// Request context, currently always "hsm"
     pub context: String,
+    /// KID of the server JWS public key the client has bundled; used to select the signing key
+    #[serde(default)]
+    pub server_kid: Option<String>,
     /// JWE-encrypted inner request payload (JWE compact serialization)
     pub inner_jwe: Option<TypedJwe<InnerRequest>>,
 }
@@ -492,6 +495,7 @@ pub enum ServiceRequestError {
     /// An internal server error occurred
     InternalServerError,
     InvalidAuthorizationCode,
+    UnknownServerKid,
     Unknown,
 }
 

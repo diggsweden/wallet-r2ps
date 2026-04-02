@@ -33,4 +33,6 @@ pub trait JosePort: Send + Sync {
     ) -> Result<String, JoseError>;
     fn jwe_decrypt<'a>(&self, jwe: &str, key: JweDecryptionKey<'a>) -> Result<Vec<u8>, JoseError>;
     fn peek_kid(&self, compact: &str) -> Result<Option<String>, JoseError>;
+    fn jws_public_key(&self) -> &EcPublicJwk;
+    fn jws_kid(&self) -> &str;
 }

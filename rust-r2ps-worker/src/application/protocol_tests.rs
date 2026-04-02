@@ -21,6 +21,7 @@ mod tests {
             version: 1,
             session_id: Some(SessionId::new()),
             context: "hsm".to_string(),
+            server_kid: None,
             inner_jwe: jwe.map(TypedJwe::new),
         }
     }

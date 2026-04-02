@@ -43,9 +43,9 @@ impl ServiceOperation for AuthenticateStartOperation {
     ) -> Result<OperationResult, domain::ServiceRequestError> {
         let pake_request = domain::PakeRequest::from_inner_request(context.inner_request)?;
 
-        let password_file = context
+        let password_file_entry = context
             .state
-            .get_password_file(&context.device_kid)
+            .get_password_file_entry(&context.device_kid)
             .ok_or(domain::ServiceRequestError::UnknownClient)?;
 
         let session_id = domain::SessionId::new();
@@ -54,7 +54,7 @@ impl ServiceOperation for AuthenticateStartOperation {
             .pake_port
             .authentication_start(
                 pake_request.data.as_ref(),
-                password_file.as_bytes(),
+                password_file_entry,
                 &context.device_kid,
             )
             .map_err(pake_err_to_service_err)?;
@@ -210,7 +210,7 @@ impl ServiceOperation for RegisterFinishOperation {
 
         let pake_port::RegistrationResult {
             password_file,
-            server_identifier,
+            opaque_domain_separator,
         } = self
             .pake_port
             .registration_finish(pake_payload.data.as_ref())
@@ -218,7 +218,7 @@ impl ServiceOperation for RegisterFinishOperation {
 
         let password_file_entry = domain::PasswordFileEntry {
             password_file,
-            server_identifier,
+            opaque_domain_separator,
             created_at: chrono::Utc::now().to_rfc3339(),
         };
 
@@ -317,7 +317,7 @@ impl ServiceOperation for PinChangeFinishOperation {
 
         let pake_port::RegistrationResult {
             password_file,
-            server_identifier,
+            opaque_domain_separator,
         } = self
             .pake_port
             .registration_finish(pake_payload.data.as_ref())
@@ -325,7 +325,7 @@ impl ServiceOperation for PinChangeFinishOperation {
 
         let password_file_entry = domain::PasswordFileEntry {
             password_file,
-            server_identifier,
+            opaque_domain_separator,
             created_at: chrono::Utc::now().to_rfc3339(),
         };
 

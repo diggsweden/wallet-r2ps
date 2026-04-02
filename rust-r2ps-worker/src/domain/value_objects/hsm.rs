@@ -38,6 +38,9 @@ pub struct HsmKey {
     pub wrapped_private_key: WrappedPrivateKey,
     /// The public key in EC JWK format
     pub public_key_jwk: EcPublicJwk,
+    /// Label of the AES wrap key used to wrap this private key
+    #[serde(default)]
+    pub wrap_key_label: String,
     /// Timestamp when this key was created
     #[cfg_attr(feature = "openapi", schema(value_type = String, format = "date-time"))]
     pub created_at: chrono::DateTime<chrono::Utc>,

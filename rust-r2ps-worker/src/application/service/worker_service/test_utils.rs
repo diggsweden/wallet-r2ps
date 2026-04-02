@@ -81,6 +81,12 @@ impl JosePort for MockJoseDeterministic {
             _ => Err(JoseError::InvalidKey),
         }
     }
+    fn jws_public_key(&self) -> &EcPublicJwk {
+        unimplemented!()
+    }
+    fn jws_kid(&self) -> &str {
+        "mock-kid"
+    }
 }
 
 // --- SPI Mocks ---
@@ -163,7 +169,7 @@ pub fn make_state_with_password_file(device_kid: &str) -> DeviceHsmState {
         device_kid,
         vec![PasswordFileEntry {
             password_file: PasswordFile(vec![1, 2, 3]),
-            server_identifier: "server-id".to_string(),
+            opaque_domain_separator: "rk-202501_opaque-202501".to_string(),
             created_at: "2026-01-01T00:00:00Z".to_string(),
         }],
     )
@@ -201,11 +207,16 @@ pub fn make_outer(context: &str, session_id: Option<SessionId>) -> OuterRequest 
         session_id,
         context: context.to_string(),
         inner_jwe: Some(TypedJwe::new("inner.jwe".to_string())),
+        server_kid: None,
     }
 }
 
-pub fn make_ports(worker_response: Arc<dyn WorkerResponseSpiPort + Send + Sync>) -> WorkerPorts {
+pub fn make_ports(
+    jose: Arc<dyn crate::application::jose_port::JosePort>,
+    worker_response: Arc<dyn WorkerResponseSpiPort + Send + Sync>,
+) -> WorkerPorts {
     WorkerPorts {
+        jose,
         session_state: Arc::new(MockSessionStateSpi),
         hsm: Arc::new(MockHsmSpiPort::new()),
         worker_response,

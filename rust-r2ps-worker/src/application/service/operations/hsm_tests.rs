@@ -26,6 +26,7 @@ mod tests {
                 session_id: None,
                 context: "hsm".to_string(),
                 inner_jwe: None, // Simplified for testing HSM ops
+                server_kid: None,
             },
             inner_request,
             session_id: None,
@@ -44,6 +45,7 @@ mod tests {
                 y: "y".to_string(),
                 kid: kid.to_string(),
             },
+            wrap_key_label: String::new(),
             created_at: chrono::Utc::now(),
         }
     }
@@ -83,6 +85,7 @@ mod tests {
                     y: "y".to_string(),
                     kid: "new-hsm-key-id".to_string(),
                 },
+                wrap_key_label: String::new(),
                 created_at: chrono::Utc::now(),
             })
         });

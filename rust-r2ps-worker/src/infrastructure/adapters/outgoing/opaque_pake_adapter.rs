@@ -1,15 +1,15 @@
 use crate::application::port::outgoing::pake_port;
 use crate::application::port::outgoing::session_state_spi_port::{PendingLoginState, SessionKey};
 use crate::domain;
+use crate::domain::value_objects::client_metadata::PasswordFileEntry;
 use crate::domain::value_objects::r2ps::PakePayloadVector;
 use argon2::password_hash::rand_core::OsRng;
 use base64::Engine;
 use base64::prelude::BASE64_STANDARD;
 use opaque_ke;
 use p256::NistP256;
+use p256::SecretKey;
 use p256::elliptic_curve::sec1::ToEncodedPoint;
-use p256::pkcs8::DecodePrivateKey;
-use pem::Pem;
 use tracing::{debug, info, warn};
 
 #[derive(Clone, Copy)]
@@ -24,30 +24,44 @@ impl opaque_ke::CipherSuite for DefaultCipherSuite {
 pub struct OpaquePakeAdapter {
     server_setup: opaque_ke::ServerSetup<DefaultCipherSuite>,
     context: String,
-    server_identifier: String,
+    /// Domain separator identifying this OPAQUE server keypair (stored in PasswordFileEntry)
+    opaque_domain_separator: String,
+    /// KID of the OPAQUE server public key (sent to client in registrationStart response)
+    opaque_server_id: String,
 }
 
 impl OpaquePakeAdapter {
-    fn new(
-        server_setup: opaque_ke::ServerSetup<DefaultCipherSuite>,
+    /// Build an adapter from a P-256 secret key and an optional persisted `ServerSetup`.
+    ///
+    /// # Why `opaque_server_setup` is required in production (both modes)
+    ///
+    /// OPAQUE `ServerSetup` contains two independent components:
+    ///   1. The server keypair — used in the AKE handshake. In HSM key derivation mode
+    ///      this is deterministically derived from the root key; in legacy mode it comes
+    ///      from `SERVER_PRIVATE_KEY`. Either way it is stable across restarts.
+    ///   2. An OPRF key — used to blind/unblind the password during registration and
+    ///      authentication. This key is randomly generated and is NOT derivable from the
+    ///      server keypair.
+    ///
+    /// If the OPRF key changes between restarts every existing client registration becomes
+    /// permanently invalid (authentication will always fail). Therefore:
+    ///   - On the first startup, the service logs `OPAQUE_SERVER_SETUP=<base64>`.
+    ///   - That value **must** be saved and set in the environment for all subsequent starts.
+    ///   - This requirement applies to both legacy PEM mode and HSM key derivation mode.
+    pub fn build(
+        secret_key: &SecretKey,
+        opaque_server_setup: &Option<String>,
+        opaque_domain_separator: String,
+        opaque_server_id: String,
         context: String,
-        server_identifier: String,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, String> {
+        let server_setup = load_or_create_server_setup(opaque_server_setup, secret_key)?;
+        Ok(Self {
             server_setup,
             context,
-            server_identifier,
-        }
-    }
-
-    pub fn from_config(
-        opaque_server_setup: &Option<String>,
-        server_private_key: &Pem,
-        context: String,
-        server_identifier: String,
-    ) -> Self {
-        let server_setup = load_or_create_server_setup(opaque_server_setup, server_private_key);
-        Self::new(server_setup, context, server_identifier)
+            opaque_domain_separator,
+            opaque_server_id,
+        })
     }
 
     fn server_login_parameters<'a>(
@@ -123,22 +137,31 @@ impl pake_port::PakePort for OpaquePakeAdapter {
         let password_file = opaque_ke::ServerRegistration::<DefaultCipherSuite>::finish(upload);
         Ok(pake_port::RegistrationResult {
             password_file: domain::PasswordFile(password_file.serialize().to_vec()),
-            server_identifier: self.server_identifier.clone(),
+            opaque_domain_separator: self.opaque_domain_separator.clone(),
         })
     }
 
     fn authentication_start(
         &self,
         request_bytes: &[u8],
-        password_file_bytes: &[u8],
+        password_file_entry: &PasswordFileEntry,
         client_id: &str,
     ) -> Result<(PakePayloadVector, PendingLoginState), pake_port::PakeError> {
-        let password_file =
-            opaque_ke::ServerRegistration::<DefaultCipherSuite>::deserialize(password_file_bytes)
-                .map_err(|e| {
-                warn!("invalid password file: {:?}", e);
-                pake_port::PakeError::InvalidPasswordFile
-            })?;
+        if password_file_entry.opaque_domain_separator != self.opaque_domain_separator {
+            warn!(
+                "authentication_start: opaque_domain_separator mismatch: stored='{}', current='{}'",
+                password_file_entry.opaque_domain_separator, self.opaque_domain_separator
+            );
+            return Err(pake_port::PakeError::InvalidRequest);
+        }
+
+        let password_file = opaque_ke::ServerRegistration::<DefaultCipherSuite>::deserialize(
+            password_file_entry.password_file.as_bytes(),
+        )
+        .map_err(|e| {
+            warn!("invalid password file: {:?}", e);
+            pake_port::PakeError::InvalidPasswordFile
+        })?;
 
         let credential_request =
             opaque_ke::CredentialRequest::deserialize(request_bytes).map_err(|e| {
@@ -149,7 +172,7 @@ impl pake_port::PakePort for OpaquePakeAdapter {
         debug!("Using client id for OPAQUE authentication: {}", client_id);
 
         let params =
-            Self::server_login_parameters(&self.context, client_id, &self.server_identifier);
+            Self::server_login_parameters(&self.context, client_id, &self.opaque_server_id);
 
         let result = opaque_ke::ServerLogin::start(
             &mut OsRng,
@@ -190,7 +213,7 @@ impl pake_port::PakePort for OpaquePakeAdapter {
             })?;
 
         let params =
-            Self::server_login_parameters(&self.context, client_id, &self.server_identifier);
+            Self::server_login_parameters(&self.context, client_id, &self.opaque_server_id);
 
         let result = server_login.finish(finalization, params).map_err(|e| {
             warn!("authentication finish failed: {:?}", e);
@@ -203,18 +226,17 @@ impl pake_port::PakePort for OpaquePakeAdapter {
 
 fn load_or_create_server_setup(
     opaque_server_setup: &Option<String>,
-    server_private_key: &Pem,
-) -> opaque_ke::ServerSetup<DefaultCipherSuite> {
+    secret_key: &SecretKey,
+) -> Result<opaque_ke::ServerSetup<DefaultCipherSuite>, String> {
     match load_server_setup(opaque_server_setup) {
-        Ok(setup) => setup,
+        Ok(setup) => Ok(setup),
         Err(_) => {
-            let setup = create_server_setup(server_private_key)
-                .expect("Failed to create OPAQUE server setup");
+            let setup = create_server_setup(secret_key)?;
             info!(
                 "OPAQUE_SERVER_SETUP={}",
                 BASE64_STANDARD.encode(setup.serialize())
             );
-            setup
+            Ok(setup)
         }
     }
 }
@@ -234,12 +256,10 @@ fn load_server_setup(
     }
 }
 
+/// Build an OPAQUE ServerSetup from a P-256 secret key with a fresh random OPRF seed.
 fn create_server_setup(
-    server_private_key_pem: &Pem,
+    secret_key: &SecretKey,
 ) -> Result<opaque_ke::ServerSetup<DefaultCipherSuite>, String> {
-    let secret_key = p256::SecretKey::from_pkcs8_pem(&pem::encode(server_private_key_pem))
-        .map_err(|e| format!("Failed to parse P-256 private key: {:?}", e))?;
-
     let keypair = opaque_ke::keypair::KeyPair::new(
         opaque_ke::keypair::PrivateKey::<NistP256>::deserialize(&secret_key.to_bytes())
             .map_err(|e| format!("Failed to deserialize private key: {:?}", e))?,

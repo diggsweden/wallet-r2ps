@@ -10,6 +10,8 @@ pub enum UpstreamError {
     OuterJwsInvalid,
     OuterJwsMissingKid,
     UnknownDevice,
+    UnknownServerKid,
+    ServerKidRequired,
     EncodeFailed(&'static str),
 }
 

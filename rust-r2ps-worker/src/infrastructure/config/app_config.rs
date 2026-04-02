@@ -5,11 +5,17 @@ use serde::Deserialize;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct AppConfig {
-    pub server_private_key: String, // base64 env pem (double encoded)
-    pub server_public_key: String,  // base64 env pem (double encoded)
-    pub opaque_server_setup: Option<String>, // serialized OPAQUE server state, base64 encoded
-    pub opaque_server_identifier: String, // stable domain identifier for OPAQUE protocol
-    pub opaque_context: String,     // OPAQUE protocol context
+    // Legacy: direct PEM key config (used when hsm_root_key_label is absent)
+    pub server_private_key: Option<String>,
+    pub opaque_server_setup: Option<String>,
+    pub opaque_server_identifier: String,
+
+    // HSM key derivation (used when present, supersedes PEM config)
+    pub hsm_root_key_label: Option<String>,
+    pub jws_domain_separator: Option<String>,
+    pub opaque_domain_separator: Option<String>,
+
+    pub opaque_context: String,
 
     pub pkcs11_lib: String,
     pub pkcs11_slot_token_label: String,
@@ -33,8 +39,8 @@ impl AppConfig {
             .set_default("kafka_group_id", "rust-grp")?
             .set_default("kafka_group_instance_id", "consumer-1")?
             .set_default("kafka_broker_address_family", "v4")?
-            .set_default("opaque_server_identifier", "cloud-wallet.digg.se")?
             .set_default("opaque_context", "RPS-Ops")?
+            .set_default("opaque_server_identifier", "cloud-wallet.digg.se")?
             .add_source(Environment::default())
             .build()?
             .try_deserialize()

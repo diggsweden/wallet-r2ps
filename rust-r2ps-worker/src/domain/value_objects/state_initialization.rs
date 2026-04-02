@@ -26,4 +26,10 @@ pub struct StateInitResponse {
     pub state_jws: TypedJws<DeviceHsmState>,
     /// One-time authorization code for device registration
     pub dev_authorization_code: String,
+    /// Server JWS public key (EC JWK); clients may use this for JWE encryption and JWS verification
+    pub server_jws_public_key: EcPublicJwk,
+    /// KID of the server JWS public key
+    pub server_jws_kid: String,
+    /// OPAQUE server identifier used during registration (must match on authenticate)
+    pub opaque_server_id: String,
 }

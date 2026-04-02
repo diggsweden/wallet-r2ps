@@ -34,6 +34,7 @@ fn make_hsm_key(kid: &str) -> HsmKey {
     HsmKey {
         wrapped_private_key: WrappedPrivateKey::new(vec![0xDE, 0xAD]),
         public_key_jwk: make_ec_jwk(kid),
+        wrap_key_label: "test-wrap-key".to_string(),
         created_at: chrono::Utc::now(),
     }
 }
@@ -49,7 +50,7 @@ fn make_state() -> DeviceHsmState {
 fn make_password_file_entry() -> PasswordFileEntry {
     PasswordFileEntry {
         password_file: PasswordFile(vec![0x01, 0x02, 0x03]),
-        server_identifier: "test-server".to_string(),
+        opaque_domain_separator: "rk-202501_opaque-202501".to_string(),
         created_at: "2026-01-01T00:00:00Z".to_string(),
     }
 }
@@ -342,12 +343,12 @@ fn get_password_file_returns_last() {
     state.add_device_key(make_device_key("k1")).unwrap();
     let first_entry = PasswordFileEntry {
         password_file: PasswordFile(vec![0xAA, 0xBB]),
-        server_identifier: "server-1".to_string(),
+        opaque_domain_separator: "rk-202501_opaque-202501".to_string(),
         created_at: "2026-01-01T00:00:00Z".to_string(),
     };
     let second_entry = PasswordFileEntry {
         password_file: PasswordFile(vec![0xCC, 0xDD]),
-        server_identifier: "server-2".to_string(),
+        opaque_domain_separator: "rk-202501_opaque-202502".to_string(),
         created_at: "2026-01-02T00:00:00Z".to_string(),
     };
     {

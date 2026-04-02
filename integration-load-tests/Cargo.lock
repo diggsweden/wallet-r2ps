@@ -2083,6 +2083,7 @@ dependencies = [
  "dotenvy",
  "elliptic-curve",
  "hex",
+ "hkdf",
  "iso8601-duration",
  "josekit",
  "moka",
