@@ -43,8 +43,9 @@ RUN cargo build --release
 
 FROM runtime-softhsm
 
-# Copy the binary from builder
+# Copy the binaries from builder
 COPY --from=builder /app/target/release/rust-r2ps-worker /rust-r2ps-worker
+COPY --from=builder /app/target/release/digg-hsm-keytool /usr/local/bin/digg-hsm-keytool
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["/rust-r2ps-worker"]

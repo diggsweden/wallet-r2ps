@@ -15,7 +15,7 @@ use der::asn1::OctetStringRef;
 use digest::Digest;
 use p256::ecdsa::VerifyingKey;
 use std::sync::Arc;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 
 pub struct HsmWrapper {
     pkcs11: Arc<Pkcs11>,
