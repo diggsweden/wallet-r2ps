@@ -14,8 +14,8 @@ name = "integration-load-tests"
 path = "src/main.rs"
 
 [dependencies]
-# Shared domain types from the HSM worker
-hsm-worker = { path = "../hsm-worker" }
+# Shared protocol types
+hsm-common = { path = "../hsm-common" }
 
 # OPAQUE protocol (must match hsm-worker + opaque-ke-wasm)
 opaque-ke = { version = "4.0.1", features = ["std"] }

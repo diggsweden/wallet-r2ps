@@ -175,7 +175,10 @@ async fn worker_loop(
     {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("[worker {}] Failed to build client pool: {:#}", worker_id, e);
+            eprintln!(
+                "[worker {}] Failed to build client pool: {:#}",
+                worker_id, e
+            );
             return;
         }
     };
@@ -227,7 +230,10 @@ async fn run_one_cycle(
 
         let message: [u8; 32] = rand::thread_rng().gen();
         let t_sign = Instant::now();
-        match am.hsm_sign(&session_key, &session_id, client_id, hsm_kid, &message).await {
+        match am
+            .hsm_sign(&session_key, &session_id, client_id, hsm_kid, &message)
+            .await
+        {
             Ok(_) => {
                 stats.record_latency(t_sign.elapsed().as_millis() as u64);
             }

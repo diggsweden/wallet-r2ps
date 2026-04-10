@@ -1,0 +1,8 @@
+[workspace]
+members = [
+    "hsm-worker",
+    "wallet-bff",
+    "integration-load-tests",
+    "hsm-common",
+]
+resolver = "2"

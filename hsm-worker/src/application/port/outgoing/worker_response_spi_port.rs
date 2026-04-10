@@ -2,10 +2,10 @@
 //
 // SPDX-License-Identifier: EUPL-1.2
 
-use crate::domain::WorkerResponse;
+use crate::domain::HsmWorkerResponse;
 
 pub trait WorkerResponseSpiPort {
-    fn send(&self, worker_response: WorkerResponse) -> Result<(), WorkerResponseError>;
+    fn send(&self, worker_response: HsmWorkerResponse) -> Result<(), WorkerResponseError>;
 }
 
 #[derive(Debug)]

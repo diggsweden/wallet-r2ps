@@ -427,7 +427,7 @@ pub fn build_async_response(
             }
             (StatusCode::ACCEPTED, headers, Json(body)).into_response()
         }
-        Some(resp) if resp.status != "OK" => {
+        Some(resp) if resp.status != hsm_common::Status::Ok => {
             // Forward the worker's pre-built RFC 9457 JSON if available.
             if let Some(problem_json_str) = resp.error_message {
                 return forward_problem_json(StatusCode::INTERNAL_SERVER_ERROR, problem_json_str);

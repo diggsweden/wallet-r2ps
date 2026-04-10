@@ -10,8 +10,8 @@ use crate::application::service::worker_service::error::{
 };
 use crate::domain::value_objects::r2ps::{InnerResponse, OuterResponse, Status};
 use crate::domain::{
-    DeviceHsmState, EncryptOption, SessionId, TypedJwe, TypedJws, WorkerRequestError,
-    WorkerResponse,
+    DeviceHsmState, EncryptOption, HsmWorkerResponse, SessionId, TypedJwe, TypedJws,
+    WorkerRequestError,
 };
 use std::sync::Arc;
 
@@ -33,12 +33,12 @@ impl ResponseBuilder {
         Self { jose }
     }
 
-    /// Encodes a successful `OperationResult` into a full `WorkerResponse`.
+    /// Encodes a successful `OperationResult` into a full `HsmWorkerResponse`.
     pub fn encode_response(
         &self,
         operation_result: OperationResult,
         context: &ResponseContext,
-    ) -> Result<WorkerResponse, WorkerError> {
+    ) -> Result<HsmWorkerResponse, WorkerError> {
         let inner_response = self.build_inner_response(&operation_result, context.ttl)?;
         let inner_jwe = self.encrypt_inner_response(&inner_response, context)?;
         let outer_response_jws =
@@ -46,7 +46,7 @@ impl ResponseBuilder {
 
         let new_state_jws = self.encode_state_jws(operation_result.state)?;
 
-        Ok(WorkerResponse {
+        Ok(HsmWorkerResponse {
             request_id: context.request_id.clone(),
             state_jws: new_state_jws,
             outer_response_jws: Some(outer_response_jws),
@@ -96,7 +96,7 @@ impl ResponseBuilder {
         &self,
         request_id: &str,
         process_err: ProcessError,
-    ) -> Result<WorkerResponse, WorkerRequestError> {
+    ) -> Result<HsmWorkerResponse, WorkerRequestError> {
         let ProcessError { error, context } = process_err;
         let problem_json = error.to_problem_details_json(request_id);
 
@@ -126,7 +126,7 @@ impl ResponseBuilder {
         &self,
         request_id: &str,
         problem_json: String,
-    ) -> Result<WorkerResponse, WorkerRequestError> {
+    ) -> Result<HsmWorkerResponse, WorkerRequestError> {
         self.sign_and_wrap_outer_response(request_id, OuterResponse::error(problem_json))
     }
 
@@ -134,8 +134,8 @@ impl ResponseBuilder {
         &self,
         request_id: &str,
         problem_json: String,
-    ) -> WorkerResponse {
-        WorkerResponse {
+    ) -> HsmWorkerResponse {
+        HsmWorkerResponse {
             request_id: request_id.to_string(),
             state_jws: None,
             outer_response_jws: None,
@@ -170,9 +170,9 @@ impl ResponseBuilder {
         &self,
         request_id: &str,
         outer_response: OuterResponse,
-    ) -> Result<WorkerResponse, WorkerRequestError> {
+    ) -> Result<HsmWorkerResponse, WorkerRequestError> {
         match outer_response.sign(self.jose.as_ref()) {
-            Ok(outer_response_jws) => Ok(WorkerResponse {
+            Ok(outer_response_jws) => Ok(HsmWorkerResponse {
                 request_id: request_id.to_string(),
                 state_jws: None,
                 outer_response_jws: Some(outer_response_jws),

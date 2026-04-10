@@ -12,6 +12,7 @@ name = "wallet-bff"
 path = "src/main.rs"
 
 [dependencies]
+hsm-common = { path = "../hsm-common", features = ["openapi"] }
 axum = { version = "0.8", features = ["macros"] }
 tokio = { version = "1", features = ["full"] }
 rdkafka = { version = "0.38.0", features = ["cmake-build", "curl-static", "tokio"] }

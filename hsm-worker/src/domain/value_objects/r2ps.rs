@@ -80,7 +80,7 @@ pub struct HsmWorkerRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(ToSchema))]
 #[serde(rename_all = "camelCase")]
-pub struct WorkerResponse {
+pub struct HsmWorkerResponse {
     /// Correlation ID matching the original request
     pub request_id: String,
     /// JWS-encoded updated device state (DeviceHsmState)

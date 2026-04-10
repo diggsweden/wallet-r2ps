@@ -19,9 +19,9 @@ use hsm_worker::domain::value_objects::r2ps::{
     OperationId, PakePayloadVector, PakeRequest, Status,
 };
 use hsm_worker::domain::{
-    DeviceHsmState, DeviceKeyEntry, EcPublicJwk, HsmKey, HsmWorkerRequest, InnerRequest,
-    OuterRequest, OuterResponse, PasswordFile, PasswordFileEntry, SessionId, TypedJwe, TypedJws,
-    WorkerResponse, WrappedPrivateKey,
+    DeviceHsmState, DeviceKeyEntry, EcPublicJwk, HsmKey, HsmWorkerRequest, HsmWorkerResponse,
+    InnerRequest, OuterRequest, OuterResponse, PasswordFile, PasswordFileEntry, SessionId,
+    TypedJwe, TypedJws, WrappedPrivateKey,
 };
 use hsm_worker::infrastructure::adapters::outgoing::jose_adapter::JoseAdapter;
 use hsm_worker::infrastructure::adapters::outgoing::session_state_memory_cache::SessionStateMemoryCache;
@@ -94,7 +94,7 @@ impl HsmSpiPort for NoOpHsm {
 // Capturing WorkerResponseSpiPort (replaces pub(crate) MockWorkerResponseSpi)
 // ---------------------------------------------------------------------------
 struct CapturingResponseSink {
-    responses: Mutex<Vec<WorkerResponse>>,
+    responses: Mutex<Vec<HsmWorkerResponse>>,
 }
 
 impl CapturingResponseSink {
@@ -106,7 +106,7 @@ impl CapturingResponseSink {
 }
 
 impl WorkerResponseSpiPort for CapturingResponseSink {
-    fn send(&self, r: WorkerResponse) -> Result<(), WorkerResponseError> {
+    fn send(&self, r: HsmWorkerResponse) -> Result<(), WorkerResponseError> {
         self.responses.lock().unwrap().push(r);
         Ok(())
     }
@@ -277,7 +277,7 @@ impl TestFixture {
     }
 
     /// Return the most recent response from the sink (panics if sink is empty).
-    fn last_response(&self) -> WorkerResponse {
+    fn last_response(&self) -> HsmWorkerResponse {
         self.response_sink
             .responses
             .lock()

@@ -10,8 +10,8 @@ use crate::application::port::outgoing::session_state_spi_port::{
 };
 use crate::application::{WorkerPorts, WorkerResponseError, WorkerResponseSpiPort};
 use crate::domain::{
-    DeviceHsmState, EcPublicJwk, HsmWorkerRequest, OuterRequest, PasswordFile, PasswordFileEntry,
-    SessionId, TypedJwe, TypedJws, WorkerResponse,
+    DeviceHsmState, EcPublicJwk, HsmWorkerRequest, HsmWorkerResponse, OuterRequest, PasswordFile,
+    PasswordFileEntry, SessionId, TypedJwe, TypedJws,
 };
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -113,7 +113,7 @@ impl SessionStateSpiPort for MockSessionStateSpi {
 }
 
 pub struct MockWorkerResponseSpi {
-    pub responses: Mutex<Vec<WorkerResponse>>,
+    pub responses: Mutex<Vec<HsmWorkerResponse>>,
 }
 impl MockWorkerResponseSpi {
     pub fn new() -> Arc<Self> {
@@ -123,7 +123,7 @@ impl MockWorkerResponseSpi {
     }
 }
 impl WorkerResponseSpiPort for MockWorkerResponseSpi {
-    fn send(&self, worker_response: WorkerResponse) -> Result<(), WorkerResponseError> {
+    fn send(&self, worker_response: HsmWorkerResponse) -> Result<(), WorkerResponseError> {
         self.responses.lock().unwrap().push(worker_response);
         Ok(())
     }
@@ -131,7 +131,7 @@ impl WorkerResponseSpiPort for MockWorkerResponseSpi {
 
 pub struct FailingWorkerResponseSpi;
 impl WorkerResponseSpiPort for FailingWorkerResponseSpi {
-    fn send(&self, _worker_response: WorkerResponse) -> Result<(), WorkerResponseError> {
+    fn send(&self, _worker_response: HsmWorkerResponse) -> Result<(), WorkerResponseError> {
         Err(WorkerResponseError::ConnectionError)
     }
 }

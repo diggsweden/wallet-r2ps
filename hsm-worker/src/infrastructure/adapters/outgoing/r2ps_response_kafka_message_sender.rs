@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 
 use crate::application::{WorkerResponseError, WorkerResponseSpiPort};
-use crate::domain::WorkerResponse;
+use crate::domain::HsmWorkerResponse;
 use crate::infrastructure::KafkaConfig;
 use rdkafka::ClientConfig;
 use rdkafka::producer::{BaseProducer, BaseRecord};
@@ -28,7 +28,7 @@ impl WorkerResponseKafkaSender {
 }
 
 impl WorkerResponseSpiPort for WorkerResponseKafkaSender {
-    fn send(&self, worker_response: WorkerResponse) -> Result<(), WorkerResponseError> {
+    fn send(&self, worker_response: HsmWorkerResponse) -> Result<(), WorkerResponseError> {
         let response = match serde_json::to_string(&worker_response) {
             Ok(output_json) => {
                 let key = &worker_response.request_id;

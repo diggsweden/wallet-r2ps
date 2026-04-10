@@ -26,7 +26,7 @@ use crate::application::service::operations::OperationDispatcher;
 use crate::application::{
     WorkerPorts, WorkerRequestId, WorkerRequestUseCase, WorkerResponseSpiPort,
 };
-use crate::domain::{HsmWorkerRequest, WorkerRequestError, WorkerResponse};
+use crate::domain::{HsmWorkerRequest, HsmWorkerResponse, WorkerRequestError};
 use std::sync::Arc;
 use std::time::Instant;
 use tracing::{error, info};
@@ -106,7 +106,10 @@ impl WorkerRequestUseCase for WorkerService {
 
 impl WorkerService {
     /// The core execution pipeline: Decode → Read state → Dispatch → Apply transition → Encode.
-    fn process_request(&self, request: HsmWorkerRequest) -> Result<WorkerResponse, ProcessError> {
+    fn process_request(
+        &self,
+        request: HsmWorkerRequest,
+    ) -> Result<HsmWorkerResponse, ProcessError> {
         // Phase 1: Decode outer (pure — no side effects)
         let partial = self
             .request_decoder

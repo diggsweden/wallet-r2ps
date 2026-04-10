@@ -2,79 +2,19 @@
 //
 // SPDX-License-Identifier: EUPL-1.2
 
-//! Protocol wire types matching the hsm-worker / wallet-bff-ws format.
-//!
-//! Response types have fields that may not be directly read in code but are
-//! needed for correct JSON deserialization.
+//! Protocol wire types matching the hsm-worker / wallet-bff format.
 
 use serde::{Deserialize, Serialize};
 
-// ─── Re-exported types from hsm-worker ───
+// ─── Re-exported types from hsm-common ───────────────────────────────────────
 
-pub use hsm_worker::domain::{
-    CreateKeyServiceData, CreateKeyServiceDataResponse, Curve, EcPublicJwk,
+pub use hsm_common::{
+    CreateKeyServiceData, CreateKeyServiceDataResponse, Curve, EcPublicJwk, InnerRequest,
+    InnerResponse, MessageVector, OperationId, OuterRequest, OuterResponse, PakePayloadVector,
+    PakeRequest, PakeResponse, SignRequest, Status,
 };
 
-// ─── Request types ───
-
-#[derive(Serialize)]
-pub struct OuterRequest {
-    pub version: u32,
-    pub session_id: Option<String>,
-    pub context: String,
-    pub inner_jwe: String,
-}
-
-#[derive(Serialize)]
-pub struct InnerRequest {
-    pub version: u32,
-    #[serde(rename = "type")]
-    pub operation_type: String,
-    pub request_counter: u32,
-    pub data: String, // JSON-stringified payload (double-serialized)
-}
-
-#[derive(Serialize)]
-pub struct PakeRequest {
-    pub authorization: Option<String>,
-    pub task: Option<String>,
-    pub data: String, // base64-standard encoded OPAQUE bytes
-}
-
-#[derive(Serialize)]
-pub struct SignRequestPayload {
-    pub hsm_kid: String,
-    pub message: String, // base64-standard encoded hash bytes
-}
-
-// ─── Response types ───
-
-#[allow(dead_code)]
-#[derive(Deserialize, Debug)]
-pub struct OuterResponse {
-    pub version: u32,
-    pub session_id: Option<String>,
-    pub inner_jwe: Option<String>,
-}
-
-#[allow(dead_code)]
-#[derive(Deserialize, Debug)]
-pub struct InnerResponse {
-    pub version: u32,
-    pub data: Option<String>,
-    pub expires_in: Option<serde_json::Value>,
-    pub status: String,
-    pub hsm_state_version: Option<i64>,
-}
-
-#[allow(dead_code)]
-#[derive(Deserialize, Debug)]
-pub struct PakeResponse {
-    pub task: Option<String>,
-    pub data: Option<String>,
-}
-
-// ─── BFF REST types ───
+// ─── BFF REST types ───────────────────────────────────────────────────────────
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -118,4 +58,3 @@ pub struct BffNewStateResponse {
     pub client_id: String,
     pub dev_authorization_code: Option<String>,
 }
-
