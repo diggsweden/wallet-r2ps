@@ -5,59 +5,12 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-/// EC P-256 public key in JWK format.
-#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
-pub struct EcPublicJwk {
-    pub kty: String,
-    pub crv: String,
-    pub x: String,
-    pub y: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub kid: Option<String>,
-}
+// Re-export shared protocol types used for Kafka ser/de
+pub use hsm_common::{
+    EcPublicJwk, HsmWorkerRequest, HsmWorkerResponse, StateInitRequest, StateInitResponse, Status,
+};
 
-/// Request sent by the BFF to the Rust worker via r2ps-requests.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct HsmWorkerRequest {
-    pub request_id: String,
-    pub state_jws: String,
-    pub outer_request_jws: String,
-}
-
-/// Response received from the Rust worker via r2ps-responses.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WorkerResponse {
-    pub request_id: String,
-    pub state_jws: Option<String>,
-    pub outer_response_jws: Option<String>,
-    pub status: String,
-    pub error_message: Option<String>,
-}
-
-/// Request sent to the state-init-requests topic.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct StateInitRequest {
-    pub request_id: String,
-    pub public_key: EcPublicJwk,
-}
-
-/// Response received from the state-init-responses topic.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct StateInitResponse {
-    pub request_id: String,
-    pub state_jws: String,
-    pub dev_authorization_code: String,
-    #[serde(default)]
-    pub server_jws_public_key: Option<EcPublicJwk>,
-    #[serde(default)]
-    pub opaque_server_id: Option<String>,
-}
-
-/// Pending request metadata stored in Redis, linking a requestId to the device state key.
+/// Pending request metadata stored in Redis.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PendingRequestContext {
@@ -71,12 +24,12 @@ pub struct CachedResponse {
     pub request_id: String,
     pub state_jws: Option<String>,
     pub outer_response_jws: Option<String>,
-    pub status: String,
+    pub status: Status,
     pub error_message: Option<String>,
 }
 
-impl From<WorkerResponse> for CachedResponse {
-    fn from(r: WorkerResponse) -> Self {
+impl From<HsmWorkerResponse> for CachedResponse {
+    fn from(r: HsmWorkerResponse) -> Self {
         Self {
             request_id: r.request_id,
             state_jws: r.state_jws,

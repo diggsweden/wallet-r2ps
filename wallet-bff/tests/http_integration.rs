@@ -14,8 +14,8 @@ use wallet_bff::application::port::outgoing::{
     DeviceStatePort, PendingContextPort, RequestSenderPort, StateInitCachePort, StateInitSenderPort,
 };
 use wallet_bff::domain::{
-    CachedResponse, HsmWorkerRequest, PendingRequestContext, StateInitRequest, StateInitResponse,
-    WorkerResponse,
+    CachedResponse, HsmWorkerRequest, HsmWorkerResponse, PendingRequestContext, StateInitRequest,
+    StateInitResponse, Status,
 };
 use wallet_bff::infrastructure::adapters::incoming::web;
 use wallet_bff::infrastructure::adapters::incoming::web::handlers::AppState;
@@ -73,7 +73,7 @@ struct MockResponseUseCase {
 
 #[async_trait::async_trait]
 impl ResponseUseCase for MockResponseUseCase {
-    async fn response_ready(&self, _response: WorkerResponse) {}
+    async fn response_ready(&self, _response: HsmWorkerResponse) {}
     async fn wait_for_response(
         &self,
         _request_id: &str,
@@ -174,7 +174,7 @@ fn ok_cached_response() -> CachedResponse {
         request_id: "any-id".to_string(),
         state_jws: None,
         outer_response_jws: Some("some-jws-result".to_string()),
-        status: "OK".to_string(),
+        status: Status::Ok,
         error_message: None,
     }
 }
@@ -185,6 +185,7 @@ fn ok_state_init_response() -> StateInitResponse {
         state_jws: "mock-state-jws".to_string(),
         dev_authorization_code: "abc123".to_string(),
         server_jws_public_key: None,
+        server_jws_kid: None,
         opaque_server_id: None,
     }
 }

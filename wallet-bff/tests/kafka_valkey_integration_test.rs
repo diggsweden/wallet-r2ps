@@ -21,8 +21,8 @@ use wallet_bff::application::port::outgoing::{
 };
 use wallet_bff::application::service::ResponseService;
 use wallet_bff::domain::{
-    CachedResponse, EcPublicJwk, HsmWorkerRequest, PendingRequestContext, StateInitRequest,
-    StateInitResponse, WorkerResponse,
+    CachedResponse, EcPublicJwk, HsmWorkerRequest, HsmWorkerResponse, PendingRequestContext,
+    StateInitRequest, StateInitResponse, Status,
 };
 use wallet_bff::infrastructure::adapters::incoming::kafka::state_init_cache::StateInitResponseCache;
 use wallet_bff::infrastructure::adapters::incoming::kafka::{
@@ -112,7 +112,7 @@ async fn test_response_sink_valkey_round_trip() {
         request_id: "req-42".to_string(),
         state_jws: Some("updated-state".to_string()),
         outer_response_jws: Some("outer-resp".to_string()),
-        status: "OK".to_string(),
+        status: Status::Ok,
         error_message: None,
     };
 
@@ -121,7 +121,7 @@ async fn test_response_sink_valkey_round_trip() {
     assert!(loaded.is_some());
     let loaded = loaded.unwrap();
     assert_eq!(loaded.request_id, "req-42");
-    assert_eq!(loaded.status, "OK");
+    assert_eq!(loaded.status, Status::Ok);
     assert_eq!(loaded.state_jws, Some("updated-state".to_string()));
 
     let missing = adapter.load("nonexistent").await;
@@ -156,7 +156,7 @@ async fn test_response_sink_valkey_ttl_expiry() {
         request_id: "ttl-req".to_string(),
         state_jws: None,
         outer_response_jws: None,
-        status: "OK".to_string(),
+        status: Status::Ok,
         error_message: None,
     };
     adapter.store(&response).await;
@@ -265,7 +265,7 @@ async fn test_state_init_sender_produces_to_kafka() {
 
 /// Test-local capturing implementation of ResponseUseCase.
 struct CapturingResponseUseCase {
-    responses: Mutex<Vec<WorkerResponse>>,
+    responses: Mutex<Vec<HsmWorkerResponse>>,
 }
 
 impl CapturingResponseUseCase {
@@ -278,7 +278,7 @@ impl CapturingResponseUseCase {
 
 #[async_trait::async_trait]
 impl ResponseUseCase for CapturingResponseUseCase {
-    async fn response_ready(&self, response: WorkerResponse) {
+    async fn response_ready(&self, response: HsmWorkerResponse) {
         self.responses.lock().await.push(response);
     }
 
@@ -303,11 +303,11 @@ async fn test_response_consumer_receives_and_calls_use_case() {
         .create()
         .expect("producer creation failed");
 
-    let response = WorkerResponse {
+    let response = HsmWorkerResponse {
         request_id: "req-300".to_string(),
         state_jws: Some("state".to_string()),
         outer_response_jws: Some("outer".to_string()),
-        status: "OK".to_string(),
+        status: Status::Ok,
         error_message: None,
     };
     let payload = serde_json::to_string(&response).unwrap();
@@ -334,7 +334,7 @@ async fn test_response_consumer_receives_and_calls_use_case() {
         let captured = capturing.responses.lock().await;
         if !captured.is_empty() {
             assert_eq!(captured[0].request_id, "req-300");
-            assert_eq!(captured[0].status, "OK");
+            assert_eq!(captured[0].status, Status::Ok);
             break;
         }
         drop(captured);
@@ -380,6 +380,7 @@ async fn test_state_init_consumer_receives_and_saves_to_valkey() {
         state_jws: "init-state-jws".to_string(),
         dev_authorization_code: "dac_test_123".to_string(),
         server_jws_public_key: None,
+        server_jws_kid: None,
         opaque_server_id: None,
     };
     let payload = serde_json::to_string(&response).unwrap();
@@ -470,7 +471,7 @@ async fn test_bff_kafka_valkey_round_trip() {
         response_service as Arc<dyn ResponseUseCase>,
     );
 
-    // Background task: consume from r2ps-requests, fabricate a WorkerResponse, produce to r2ps-responses
+    // Background task: consume from r2ps-requests, fabricate a HsmWorkerResponse, produce to r2ps-responses
     let bootstrap_clone = bootstrap.clone();
     tokio::spawn(async move {
         let consumer: StreamConsumer = ClientConfig::new()
@@ -491,11 +492,11 @@ async fn test_bff_kafka_valkey_round_trip() {
         let req: HsmWorkerRequest = serde_json::from_slice(payload).expect("deserialize failed");
 
         // Fabricate a worker response
-        let response = WorkerResponse {
+        let response = HsmWorkerResponse {
             request_id: req.request_id,
             state_jws: Some("new-state-jws".to_string()),
             outer_response_jws: Some("outer-response".to_string()),
-            status: "OK".to_string(),
+            status: Status::Ok,
             error_message: None,
         };
         let resp_payload = serde_json::to_string(&response).unwrap();
@@ -522,7 +523,7 @@ async fn test_bff_kafka_valkey_round_trip() {
     loop {
         if let Some(cached) = response_sink_port.load(request_id).await {
             assert_eq!(cached.request_id, request_id);
-            assert_eq!(cached.status, "OK");
+            assert_eq!(cached.status, Status::Ok);
             assert_eq!(cached.state_jws, Some("new-state-jws".to_string()));
 
             // Verify device state was updated in Valkey

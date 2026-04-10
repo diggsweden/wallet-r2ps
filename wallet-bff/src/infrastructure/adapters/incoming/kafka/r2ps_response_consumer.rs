@@ -9,7 +9,7 @@ use std::sync::Arc;
 use tracing::{error, info};
 
 use crate::application::port::incoming::ResponseUseCase;
-use crate::domain::WorkerResponse;
+use crate::domain::HsmWorkerResponse;
 
 const R2PS_RESPONSES_TOPIC: &str = "r2ps-responses";
 
@@ -39,7 +39,7 @@ pub fn start(bootstrap_servers: &str, group_id: &str, response_use_case: Arc<dyn
                     let Some(payload) = msg.payload() else {
                         continue;
                     };
-                    match serde_json::from_slice::<WorkerResponse>(payload) {
+                    match serde_json::from_slice::<HsmWorkerResponse>(payload) {
                         Ok(response) => {
                             info!(
                                 "Received worker response for requestId: {}",
@@ -49,7 +49,7 @@ pub fn start(bootstrap_servers: &str, group_id: &str, response_use_case: Arc<dyn
                         }
                         Err(e) => {
                             error!(
-                                "Failed to deserialize WorkerResponse: {} - payload: {}",
+                                "Failed to deserialize HsmWorkerResponse: {} - payload: {}",
                                 e,
                                 String::from_utf8_lossy(payload)
                             );

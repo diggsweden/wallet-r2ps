@@ -6,7 +6,7 @@
 //! Combines OPAQUE crypto + JOSE envelope construction + REST client.
 
 use anyhow::{bail, Context, Result};
-use base64::engine::general_purpose::STANDARD;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use josekit::jwk::Jwk;
 use std::sync::Arc;
@@ -16,7 +16,7 @@ use crate::protocol::message_builder::{build_pake_request_jws, build_session_req
 use crate::protocol::response_parser::{unwrap_pake_response, unwrap_session_response};
 use crate::protocol::types::{
     BffNewStateRequest, CreateKeyServiceData, CreateKeyServiceDataResponse, Curve, EcPublicJwk,
-    PakeRequest, SignRequestPayload,
+    MessageVector, OperationId, PakePayloadVector, PakeRequest, SignRequest,
 };
 
 use super::rest_client::RestClient;
@@ -87,11 +87,11 @@ impl AccessMechanismClient {
         let reg_start = opaque_client::client_registration_start(&stretched)?;
         let pake_req = PakeRequest {
             authorization: Some(auth_code.to_string()),
-            task: None,
-            data: STANDARD.encode(&reg_start.registration_request),
+            purpose: None,
+            data: PakePayloadVector::new(reg_start.registration_request),
         };
         let jws = build_pake_request_jws(
-            "register_start",
+            OperationId::RegisterStart,
             &pake_req,
             None,
             0,
@@ -126,11 +126,11 @@ impl AccessMechanismClient {
 
         let pake_req = PakeRequest {
             authorization: Some(auth_code.to_string()),
-            task: None,
-            data: STANDARD.encode(&reg_finish.registration_upload),
+            purpose: None,
+            data: PakePayloadVector::new(reg_finish.registration_upload),
         };
         let jws = build_pake_request_jws(
-            "register_finish",
+            OperationId::RegisterFinish,
             &pake_req,
             None,
             1,
@@ -148,22 +148,18 @@ impl AccessMechanismClient {
 
     /// Create a session (two-round OPAQUE login).
     /// Returns (session_key, session_id).
-    pub async fn create_session(
-        &self,
-        pin: &str,
-        client_id: &str,
-    ) -> Result<(Vec<u8>, String)> {
+    pub async fn create_session(&self, pin: &str, client_id: &str) -> Result<(Vec<u8>, String)> {
         let stretched = pin_stretch::stretch_pin(pin, &self.pin_stretch_d)?;
 
         // Login start
         let login_start = opaque_client::client_login_start(&stretched)?;
         let pake_req = PakeRequest {
             authorization: None,
-            task: None,
-            data: STANDARD.encode(&login_start.credential_request),
+            purpose: None,
+            data: PakePayloadVector::new(login_start.credential_request),
         };
         let jws = build_pake_request_jws(
-            "authenticate_start",
+            OperationId::AuthenticateStart,
             &pake_req,
             None,
             1,
@@ -201,11 +197,11 @@ impl AccessMechanismClient {
 
         let pake_req = PakeRequest {
             authorization: None,
-            task: Some("general".to_string()),
-            data: STANDARD.encode(&login_finish.credential_finalization),
+            purpose: Some("general".to_string()),
+            data: PakePayloadVector::new(login_finish.credential_finalization),
         };
         let jws = build_pake_request_jws(
-            "authenticate_finish",
+            OperationId::AuthenticateFinish,
             &pake_req,
             Some(&session_id),
             2,
@@ -228,11 +224,9 @@ impl AccessMechanismClient {
         session_id: &str,
         client_id: &str,
     ) -> Result<String> {
-        let payload = serde_json::to_value(CreateKeyServiceData {
-            curve: Curve::P256,
-        })?;
+        let payload = serde_json::to_value(CreateKeyServiceData { curve: Curve::P256 })?;
         let jws = build_session_request_jws(
-            "hsm_generate_key",
+            OperationId::HsmGenerateKey,
             &payload,
             session_id,
             3,
@@ -260,7 +254,7 @@ impl AccessMechanismClient {
             .context("No data in HSM generate key response")?;
         let hsm_resp: CreateKeyServiceDataResponse =
             serde_json::from_str(&data_str).context("Failed to parse HSM generate key response")?;
-        let hsm_kid = hsm_resp.public_key.kid.clone();
+        let hsm_kid = hsm_resp.public_key.kid.clone().unwrap_or_default();
 
         Ok(hsm_kid)
     }
@@ -274,12 +268,12 @@ impl AccessMechanismClient {
         hsm_kid: &str,
         message: &[u8],
     ) -> Result<String> {
-        let payload = serde_json::to_value(SignRequestPayload {
+        let payload = serde_json::to_value(SignRequest {
             hsm_kid: hsm_kid.to_string(),
-            message: STANDARD.encode(message),
+            message: MessageVector::new(message.to_vec()),
         })?;
         let jws = build_session_request_jws(
-            "hsm_sign",
+            OperationId::HsmSign,
             &payload,
             session_id,
             3,
@@ -308,11 +302,8 @@ pub fn load_server_public_key_pem(pem_path: &str) -> Result<Jwk> {
     let pem_content = std::fs::read_to_string(pem_path)
         .with_context(|| format!("Failed to read PEM file: {}", pem_path))?;
 
-    let jwk =
-        Jwk::from_bytes(pem_to_jwk_bytes(&pem_content).context("Failed to convert PEM to JWK")?)
-            .context("Failed to parse JWK")?;
-
-    Ok(jwk)
+    Jwk::from_bytes(pem_to_jwk_bytes(&pem_content).context("Failed to convert PEM to JWK")?)
+        .context("Failed to parse JWK")
 }
 
 /// Convert an EC P-256 public key PEM to a JWK JSON bytes.
@@ -329,17 +320,15 @@ fn pem_to_jwk_bytes(pem_str: &str) -> Result<Vec<u8>> {
     })?;
 
     let point = public_key.to_encoded_point(false);
-    let x = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(point.x().unwrap());
-    let y = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(point.y().unwrap());
+    let x = URL_SAFE_NO_PAD.encode(point.x().unwrap());
+    let y = URL_SAFE_NO_PAD.encode(point.y().unwrap());
 
-    let jwk_json = serde_json::json!({
+    Ok(serde_json::to_vec(&serde_json::json!({
         "kty": "EC",
         "crv": "P-256",
         "x": x,
         "y": y,
-    });
-
-    Ok(serde_json::to_vec(&jwk_json)?)
+    }))?)
 }
 
 /// Try to extract SEC1 uncompressed bytes from a PEM string.
@@ -382,6 +371,5 @@ pub fn build_device_jwk(x: &str, y: &str, d: &str, kid: &str) -> Result<Jwk> {
         "d": d,
         "kid": kid,
     });
-    let jwk = Jwk::from_bytes(serde_json::to_vec(&jwk_json)?)?;
-    Ok(jwk)
+    Jwk::from_bytes(serde_json::to_vec(&jwk_json)?).context("Failed to build device JWK")
 }

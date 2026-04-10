@@ -6,7 +6,7 @@ use axum::body::to_bytes;
 use axum::http::{StatusCode, header};
 use rstest::rstest;
 use uuid::Uuid;
-use wallet_bff::domain::CachedResponse;
+use wallet_bff::domain::{CachedResponse, Status};
 use wallet_bff::infrastructure::adapters::incoming::web::handlers::{
     PROBLEM_CONTENT_TYPE, build_async_response, parse_iso8601_to_seconds,
 };
@@ -57,7 +57,7 @@ async fn build_async_response_ok_returns_200_complete() {
     let id = Uuid::new_v4();
     let cached = CachedResponse {
         request_id: id.to_string(),
-        status: "OK".to_string(),
+        status: Status::Ok,
         outer_response_jws: Some("jws.token.here".to_string()),
         state_jws: None,
         error_message: None,
@@ -80,7 +80,7 @@ async fn build_async_response_error_returns_500(#[case] error_message: Option<St
     let id = Uuid::new_v4();
     let cached = CachedResponse {
         request_id: id.to_string(),
-        status: "ERROR".to_string(),
+        status: Status::Error,
         outer_response_jws: None,
         state_jws: None,
         error_message,
@@ -108,7 +108,7 @@ async fn build_async_response_forwards_worker_problem_json_exactly() {
     );
     let cached = CachedResponse {
         request_id: id.to_string(),
-        status: "ERROR".to_string(),
+        status: Status::Error,
         outer_response_jws: None,
         state_jws: None,
         error_message: Some(worker_error.clone()),

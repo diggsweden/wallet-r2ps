@@ -5,12 +5,12 @@
 //! Parses server response envelopes (JWS -> OuterResponse -> JWE -> InnerResponse).
 
 use anyhow::{bail, Context, Result};
-use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use josekit::jwe;
 use josekit::jwk::Jwk;
 
-use super::types::{InnerResponse, OuterResponse, PakeResponse};
+use super::types::{InnerResponse, OuterResponse, PakeResponse, Status};
 
 /// Decoded payload from a PAKE response.
 #[allow(dead_code)]
@@ -38,9 +38,7 @@ fn jws_decode_payload(jws_str: &str) -> Result<serde_json::Value> {
     let payload_bytes = URL_SAFE_NO_PAD
         .decode(parts[1])
         .context("Failed to base64url decode JWS payload")?;
-    let value: serde_json::Value =
-        serde_json::from_slice(&payload_bytes).context("Failed to parse JWS payload JSON")?;
-    Ok(value)
+    serde_json::from_slice(&payload_bytes).context("Failed to parse JWS payload JSON")
 }
 
 /// Decrypt a JWE encrypted with ECDH-ES using the device's private key.
@@ -58,7 +56,7 @@ fn jwe_decrypt_device(jwe_str: &str, device_private_key: &Jwk) -> Result<Vec<u8>
     let decrypter = jwe::ECDH_ES
         .decrypter_from_jwk(&decryption_jwk)
         .context("Failed to create ECDH-ES decrypter")?;
-    let (payload, _header) =
+    let (payload, _) =
         jwe::deserialize_compact(jwe_str, &decrypter).context("Failed to decrypt JWE (ECDH-ES)")?;
     Ok(payload)
 }
@@ -66,16 +64,13 @@ fn jwe_decrypt_device(jwe_str: &str, device_private_key: &Jwk) -> Result<Vec<u8>
 /// Decrypt a JWE encrypted with dir using a 32-byte session key.
 fn jwe_decrypt_session(jwe_str: &str, session_key: &[u8]) -> Result<Vec<u8>> {
     let k_b64 = URL_SAFE_NO_PAD.encode(session_key);
-    let jwk_json = serde_json::json!({
-        "kty": "oct",
-        "k": k_b64
-    });
+    let jwk_json = serde_json::json!({ "kty": "oct", "k": k_b64 });
     let oct_jwk = Jwk::from_bytes(serde_json::to_vec(&jwk_json)?)?;
 
     let decrypter = jwe::Dir
         .decrypter_from_jwk(&oct_jwk)
         .context("Failed to create dir decrypter")?;
-    let (payload, _header) =
+    let (payload, _) =
         jwe::deserialize_compact(jwe_str, &decrypter).context("Failed to decrypt JWE (dir)")?;
     Ok(payload)
 }
@@ -87,80 +82,69 @@ pub fn unwrap_pake_response(
     response_jws: &str,
     device_private_key: &Jwk,
 ) -> Result<PakeResponseData> {
-    let outer_value = jws_decode_payload(response_jws)?;
-    let outer: OuterResponse =
-        serde_json::from_value(outer_value).context("Failed to parse OuterResponse")?;
+    let outer: OuterResponse = serde_json::from_value(jws_decode_payload(response_jws)?)
+        .context("Failed to parse OuterResponse")?;
 
     let inner_jwe = match &outer.inner_jwe {
         Some(jwe) => jwe,
         None => {
             return Ok(PakeResponseData {
                 session_id: outer.session_id,
-                status: "ERROR".to_string(),
+                status: Status::Error.to_string(),
                 data: None,
             })
         }
     };
 
-    let inner_bytes = jwe_decrypt_device(inner_jwe, device_private_key)?;
     let inner: InnerResponse =
-        serde_json::from_slice(&inner_bytes).context("Failed to parse InnerResponse")?;
+        serde_json::from_slice(&jwe_decrypt_device(inner_jwe, device_private_key)?)
+            .context("Failed to parse InnerResponse")?;
 
-    if inner.status != "OK" {
+    if inner.status != Status::Ok {
         return Ok(PakeResponseData {
             session_id: outer.session_id,
-            status: inner.status,
+            status: inner.status.to_string(),
             data: None,
         });
     }
 
-    let opaque_bytes = if let Some(data_str) = &inner.data {
-        let pake_response: PakeResponse =
-            serde_json::from_str(data_str).context("Failed to parse PakeResponse")?;
-        if let Some(b64_data) = &pake_response.data {
-            Some(
-                STANDARD
-                    .decode(b64_data)
-                    .context("Failed to base64-decode OPAQUE bytes")?,
-            )
-        } else {
-            None
-        }
-    } else {
-        None
-    };
+    let opaque_bytes = inner
+        .data
+        .as_ref()
+        .and_then(|data_str| serde_json::from_str::<PakeResponse>(data_str).ok())
+        .and_then(|pake_resp| pake_resp.data)
+        .map(|pv| pv.to_vec());
 
     Ok(PakeResponseData {
         session_id: outer.session_id,
-        status: inner.status,
+        status: inner.status.to_string(),
         data: opaque_bytes,
     })
 }
 
 /// Unwrap a session-encrypted response and return the raw InnerResponse data string.
 pub fn unwrap_session_response(response_jws: &str, session_key: &[u8]) -> Result<ResponseData> {
-    let outer_value = jws_decode_payload(response_jws)?;
-    let outer: OuterResponse =
-        serde_json::from_value(outer_value).context("Failed to parse OuterResponse")?;
+    let outer: OuterResponse = serde_json::from_value(jws_decode_payload(response_jws)?)
+        .context("Failed to parse OuterResponse")?;
 
     let inner_jwe = match &outer.inner_jwe {
         Some(jwe) => jwe,
         None => {
             return Ok(ResponseData {
                 session_id: outer.session_id,
-                status: "ERROR".to_string(),
+                status: Status::Error.to_string(),
                 data: None,
             })
         }
     };
 
-    let inner_bytes = jwe_decrypt_session(inner_jwe, session_key)?;
     let inner: InnerResponse =
-        serde_json::from_slice(&inner_bytes).context("Failed to parse InnerResponse")?;
+        serde_json::from_slice(&jwe_decrypt_session(inner_jwe, session_key)?)
+            .context("Failed to parse InnerResponse")?;
 
     Ok(ResponseData {
         session_id: outer.session_id,
-        status: inner.status,
+        status: inner.status.to_string(),
         data: inner.data,
     })
 }

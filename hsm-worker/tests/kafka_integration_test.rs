@@ -19,8 +19,8 @@ use hsm_worker::application::port::outgoing::state_init_response_spi_port::{
 use hsm_worker::application::{WorkerRequestUseCase, WorkerResponseSpiPort};
 use hsm_worker::domain::value_objects::r2ps::{Status, WorkerRequestError};
 use hsm_worker::domain::{
-    EcPublicJwk, HsmWorkerRequest, HsmWorkerRequestDto, StateInitRequest, StateInitResponse,
-    TypedJws, WorkerResponse,
+    EcPublicJwk, HsmWorkerRequest, HsmWorkerRequestDto, HsmWorkerResponse, StateInitRequest,
+    StateInitResponse, TypedJws,
 };
 use hsm_worker::infrastructure::KafkaConfig;
 use hsm_worker::infrastructure::adapters::incoming::r2ps_request_kafka_message_receiver::WorkerRequestKafkaReceiver;
@@ -99,7 +99,7 @@ async fn test_worker_response_sender_produces_to_kafka() {
     let config = make_kafka_config(&bootstrap);
 
     let sender = WorkerResponseKafkaSender::new(&config);
-    let response = WorkerResponse {
+    let response = HsmWorkerResponse {
         request_id: "req-101".to_string(),
         state_jws: None,
         outer_response_jws: None,
@@ -123,7 +123,7 @@ async fn test_worker_response_sender_produces_to_kafka() {
     loop {
         if let Some(Ok(msg)) = consumer.poll(Duration::from_millis(100)) {
             let payload = msg.payload().expect("empty payload");
-            let received: WorkerResponse =
+            let received: HsmWorkerResponse =
                 serde_json::from_slice(payload).expect("deserialize failed");
             assert_eq!(received.request_id, "req-101");
             assert_eq!(received.status, Status::Ok);
@@ -574,7 +574,7 @@ async fn test_worker_kafka_round_trip() {
     loop {
         if let Some(Ok(msg)) = resp_consumer.poll(Duration::from_millis(100)) {
             let payload = msg.payload().expect("empty payload");
-            let received: WorkerResponse =
+            let received: HsmWorkerResponse =
                 serde_json::from_slice(payload).expect("deserialize failed");
             assert_eq!(received.request_id, "req-501");
             // The operation should succeed (list-keys on fresh device returns empty list)

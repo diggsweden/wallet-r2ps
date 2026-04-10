@@ -8,7 +8,7 @@ use tracing::{info, warn};
 
 use crate::application::port::incoming::ResponseUseCase;
 use crate::application::port::outgoing::{DeviceStatePort, PendingContextPort, ResponseSinkPort};
-use crate::domain::{CachedResponse, WorkerResponse};
+use crate::domain::{CachedResponse, HsmWorkerResponse};
 
 pub struct ResponseService {
     device_state_port: Arc<dyn DeviceStatePort>,
@@ -32,7 +32,7 @@ impl ResponseService {
 
 #[async_trait::async_trait]
 impl ResponseUseCase for ResponseService {
-    async fn response_ready(&self, response: WorkerResponse) {
+    async fn response_ready(&self, response: HsmWorkerResponse) {
         let ctx = self.pending_context_port.load(&response.request_id).await;
 
         let Some(ctx) = ctx else {
