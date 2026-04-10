@@ -4,13 +4,14 @@
 
 use crate::application::jose_port::{JoseError, JosePort, JweDecryptionKey, MockJosePort};
 use crate::application::port::outgoing::session_state_spi_port::SessionKey;
+use crate::application::service::operations::InnerResponseData;
 use crate::application::service::operations::OperationResult;
 use crate::application::service::worker_service::context::ResponseContext;
 use crate::application::service::worker_service::error::{OuterError, UpstreamError, WorkerError};
 use crate::application::service::worker_service::response::{ProcessError, ResponseBuilder};
 use crate::domain::ServiceRequestError;
-use crate::domain::value_objects::r2ps::{InnerResponse, OperationId, Status};
-use crate::domain::{DeviceHsmState, EcPublicJwk, InnerResponseData, SessionId};
+use crate::domain::{DeviceHsmState, EcPublicJwk, SessionId};
+use crate::domain::{InnerResponse, OperationId, Status};
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use josekit::jws::alg::ecdsa::EcdsaJwsVerifier;

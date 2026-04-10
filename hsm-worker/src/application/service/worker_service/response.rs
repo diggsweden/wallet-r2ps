@@ -2,17 +2,18 @@
 //
 // SPDX-License-Identifier: EUPL-1.2
 
+use crate::application::port::incoming::worker_request_use_case::WorkerRequestError;
 use crate::application::port::outgoing::jose_port;
+use crate::application::protocol::{InnerResponseExt, OuterResponseExt};
 use crate::application::service::operations::OperationResult;
 use crate::application::service::worker_service::context::ResponseContext;
 use crate::application::service::worker_service::error::{
     ProblemDetail, UpstreamError, WorkerError,
 };
-use crate::domain::value_objects::r2ps::{InnerResponse, OuterResponse, Status};
 use crate::domain::{
     DeviceHsmState, EncryptOption, HsmWorkerResponse, SessionId, TypedJwe, TypedJws,
-    WorkerRequestError,
 };
+use crate::domain::{InnerResponse, OuterResponse, Status};
 use std::sync::Arc;
 
 /// Carries a `WorkerError` with whatever context was available when the error occurred.

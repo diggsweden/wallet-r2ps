@@ -29,10 +29,7 @@ use utoipa::OpenApi;
         domain::PakeState,
         domain::Curve,
         // Request/response envelopes
-        domain::HsmWorkerRequestDto,
-        domain::R2psResponseDto,
         domain::HsmWorkerRequest,
-        domain::WorkerResponseJws,
         domain::OuterRequest,
         domain::OuterResponse,
         domain::InnerRequest,
@@ -51,7 +48,6 @@ use utoipa::OpenApi;
         domain::KeyInfo,
         // Error types
         domain::ServiceRequestError,
-        domain::WorkerRequestError,
         // State initialization
         domain::StateInitRequest,
         domain::StateInitResponse,

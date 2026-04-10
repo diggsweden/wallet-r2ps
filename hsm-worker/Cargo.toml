@@ -26,7 +26,7 @@ name = "digg-hsm-keytool"
 path = "src/bin/digg_hsm_keytool.rs"
 
 [features]
-openapi = ["dep:utoipa"]
+openapi = ["dep:utoipa", "hsm-common/openapi"]
 
 [dependencies]
 hsm-common = { path = "../hsm-common" }

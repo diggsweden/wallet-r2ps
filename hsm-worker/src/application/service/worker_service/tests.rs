@@ -5,13 +5,14 @@
 use crate::application::WorkerPorts;
 use crate::application::WorkerRequestUseCase;
 use crate::application::hsm_spi_port::MockHsmSpiPort;
+use crate::application::port::incoming::worker_request_use_case::WorkerRequestError;
 use crate::application::port::outgoing::pake_port::MockPakePort;
 use crate::application::port::outgoing::session_state_spi_port::PendingLoginState;
 use crate::application::service::worker_service::WorkerService;
 use crate::application::service::worker_service::test_utils::*;
 use crate::application::session_state_spi_port::SessionKey;
-use crate::domain::value_objects::r2ps::{OperationId, PakePayloadVector, Status};
 use crate::domain::{HsmWorkerRequest, InnerRequest, SessionId, TypedJws};
+use crate::domain::{OperationId, PakePayloadVector, Status};
 use std::sync::Arc;
 
 fn setup_worker_service() -> (WorkerService, Arc<MockWorkerResponseSpi>) {
@@ -68,10 +69,7 @@ fn test_execute_returns_connection_error_when_response_send_fails() {
 
     let result = service.execute(request);
 
-    assert!(matches!(
-        result,
-        Err(crate::domain::WorkerRequestError::ConnectionError)
-    ));
+    assert!(matches!(result, Err(WorkerRequestError::ConnectionError)));
 }
 
 #[test]
@@ -90,7 +88,7 @@ fn test_execute_returns_response_build_error_when_error_response_signing_fails()
 
     assert!(matches!(
         result,
-        Err(crate::domain::WorkerRequestError::ResponseBuildError)
+        Err(WorkerRequestError::ResponseBuildError)
     ));
     assert!(mock_response_port.responses.lock().unwrap().is_empty());
 }

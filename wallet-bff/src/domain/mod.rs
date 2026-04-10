@@ -6,8 +6,10 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 // Re-export shared protocol types used for Kafka ser/de
+pub use hsm_common::types::TypedJws;
 pub use hsm_common::{
-    EcPublicJwk, HsmWorkerRequest, HsmWorkerResponse, StateInitRequest, StateInitResponse, Status,
+    EcPublicJwk, HsmWorkerRequest, HsmWorkerResponse, OuterRequest, OuterResponse,
+    StateInitRequest, StateInitResponse, Status,
 };
 
 /// Pending request metadata stored in Redis.
@@ -23,7 +25,7 @@ pub struct PendingRequestContext {
 pub struct CachedResponse {
     pub request_id: String,
     pub state_jws: Option<String>,
-    pub outer_response_jws: Option<String>,
+    pub outer_response_jws: Option<TypedJws<OuterResponse>>,
     pub status: Status,
     pub error_message: Option<String>,
 }

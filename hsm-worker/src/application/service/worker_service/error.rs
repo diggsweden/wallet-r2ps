@@ -24,7 +24,6 @@ pub enum UpstreamError {
 #[derive(Debug, Clone, PartialEq)]
 pub enum OuterError {
     InnerJweMissing,
-    InnerJweHeaderInvalid,
     InnerJweDecryptFailed,
     UnknownEncryptionOption,
     SessionKeyMissing,

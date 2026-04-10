@@ -4,13 +4,13 @@
 
 //! Shared JWS/JWE plumbing using JOSE primitives.
 //!
-//! All functions operate on raw bytes and `josekit::jwk::Jwk` — no domain types.
-//! Callers are responsible for key management and format conversion.
-//!
 //! Algorithms:
 //!   - JWS: ES256 (ECDSA P-256)
 //!   - JWE device: ECDH-ES + A256GCM
 //!   - JWE session: dir + A256GCM
+//!
+//! Key types: functions accept `josekit::jwk::Jwk` for both private and public keys.
+//! `TryFrom<&EcPublicJwk> for Jwk` is provided to convert wire-format public keys.
 
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -19,6 +19,8 @@ use josekit::jwe::{self, ECDH_ES, JweHeader};
 use josekit::jwk::Jwk;
 use josekit::jws::{self, ES256, JwsHeader};
 
+use crate::EcPublicJwk;
+
 #[derive(Debug)]
 pub enum JoseError {
     Sign,
@@ -26,6 +28,31 @@ pub enum JoseError {
     Encrypt,
     Decrypt,
     InvalidKey,
+}
+
+impl std::fmt::Display for JoseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+impl std::error::Error for JoseError {}
+
+impl TryFrom<&EcPublicJwk> for Jwk {
+    type Error = JoseError;
+
+    fn try_from(ec_jwk: &EcPublicJwk) -> Result<Self, Self::Error> {
+        let mut jwk = Jwk::new("EC");
+        jwk.set_curve(&ec_jwk.crv);
+        jwk.set_parameter("x", Some(serde_json::Value::String(ec_jwk.x.clone())))
+            .map_err(|_| JoseError::InvalidKey)?;
+        jwk.set_parameter("y", Some(serde_json::Value::String(ec_jwk.y.clone())))
+            .map_err(|_| JoseError::InvalidKey)?;
+        if !ec_jwk.kid.is_empty() {
+            jwk.set_key_id(&ec_jwk.kid);
+        }
+        Ok(jwk)
+    }
 }
 
 /// Extract `kid` from the first segment (header) of a compact JWS or JWE
@@ -139,94 +166,4 @@ pub fn jws_decode_unverified(jws_str: &str) -> Result<Vec<u8>, JoseError> {
     URL_SAFE_NO_PAD
         .decode(parts[1])
         .map_err(|_| JoseError::Verify)
-}
-
-// ─── Tests ────────────────────────────────────────────────────────────────────
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use josekit::jwk::alg::ec::EcKeyPair;
-
-    fn make_ec_keypair() -> (Jwk, Jwk) {
-        let key_pair = EcKeyPair::generate(josekit::jwk::alg::ec::EcCurve::P256).unwrap();
-        let private_jwk = key_pair.to_jwk_private_key();
-        let public_jwk = key_pair.to_jwk_public_key();
-        (private_jwk, public_jwk)
-    }
-
-    fn make_session_key() -> Vec<u8> {
-        vec![0x42u8; 32]
-    }
-
-    #[test]
-    fn test_jwe_dir_round_trip() {
-        let key = make_session_key();
-        let plaintext = b"hello dir world";
-        let jwe = jwe_encrypt_dir(plaintext, &key, "session").unwrap();
-        let decrypted = jwe_decrypt_dir(&jwe, &key).unwrap();
-        assert_eq!(decrypted, plaintext);
-    }
-
-    #[test]
-    fn test_jwe_ecdh_es_round_trip() {
-        let (private_jwk, public_jwk) = make_ec_keypair();
-        let plaintext = b"hello ecdh-es world";
-        let jwe = jwe_encrypt_ecdh_es(plaintext, &public_jwk, "device").unwrap();
-        let decrypted = jwe_decrypt_ecdh_es(&jwe, &private_jwk).unwrap();
-        assert_eq!(decrypted, plaintext);
-    }
-
-    #[test]
-    fn test_jwe_ecdh_es_decrypt_ignores_kid_mismatch() {
-        let (private_jwk, public_jwk) = make_ec_keypair();
-        // Server always writes kid="device"; client key has no kid or a different kid
-        let jwe = jwe_encrypt_ecdh_es(b"payload", &public_jwk, "device").unwrap();
-        // Add a different kid to the private key — decrypt must still succeed
-        let mut map = private_jwk.as_ref().clone();
-        map.insert(
-            "kid".to_string(),
-            serde_json::Value::String("thumbprint-abc".to_string()),
-        );
-        let private_with_kid = Jwk::from_map(map).unwrap();
-        let decrypted = jwe_decrypt_ecdh_es(&jwe, &private_with_kid).unwrap();
-        assert_eq!(decrypted, b"payload");
-    }
-
-    #[test]
-    fn test_jws_sign_verify_round_trip() {
-        let (private_jwk, public_jwk) = make_ec_keypair();
-        let payload = b"{\"hello\":\"world\"}";
-        let signed = jws_sign(payload, &private_jwk, "my-kid").unwrap();
-        let verified = jws_verify(&signed, &public_jwk).unwrap();
-        assert_eq!(verified, payload);
-    }
-
-    #[test]
-    fn test_peek_kid_jws() {
-        let (private_jwk, _) = make_ec_keypair();
-        let signed = jws_sign(b"data", &private_jwk, "test-kid").unwrap();
-        assert_eq!(peek_kid(&signed), Some("test-kid".to_string()));
-    }
-
-    #[test]
-    fn test_peek_kid_jwe() {
-        let (_, public_jwk) = make_ec_keypair();
-        let jwe = jwe_encrypt_ecdh_es(b"data", &public_jwk, "device").unwrap();
-        assert_eq!(peek_kid(&jwe), Some("device".to_string()));
-    }
-
-    #[test]
-    fn test_jws_decode_unverified() {
-        let (private_jwk, _) = make_ec_keypair();
-        let payload = b"{\"foo\":1}";
-        let signed = jws_sign(payload, &private_jwk, "k").unwrap();
-        let decoded = jws_decode_unverified(&signed).unwrap();
-        assert_eq!(decoded, payload);
-    }
-
-    #[test]
-    fn test_jws_decode_unverified_bad_format() {
-        assert!(jws_decode_unverified("only.two").is_err());
-    }
 }

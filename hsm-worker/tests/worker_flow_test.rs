@@ -14,7 +14,7 @@ use hsm_worker::application::port::outgoing::session_state_spi_port::{
 };
 use hsm_worker::application::service::worker_service::WorkerService;
 use hsm_worker::application::{WorkerResponseError, WorkerResponseSpiPort};
-use hsm_worker::domain::value_objects::r2ps::{
+use hsm_worker::domain::{
     CreateKeyServiceData, Curve, DeleteKeyServiceData, InnerResponse, ListKeysResponse,
     OperationId, PakePayloadVector, PakeRequest, Status,
 };

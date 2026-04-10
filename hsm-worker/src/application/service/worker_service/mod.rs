@@ -19,6 +19,7 @@ mod tests;
 pub use context::{ResponseContext, WorkerInput};
 pub use error::{OuterError, ProblemDetail, UpstreamError, WorkerError};
 
+use crate::application::port::incoming::worker_request_use_case::WorkerRequestError;
 use crate::application::port::outgoing::session_state_spi_port::{
     SessionState, SessionStateSpiPort,
 };
@@ -26,11 +27,13 @@ use crate::application::service::operations::OperationDispatcher;
 use crate::application::{
     WorkerPorts, WorkerRequestId, WorkerRequestUseCase, WorkerResponseSpiPort,
 };
-use crate::domain::{HsmWorkerRequest, HsmWorkerResponse, WorkerRequestError};
+use crate::domain::{HsmWorkerRequest, HsmWorkerResponse};
 use std::sync::Arc;
 use std::time::Instant;
 use tracing::{error, info};
 
+#[cfg(test)]
+use crate::application::jose_port::JosePort;
 use decode::RequestDecoder;
 use response::{ProcessError, ResponseBuilder};
 
@@ -195,7 +198,7 @@ impl WorkerService {
 
 #[cfg(test)]
 fn setup_crypto() -> (
-    Arc<dyn crate::application::jose_port::JosePort>,
+    Arc<dyn JosePort>,
     josekit::jws::alg::ecdsa::EcdsaJwsVerifier,
 ) {
     use crate::infrastructure::adapters::outgoing::jose_adapter::JoseAdapter;

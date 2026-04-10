@@ -4,5 +4,10 @@
 
 pub mod jose;
 pub mod protocol;
+pub mod types;
+
+#[cfg(test)]
+mod jose_tests;
 
 pub use protocol::*;
+pub use types::*;

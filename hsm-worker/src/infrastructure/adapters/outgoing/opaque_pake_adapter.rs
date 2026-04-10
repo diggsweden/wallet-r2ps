@@ -5,8 +5,8 @@
 use crate::application::port::outgoing::pake_port;
 use crate::application::port::outgoing::session_state_spi_port::{PendingLoginState, SessionKey};
 use crate::domain;
+use crate::domain::PakePayloadVector;
 use crate::domain::value_objects::client_metadata::PasswordFileEntry;
-use crate::domain::value_objects::r2ps::PakePayloadVector;
 use argon2::password_hash::rand_core::OsRng;
 use base64::Engine;
 use base64::prelude::BASE64_STANDARD;

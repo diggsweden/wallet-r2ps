@@ -33,7 +33,7 @@ fn test_decode_outer_error_peek_kid_returns_none() {
     mock_jose
         .expect_jws_verify_server()
         .returning(move |_| Ok(state_bytes.clone()));
-    mock_jose.expect_peek_kid().returning(|_| Ok(None));
+    mock_jose.expect_peek_kid().returning(|_| None);
     let decoder = RequestDecoder::new(Arc::new(mock_jose), true);
 
     let result = decoder.decode_outer(make_request("req"));
@@ -53,7 +53,7 @@ fn test_decode_outer_error_kid_not_in_state() {
         .returning(move |_| Ok(state_bytes.clone()));
     mock_jose
         .expect_peek_kid()
-        .returning(|_| Ok(Some("unknown-kid".to_string())));
+        .returning(|_| Some("unknown-kid".to_string()));
     let decoder = RequestDecoder::new(Arc::new(mock_jose), true);
 
     let result = decoder.decode_outer(make_request("req"));
@@ -74,7 +74,7 @@ fn test_decode_outer_returns_unsupported_context_when_context_is_not_hsm() {
         .returning(move |_| Ok(state_bytes.clone()));
     mock_jose
         .expect_peek_kid()
-        .returning(|_| Ok(Some("device-kid".to_string())));
+        .returning(|_| Some("device-kid".to_string()));
     mock_jose
         .expect_jws_verify_device()
         .returning(move |_, _| Ok(outer_bytes.clone()));

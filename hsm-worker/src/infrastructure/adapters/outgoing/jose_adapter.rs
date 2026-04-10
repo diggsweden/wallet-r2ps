@@ -2,11 +2,9 @@
 //
 // SPDX-License-Identifier: EUPL-1.2
 
-use base64::Engine;
-use base64::prelude::BASE64_URL_SAFE_NO_PAD;
-use josekit::jwe::alg::direct::DirectJweAlgorithm;
+use hsm_common::jose as hsmjose;
+use josekit::jwe::ECDH_ES;
 use josekit::jwe::alg::ecdh_es::EcdhEsJweDecrypter;
-use josekit::jwe::{self, ECDH_ES, JweHeader};
 use josekit::jwk::Jwk;
 use josekit::jws::ES256;
 use josekit::jws::alg::ecdsa::{EcdsaJwsSigner, EcdsaJwsVerifier};
@@ -77,17 +75,6 @@ impl JoseAdapter {
     }
 }
 
-fn ec_public_jwk_to_jwk(ec_jwk: &EcPublicJwk) -> Result<Jwk, JoseError> {
-    let mut jwk = Jwk::new("EC");
-    jwk.set_curve(&ec_jwk.crv);
-    jwk.set_parameter("x", Some(serde_json::Value::String(ec_jwk.x.clone())))
-        .map_err(|_| JoseError::InvalidKey)?;
-    jwk.set_parameter("y", Some(serde_json::Value::String(ec_jwk.y.clone())))
-        .map_err(|_| JoseError::InvalidKey)?;
-    jwk.set_key_id(&ec_jwk.kid);
-    Ok(jwk)
-}
-
 impl JosePort for JoseAdapter {
     fn jws_sign(&self, payload_json: &[u8]) -> Result<String, JoseError> {
         let map: serde_json::Map<String, serde_json::Value> = serde_json::from_slice(payload_json)
@@ -117,29 +104,18 @@ impl JosePort for JoseAdapter {
     }
 
     fn jws_verify_device(&self, jws: &str, key: &EcPublicJwk) -> Result<Vec<u8>, JoseError> {
-        let jwk = ec_public_jwk_to_jwk(key)?;
-        let verifier = ES256.verifier_from_jwk(&jwk).map_err(|e| {
-            error!("Failed to create verifier from device JWK: {:?}", e);
+        let jwk = Jwk::try_from(key).map_err(|e| {
+            error!("Failed to convert device JWK: {:?}", e);
             JoseError::InvalidKey
         })?;
-        let (payload, _header) = jwt::decode_with_verifier(jws, &verifier).map_err(|e| {
+        hsmjose::jws_verify(jws, &jwk).map_err(|e| {
             error!("Device JWS verification failed: {:?}", e);
             JoseError::VerifyError
-        })?;
-        debug!("Decoded device JWS payload");
-        Ok(payload.to_string().into_bytes())
+        })
     }
 
-    fn peek_kid(&self, compact: &str) -> Result<Option<String>, JoseError> {
-        let header_bytes = BASE64_URL_SAFE_NO_PAD
-            .decode(compact.split('.').next().unwrap_or(""))
-            .map_err(|_| JoseError::VerifyError)?;
-        let header: serde_json::Value =
-            serde_json::from_slice(&header_bytes).map_err(|_| JoseError::VerifyError)?;
-        Ok(header
-            .get("kid")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string()))
+    fn peek_kid(&self, compact: &str) -> Option<String> {
+        hsmjose::peek_kid(compact)
     }
 
     fn jwe_encrypt<'a>(
@@ -149,32 +125,17 @@ impl JosePort for JoseAdapter {
     ) -> Result<String, JoseError> {
         match key {
             JweEncryptionKey::Session(session_key) => {
-                let mut header = JweHeader::new();
-                header.set_algorithm("dir");
-                header.set_content_encryption("A256GCM");
-                header.set_key_id("session");
-                let encrypter = DirectJweAlgorithm::Dir
-                    .encrypter_from_bytes(session_key.as_ref())
-                    .map_err(|e| {
-                        error!("Failed to create session encrypter: {:?}", e);
-                        JoseError::EncryptError
-                    })?;
-                jwe::serialize_compact(payload, &header, &encrypter).map_err(|e| {
+                hsmjose::jwe_encrypt_dir(payload, session_key.as_ref(), "session").map_err(|e| {
                     error!("Session JWE encryption failed: {:?}", e);
                     JoseError::EncryptError
                 })
             }
             JweEncryptionKey::Device(ec_jwk) => {
-                let jwk = ec_public_jwk_to_jwk(ec_jwk)?;
-                let mut header = JweHeader::new();
-                header.set_algorithm("ECDH-ES");
-                header.set_content_encryption("A256GCM");
-                header.set_key_id("device");
-                let encrypter = ECDH_ES.encrypter_from_jwk(&jwk).map_err(|e| {
-                    error!("Failed to create device encrypter: {:?}", e);
-                    JoseError::EncryptError
+                let jwk = Jwk::try_from(ec_jwk).map_err(|e| {
+                    error!("Failed to convert device JWK: {:?}", e);
+                    JoseError::InvalidKey
                 })?;
-                jwe::serialize_compact(payload, &header, &encrypter).map_err(|e| {
+                hsmjose::jwe_encrypt_ecdh_es(payload, &jwk, "device").map_err(|e| {
                     error!("Device JWE encryption failed: {:?}", e);
                     JoseError::EncryptError
                 })
@@ -189,7 +150,7 @@ impl JosePort for JoseAdapter {
     ) -> Result<Vec<u8>, JoseError> {
         match key {
             JweDecryptionKey::Device => {
-                let (payload, header) = jwe::deserialize_compact(jwe_str, &self.decrypter)
+                let (payload, header) = josekit::jwe::deserialize_compact(jwe_str, &self.decrypter)
                     .map_err(|e| {
                         error!("Device JWE decryption failed: {:?}", e);
                         JoseError::DecryptError
@@ -198,19 +159,10 @@ impl JosePort for JoseAdapter {
                 Ok(payload)
             }
             JweDecryptionKey::Session(session_key) => {
-                let decrypter = DirectJweAlgorithm::Dir
-                    .decrypter_from_bytes(session_key.as_ref())
-                    .map_err(|e| {
-                        error!("Failed to create session decrypter: {:?}", e);
-                        JoseError::DecryptError
-                    })?;
-                let (payload, header) =
-                    jwe::deserialize_compact(jwe_str, &decrypter).map_err(|e| {
-                        error!("Session JWE decryption failed: {:?}", e);
-                        JoseError::DecryptError
-                    })?;
-                debug!("Inner JWE header (session): {:#?}", header);
-                Ok(payload)
+                hsmjose::jwe_decrypt_dir(jwe_str, session_key.as_ref()).map_err(|e| {
+                    error!("Session JWE decryption failed: {:?}", e);
+                    JoseError::DecryptError
+                })
             }
         }
     }
