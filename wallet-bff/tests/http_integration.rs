@@ -14,8 +14,8 @@ use wallet_bff::application::port::outgoing::{
     DeviceStatePort, PendingContextPort, RequestSenderPort, StateInitCachePort, StateInitSenderPort,
 };
 use wallet_bff::domain::{
-    CachedResponse, HsmWorkerRequest, HsmWorkerResponse, PendingRequestContext, StateInitRequest,
-    StateInitResponse, Status,
+    CachedResponse, HsmWorkerRequest, HsmWorkerResponse, OuterResponse, PendingRequestContext,
+    StateInitRequest, StateInitResponse, Status, TypedJws,
 };
 use wallet_bff::infrastructure::adapters::incoming::web;
 use wallet_bff::infrastructure::adapters::incoming::web::handlers::AppState;
@@ -173,7 +173,9 @@ fn ok_cached_response() -> CachedResponse {
     CachedResponse {
         request_id: "any-id".to_string(),
         state_jws: None,
-        outer_response_jws: Some("some-jws-result".to_string()),
+        outer_response_jws: Some(TypedJws::<OuterResponse>::new(
+            "some-jws-result".to_string(),
+        )),
         status: Status::Ok,
         error_message: None,
     }

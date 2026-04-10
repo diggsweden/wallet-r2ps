@@ -11,12 +11,26 @@ use crate::domain::{
 };
 use tracing::{debug, error};
 
-impl OuterRequest {
-    pub fn from_jws(
+pub trait OuterRequestExt {
+    fn from_jws(
         jws: &str,
         jose: &dyn jose_port::JosePort,
         key: &EcPublicJwk,
-    ) -> Result<Self, UpstreamError> {
+    ) -> Result<OuterRequest, UpstreamError>;
+
+    fn decrypt_inner(
+        &self,
+        jose: &dyn jose_port::JosePort,
+        session_key: Option<&SessionKey>,
+    ) -> Result<InnerRequest, OuterError>;
+}
+
+impl OuterRequestExt for OuterRequest {
+    fn from_jws(
+        jws: &str,
+        jose: &dyn jose_port::JosePort,
+        key: &EcPublicJwk,
+    ) -> Result<OuterRequest, UpstreamError> {
         let bytes = jose
             .jws_verify_device(jws, key)
             .map_err(|_| UpstreamError::OuterJwsInvalid)?;
@@ -27,16 +41,14 @@ impl OuterRequest {
         })
     }
 
-    pub fn decrypt_inner(
+    fn decrypt_inner(
         &self,
         jose: &dyn jose_port::JosePort,
         session_key: Option<&SessionKey>,
     ) -> Result<InnerRequest, OuterError> {
         let jwe = self.inner_jwe.as_ref().ok_or(OuterError::InnerJweMissing)?;
 
-        let peeked_kid = jose
-            .peek_kid(jwe.as_str())
-            .map_err(|_| OuterError::InnerJweHeaderInvalid)?;
+        let peeked_kid = jose.peek_kid(jwe.as_str());
         debug!("Peeked inner JWE kid: {:?}", peeked_kid);
 
         let (bytes, enc_option) = match peeked_kid.as_deref() {
@@ -76,8 +88,15 @@ impl OuterRequest {
     }
 }
 
-impl OuterResponse {
-    pub fn sign(
+pub trait OuterResponseExt {
+    fn sign(
+        &self,
+        jose: &dyn jose_port::JosePort,
+    ) -> Result<TypedJws<OuterResponse>, UpstreamError>;
+}
+
+impl OuterResponseExt for OuterResponse {
+    fn sign(
         &self,
         jose: &dyn jose_port::JosePort,
     ) -> Result<TypedJws<OuterResponse>, UpstreamError> {
@@ -94,8 +113,16 @@ impl OuterResponse {
     }
 }
 
-impl InnerResponse {
-    pub fn encrypt(
+pub trait InnerResponseExt {
+    fn encrypt(
+        &self,
+        jose: &dyn jose_port::JosePort,
+        key: jose_port::JweEncryptionKey<'_>,
+    ) -> Result<TypedJwe<InnerResponse>, UpstreamError>;
+}
+
+impl InnerResponseExt for InnerResponse {
+    fn encrypt(
         &self,
         jose: &dyn jose_port::JosePort,
         key: jose_port::JweEncryptionKey<'_>,

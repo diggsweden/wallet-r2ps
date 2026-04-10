@@ -21,8 +21,8 @@ use wallet_bff::application::port::outgoing::{
 };
 use wallet_bff::application::service::ResponseService;
 use wallet_bff::domain::{
-    CachedResponse, EcPublicJwk, HsmWorkerRequest, HsmWorkerResponse, PendingRequestContext,
-    StateInitRequest, StateInitResponse, Status,
+    CachedResponse, EcPublicJwk, HsmWorkerRequest, HsmWorkerResponse, OuterRequest, OuterResponse,
+    PendingRequestContext, StateInitRequest, StateInitResponse, Status, TypedJws,
 };
 use wallet_bff::infrastructure::adapters::incoming::kafka::state_init_cache::StateInitResponseCache;
 use wallet_bff::infrastructure::adapters::incoming::kafka::{
@@ -111,7 +111,7 @@ async fn test_response_sink_valkey_round_trip() {
     let response = CachedResponse {
         request_id: "req-42".to_string(),
         state_jws: Some("updated-state".to_string()),
-        outer_response_jws: Some("outer-resp".to_string()),
+        outer_response_jws: Some(TypedJws::<OuterResponse>::new("outer-resp".to_string())),
         status: Status::Ok,
         error_message: None,
     };
@@ -194,7 +194,7 @@ async fn test_request_sender_produces_to_kafka() {
     let request = HsmWorkerRequest {
         request_id: "req-100".to_string(),
         state_jws: "test-state-jws".to_string(),
-        outer_request_jws: "test-outer-jws".to_string(),
+        outer_request_jws: TypedJws::<OuterRequest>::new("test-outer-jws".to_string()),
     };
 
     use wallet_bff::application::port::outgoing::RequestSenderPort;
@@ -306,7 +306,7 @@ async fn test_response_consumer_receives_and_calls_use_case() {
     let response = HsmWorkerResponse {
         request_id: "req-300".to_string(),
         state_jws: Some("state".to_string()),
-        outer_response_jws: Some("outer".to_string()),
+        outer_response_jws: Some(TypedJws::<OuterResponse>::new("outer".to_string())),
         status: Status::Ok,
         error_message: None,
     };
@@ -450,7 +450,7 @@ async fn test_bff_kafka_valkey_round_trip() {
     let request = HsmWorkerRequest {
         request_id: request_id.to_string(),
         state_jws: "old-state".to_string(),
-        outer_request_jws: "outer-jws".to_string(),
+        outer_request_jws: TypedJws::<OuterRequest>::new("outer-jws".to_string()),
     };
     use wallet_bff::application::port::outgoing::RequestSenderPort;
     request_sender
@@ -495,7 +495,7 @@ async fn test_bff_kafka_valkey_round_trip() {
         let response = HsmWorkerResponse {
             request_id: req.request_id,
             state_jws: Some("new-state-jws".to_string()),
-            outer_response_jws: Some("outer-response".to_string()),
+            outer_response_jws: Some(TypedJws::<OuterResponse>::new("outer-response".to_string())),
             status: Status::Ok,
             error_message: None,
         };
@@ -546,6 +546,6 @@ fn test_ec_jwk() -> EcPublicJwk {
         crv: "P-256".to_string(),
         x: "f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU".to_string(),
         y: "x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0".to_string(),
-        kid: None,
+        kid: String::new(),
     }
 }

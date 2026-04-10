@@ -6,6 +6,7 @@
 mod tests {
     use crate::application::port::outgoing::jose_port::{JoseError, MockJosePort};
     use crate::application::port::outgoing::session_state_spi_port::SessionKey;
+    use crate::application::protocol::OuterRequestExt;
     use crate::application::{OuterError, UpstreamError};
     use crate::domain::{
         EcPublicJwk, InnerRequest, OperationId, OuterRequest, SessionId, TypedJwe,
@@ -44,17 +45,15 @@ mod tests {
     }
 
     #[test]
-    fn test_decrypt_inner_invalid_jwe_header() {
+    fn test_decrypt_inner_unknown_kid() {
         let outer_request = create_outer_request_with_jwe(Some("malformed.jwe".to_string()));
         let mut mock_jose = MockJosePort::new();
-        mock_jose
-            .expect_peek_kid()
-            .returning(|_| Err(JoseError::InvalidKey));
+        mock_jose.expect_peek_kid().returning(|_| None);
         let session_key = SessionKey::new(vec![0u8; 32]);
 
         let result = outer_request.decrypt_inner(&mock_jose, Some(&session_key));
 
-        assert!(matches!(result, Err(OuterError::InnerJweHeaderInvalid)));
+        assert!(matches!(result, Err(OuterError::UnknownEncryptionOption)));
     }
 
     #[test]
@@ -63,7 +62,7 @@ mod tests {
         let mut mock_jose = MockJosePort::new();
         mock_jose
             .expect_peek_kid()
-            .returning(|_| Ok(Some("session".to_string())));
+            .returning(|_| Some("session".to_string()));
 
         let result = outer_request.decrypt_inner(&mock_jose, None);
 
@@ -76,9 +75,7 @@ mod tests {
     fn test_decrypt_inner_unknown_encryption_option(#[case] kid: Option<String>) {
         let outer_request = create_outer_request_with_jwe(Some("valid.jwe".to_string()));
         let mut mock_jose = MockJosePort::new();
-        mock_jose
-            .expect_peek_kid()
-            .returning(move |_| Ok(kid.clone()));
+        mock_jose.expect_peek_kid().returning(move |_| kid.clone());
         let session_key = SessionKey::new(vec![0u8; 32]);
 
         let result = outer_request.decrypt_inner(&mock_jose, Some(&session_key));
@@ -92,7 +89,7 @@ mod tests {
         let mut mock_jose = MockJosePort::new();
         mock_jose
             .expect_peek_kid()
-            .returning(|_| Ok(Some("session".to_string())));
+            .returning(|_| Some("session".to_string()));
         mock_jose
             .expect_jwe_decrypt()
             .returning(|_, _| Err(JoseError::DecryptError));
@@ -109,7 +106,7 @@ mod tests {
         let mut mock_jose = MockJosePort::new();
         mock_jose
             .expect_peek_kid()
-            .returning(|_| Ok(Some("session".to_string())));
+            .returning(|_| Some("session".to_string()));
         mock_jose
             .expect_jwe_decrypt()
             .returning(|_, _| Ok(b"not valid json".to_vec()));
@@ -137,7 +134,7 @@ mod tests {
         let mut mock_jose = MockJosePort::new();
         mock_jose
             .expect_peek_kid()
-            .returning(move |_| Ok(Some(kid.clone())));
+            .returning(move |_| Some(kid.clone()));
         mock_jose
             .expect_jwe_decrypt()
             .returning(move |_, _| Ok(inner_json.clone()));
@@ -171,7 +168,7 @@ mod tests {
         let mut mock_jose = MockJosePort::new();
         mock_jose
             .expect_peek_kid()
-            .returning(move |_| Ok(Some(kid.clone())));
+            .returning(move |_| Some(kid.clone()));
         mock_jose
             .expect_jwe_decrypt()
             .returning(move |_, _| Ok(inner_json.clone()));

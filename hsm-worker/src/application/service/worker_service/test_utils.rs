@@ -6,12 +6,13 @@ use crate::application::hsm_spi_port::MockHsmSpiPort;
 use crate::application::jose_port::{JoseError, JosePort, JweDecryptionKey, JweEncryptionKey};
 use crate::application::pake_port::MockPakePort;
 use crate::application::port::outgoing::session_state_spi_port::{
-    SessionKey, SessionState, SessionStateError, SessionStateSpiPort, SessionTransition,
+    SessionData, SessionKey, SessionState, SessionStateError, SessionStateSpiPort,
+    SessionTransition,
 };
 use crate::application::{WorkerPorts, WorkerResponseError, WorkerResponseSpiPort};
 use crate::domain::{
-    DeviceHsmState, EcPublicJwk, HsmWorkerRequest, HsmWorkerResponse, OuterRequest, PasswordFile,
-    PasswordFileEntry, SessionId, TypedJwe, TypedJws,
+    DeviceHsmState, DeviceKeyEntry, EcPublicJwk, HsmWorkerRequest, HsmWorkerResponse, OuterRequest,
+    PasswordFile, PasswordFileEntry, SessionId, TypedJwe, TypedJws,
 };
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -78,11 +79,11 @@ impl JosePort for MockJoseDeterministic {
     ) -> Result<Vec<u8>, JoseError> {
         Ok(self.inner_json.clone())
     }
-    fn peek_kid(&self, compact: &str) -> Result<Option<String>, JoseError> {
+    fn peek_kid(&self, compact: &str) -> Option<String> {
         match compact {
-            "outer.jws" => Ok(Some("device-kid".to_string())),
-            "inner.jwe" => Ok(Some(self.inner_kid.clone())),
-            _ => Err(JoseError::InvalidKey),
+            "outer.jws" => Some("device-kid".to_string()),
+            "inner.jwe" => Some(self.inner_kid.clone()),
+            _ => None,
         }
     }
     fn jws_public_key(&self) -> &EcPublicJwk {
@@ -141,14 +142,12 @@ pub struct MockSessionStateTransitionErrorSpi {
 }
 impl SessionStateSpiPort for MockSessionStateTransitionErrorSpi {
     fn get(&self, _id: &SessionId) -> Option<SessionState> {
-        Some(SessionState::Active(
-            crate::application::port::outgoing::session_state_spi_port::SessionData {
-                session_key: self.key.clone(),
-                purpose: None,
-                operation: None,
-                has_performed_hsm_operation: false,
-            },
-        ))
+        Some(SessionState::Active(SessionData {
+            session_key: self.key.clone(),
+            purpose: None,
+            operation: None,
+            has_performed_hsm_operation: false,
+        }))
     }
     fn apply_transition(
         &self,
@@ -182,7 +181,7 @@ pub fn make_state_with_password_file(device_kid: &str) -> DeviceHsmState {
 fn make_state_impl(device_kid: &str, password_files: Vec<PasswordFileEntry>) -> DeviceHsmState {
     DeviceHsmState {
         version: 1,
-        device_keys: vec![crate::domain::DeviceKeyEntry {
+        device_keys: vec![DeviceKeyEntry {
             public_key: EcPublicJwk {
                 kty: "EC".to_string(),
                 crv: "P-256".to_string(),
@@ -216,7 +215,7 @@ pub fn make_outer(context: &str, session_id: Option<SessionId>) -> OuterRequest 
 }
 
 pub fn make_ports(
-    jose: Arc<dyn crate::application::jose_port::JosePort>,
+    jose: Arc<dyn JosePort>,
     worker_response: Arc<dyn WorkerResponseSpiPort + Send + Sync>,
 ) -> WorkerPorts {
     WorkerPorts {

@@ -4,8 +4,8 @@
 
 use crate::application::port::outgoing::session_state_spi_port::{PendingLoginState, SessionKey};
 use crate::domain;
+use crate::domain::PakePayloadVector;
 use crate::domain::value_objects::client_metadata::PasswordFileEntry;
-use crate::domain::value_objects::r2ps::PakePayloadVector;
 
 #[derive(Debug)]
 pub enum PakeError {

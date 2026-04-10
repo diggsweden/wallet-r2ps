@@ -15,9 +15,32 @@ use crate::application::hsm_spi_port::HsmSpiPort;
 use crate::application::port::outgoing::pake_port::PakePort;
 use crate::application::port::outgoing::session_state_spi_port::SessionState;
 use crate::domain::{OperationId, ServiceRequestError, SessionId};
+use serde::Serialize;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tracing::debug;
+
+#[derive(Clone, Debug)]
+pub struct InnerResponseData {
+    data: serde_json::Value,
+}
+
+impl InnerResponseData {
+    pub fn new<T: Serialize>(data: T) -> Result<Self, ServiceRequestError> {
+        serde_json::to_value(data)
+            .map(|value| Self { data: value })
+            .map_err(|_| ServiceRequestError::Unknown)
+    }
+
+    pub fn serialize(&self) -> Result<Vec<u8>, ServiceRequestError> {
+        serde_json::to_vec(&self.data).map_err(|_| ServiceRequestError::Unknown)
+    }
+}
+
+/// Converts a [`Duration`] to an ISO 8601 duration (seconds only).
+pub fn to_iso8601_duration(d: Duration) -> iso8601_duration::Duration {
+    iso8601_duration::Duration::new(0.0, 0.0, 0.0, 0.0, 0.0, d.as_secs() as f32)
+}
 
 pub use crate::application::port::outgoing::session_state_spi_port::SessionTransition;
 
@@ -32,8 +55,8 @@ use session::SessionEndOperation;
 pub struct OperationContext {
     pub request_id: String,
     pub state: crate::domain::DeviceHsmState,
-    pub outer_request: crate::domain::value_objects::r2ps::OuterRequest,
-    pub inner_request: crate::domain::value_objects::r2ps::InnerRequest,
+    pub outer_request: crate::domain::OuterRequest,
+    pub inner_request: crate::domain::InnerRequest,
     pub session_id: Option<SessionId>,
     pub device_kid: String,
     pub session_state: Option<SessionState>,
@@ -41,7 +64,7 @@ pub struct OperationContext {
 
 pub struct OperationResult {
     pub state: Option<crate::domain::DeviceHsmState>,
-    pub data: crate::domain::InnerResponseData,
+    pub data: InnerResponseData,
     pub session_id: Option<SessionId>,
     pub session_transition: Option<SessionTransition>,
 }
@@ -51,11 +74,9 @@ impl OperationResult {
     pub fn to_inner_response(
         &self,
         serialized_data: String,
-        ttl: Option<std::time::Duration>,
-    ) -> crate::domain::value_objects::r2ps::InnerResponse {
-        use crate::domain::value_objects::r2ps::{InnerResponse, to_iso8601_duration};
-
-        InnerResponse::ok(serialized_data, ttl.map(to_iso8601_duration))
+        ttl: Option<Duration>,
+    ) -> crate::domain::InnerResponse {
+        crate::domain::InnerResponse::ok(serialized_data, ttl.map(to_iso8601_duration))
     }
 }
 

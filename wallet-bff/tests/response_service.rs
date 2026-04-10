@@ -10,7 +10,9 @@ use wallet_bff::application::port::outgoing::{
     DeviceStatePort, PendingContextPort, ResponseSinkPort,
 };
 use wallet_bff::application::service::ResponseService;
-use wallet_bff::domain::{CachedResponse, HsmWorkerResponse, PendingRequestContext, Status};
+use wallet_bff::domain::{
+    CachedResponse, HsmWorkerResponse, OuterResponse, PendingRequestContext, Status, TypedJws,
+};
 
 // ── Mocks ────────────────────────────────────────────────────────────────
 
@@ -106,7 +108,7 @@ fn worker_response(state_jws: Option<&str>) -> HsmWorkerResponse {
     HsmWorkerResponse {
         request_id: "req-1".to_string(),
         state_jws: state_jws.map(str::to_string),
-        outer_response_jws: Some("outer.jws".to_string()),
+        outer_response_jws: Some(TypedJws::<OuterResponse>::new("outer.jws".to_string())),
         status: Status::Ok,
         error_message: None,
     }

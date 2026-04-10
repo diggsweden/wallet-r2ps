@@ -4,10 +4,11 @@
 
 use crate::application::jose_port;
 use crate::application::port::outgoing::session_state_spi_port::SessionKey;
+use crate::application::protocol::OuterRequestExt;
 use crate::application::service::operations::OperationContext;
 use crate::application::service::worker_service::context::{ResponseContext, WorkerInput};
 use crate::application::service::worker_service::error::{OuterError, UpstreamError, WorkerError};
-use crate::domain::value_objects::r2ps::OuterRequest;
+use crate::domain::OuterRequest;
 use crate::domain::{DeviceHsmState, EcPublicJwk, HsmWorkerRequest, SessionId};
 use std::sync::Arc;
 use tracing::info;
@@ -54,7 +55,6 @@ impl RequestDecoder {
         let device_kid = self
             .jose
             .peek_kid(outer_request_jws.as_str())
-            .map_err(|_| UpstreamError::OuterJwsInvalid)?
             .ok_or(UpstreamError::OuterJwsMissingKid)?;
 
         let device_public_key = state

@@ -110,7 +110,7 @@ async fn generate_one_client(
         crv: "P-256".to_string(),
         x: device_key.x.clone(),
         y: device_key.y.clone(),
-        kid: Some(device_key.kid.clone()),
+        kid: device_key.kid.clone(),
     };
 
     let am = AccessMechanismClient::new(

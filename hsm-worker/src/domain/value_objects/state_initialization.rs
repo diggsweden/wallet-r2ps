@@ -27,6 +27,9 @@ pub struct StateInitRequest {
 pub struct StateInitResponse {
     /// Correlation ID matching the original request
     pub request_id: String,
+    /// JWS-encoded device state. Opaque to API consumers; the inner type
+    /// (`DeviceHsmState`) is worker-internal and not part of the public schema.
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub state_jws: TypedJws<DeviceHsmState>,
     /// One-time authorization code for device registration
     pub dev_authorization_code: String,

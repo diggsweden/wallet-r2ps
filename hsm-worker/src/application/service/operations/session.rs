@@ -2,9 +2,10 @@
 //
 // SPDX-License-Identifier: EUPL-1.2
 
+use super::InnerResponseData;
 use super::{OperationContext, OperationResult, ServiceOperation, SessionTransition};
-use crate::domain::value_objects::r2ps::PakeResponse;
-use crate::domain::{InnerResponseData, ServiceRequestError};
+use crate::domain::PakeResponse;
+use crate::domain::ServiceRequestError;
 
 pub struct SessionEndOperation;
 

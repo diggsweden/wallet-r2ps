@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 
 use crate::application::port::outgoing::jose_port::{JosePort, JweDecryptionKey};
-use crate::domain::value_objects::r2ps::{InnerRequest, OperationId};
+use crate::domain::{InnerRequest, OperationId};
 use josekit::jwe::ECDH_ES;
 use josekit::jwe::JweHeader;
 use p256::SecretKey;

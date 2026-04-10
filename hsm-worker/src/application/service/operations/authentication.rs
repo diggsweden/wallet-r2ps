@@ -2,12 +2,32 @@
 //
 // SPDX-License-Identifier: EUPL-1.2
 
-use super::{OperationContext, OperationResult, ServiceOperation, SessionTransition};
+use super::{
+    InnerResponseData, OperationContext, OperationResult, ServiceOperation, SessionTransition,
+};
 use crate::application::port::outgoing::pake_port;
 use crate::application::port::outgoing::session_state_spi_port::{OngoingOperation, SessionState};
 use crate::domain;
+use crate::domain::{InnerRequest, PakeRequest, ServiceRequestError};
 use std::sync::Arc;
 use tracing::warn;
+
+trait PakeRequestExt {
+    fn from_inner_request(inner_request: InnerRequest) -> Result<PakeRequest, ServiceRequestError>;
+}
+
+impl PakeRequestExt for PakeRequest {
+    fn from_inner_request(inner_request: InnerRequest) -> Result<PakeRequest, ServiceRequestError> {
+        let data = inner_request
+            .data
+            .ok_or(ServiceRequestError::InvalidServiceRequestFormat)?;
+
+        serde_json::from_slice(data.as_bytes()).map_err(|e| {
+            warn!("error decoding pake request: {:?}", e);
+            ServiceRequestError::InvalidPakeRequest
+        })
+    }
+}
 
 fn pake_err_to_service_err(e: pake_port::PakeError) -> domain::ServiceRequestError {
     match e {
@@ -69,7 +89,7 @@ impl ServiceOperation for AuthenticateStartOperation {
 
         Ok(OperationResult {
             state: None,
-            data: domain::InnerResponseData::new(payload)?,
+            data: InnerResponseData::new(payload)?,
             session_id: Some(session_id),
             session_transition: Some(SessionTransition::CreatePendingAuth {
                 pending_state,
@@ -123,7 +143,7 @@ impl ServiceOperation for AuthenticateFinishOperation {
 
         Ok(OperationResult {
             state: None,
-            data: domain::InnerResponseData::new(payload)?,
+            data: InnerResponseData::new(payload)?,
             session_id: Some(session_id.clone()),
             session_transition: Some(SessionTransition::Authenticate { session_key }),
         })
@@ -173,7 +193,7 @@ impl ServiceOperation for RegisterStartOperation {
 
         Ok(OperationResult {
             state: None,
-            data: domain::InnerResponseData::new(payload)?,
+            data: InnerResponseData::new(payload)?,
             session_id: context.session_id,
             session_transition: None,
         })
@@ -237,7 +257,7 @@ impl ServiceOperation for RegisterFinishOperation {
 
         Ok(OperationResult {
             state: Some(new_state),
-            data: domain::InnerResponseData::new(payload)?,
+            data: InnerResponseData::new(payload)?,
             session_id: context.session_id,
             session_transition: None,
         })
@@ -286,7 +306,7 @@ impl ServiceOperation for PinChangeStartOperation {
 
         Ok(OperationResult {
             state: None,
-            data: domain::InnerResponseData::new(payload)?,
+            data: InnerResponseData::new(payload)?,
             session_id: context.session_id,
             session_transition: Some(SessionTransition::BeginChangingPin),
         })
@@ -340,7 +360,7 @@ impl ServiceOperation for PinChangeFinishOperation {
 
         Ok(OperationResult {
             state: Some(new_state),
-            data: domain::InnerResponseData::new(payload)?,
+            data: InnerResponseData::new(payload)?,
             session_id: context.session_id,
             session_transition: Some(SessionTransition::End),
         })

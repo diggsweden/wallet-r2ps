@@ -2,13 +2,14 @@
 //
 // SPDX-License-Identifier: EUPL-1.2
 
-use super::{OperationContext, OperationResult, ServiceOperation, SessionTransition};
+use super::{
+    InnerResponseData, OperationContext, OperationResult, ServiceOperation, SessionTransition,
+};
 use crate::application::hsm_spi_port::HsmSpiPort;
 use crate::application::port::outgoing::session_state_spi_port::SessionState;
-use crate::define_byte_vector;
 use crate::domain::{
-    CreateKeyServiceData, CreateKeyServiceDataResponse, DeleteKeyServiceData, InnerResponseData,
-    KeyInfo, ListKeysResponse, ServiceRequestError, SignRequest, SignatureResponse,
+    CreateKeyServiceData, CreateKeyServiceDataResponse, DeleteKeyServiceData, KeyInfo,
+    ListKeysResponse, ServiceRequestError, SignRequest, SignatureResponse, SignatureVector,
 };
 use std::sync::Arc;
 use tracing::debug;
@@ -22,9 +23,6 @@ impl HsmSignOperation {
         Self { hsm_spi_port }
     }
 }
-
-define_byte_vector!(SignatureVector);
-define_byte_vector!(MessageVector);
 
 impl ServiceOperation for HsmSignOperation {
     fn execute(&self, context: OperationContext) -> Result<OperationResult, ServiceRequestError> {

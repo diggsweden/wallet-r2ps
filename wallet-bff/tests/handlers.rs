@@ -6,7 +6,7 @@ use axum::body::to_bytes;
 use axum::http::{StatusCode, header};
 use rstest::rstest;
 use uuid::Uuid;
-use wallet_bff::domain::{CachedResponse, Status};
+use wallet_bff::domain::{CachedResponse, OuterResponse, Status, TypedJws};
 use wallet_bff::infrastructure::adapters::incoming::web::handlers::{
     PROBLEM_CONTENT_TYPE, build_async_response, parse_iso8601_to_seconds,
 };
@@ -58,7 +58,7 @@ async fn build_async_response_ok_returns_200_complete() {
     let cached = CachedResponse {
         request_id: id.to_string(),
         status: Status::Ok,
-        outer_response_jws: Some("jws.token.here".to_string()),
+        outer_response_jws: Some(TypedJws::<OuterResponse>::new("jws.token.here".to_string())),
         state_jws: None,
         error_message: None,
     };

@@ -10,6 +10,8 @@ use strum_macros::Display;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
+use crate::types::{TypedJwe, TypedJws};
+
 // ─── Internal byte-vector macro (not exported) ───────────────────────────────
 
 macro_rules! define_byte_vector_base {
@@ -77,8 +79,8 @@ pub struct EcPublicJwk {
     pub crv: String,
     pub x: String,
     pub y: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub kid: Option<String>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub kid: String,
 }
 
 /// Unique session identifier (UUID v4).
@@ -102,6 +104,12 @@ impl SessionId {
     }
     pub fn into_string(self) -> String {
         self.0
+    }
+}
+
+impl From<String> for SessionId {
+    fn from(s: String) -> Self {
+        Self(s)
     }
 }
 
@@ -161,6 +169,30 @@ impl EncryptOption {
     }
 }
 
+impl OperationId {
+    pub fn encrypt_option(&self) -> EncryptOption {
+        match self {
+            OperationId::AuthenticateStart => EncryptOption::Device,
+            OperationId::AuthenticateFinish => EncryptOption::Device,
+            OperationId::RegisterStart => EncryptOption::Device,
+            OperationId::RegisterFinish => EncryptOption::Device,
+            OperationId::ChangePinStart => EncryptOption::Session,
+            OperationId::ChangePinFinish => EncryptOption::Session,
+            OperationId::HsmSign => EncryptOption::Session,
+            OperationId::HsmEcdh => EncryptOption::Session,
+            OperationId::HsmGenerateKey => EncryptOption::Session,
+            OperationId::HsmDeleteKey => EncryptOption::Session,
+            OperationId::HsmListKeys => EncryptOption::Session,
+            OperationId::EndSession => EncryptOption::Session,
+            OperationId::Store => EncryptOption::Session,
+            OperationId::Retrieve => EncryptOption::Session,
+            OperationId::Log => EncryptOption::Session,
+            OperationId::GetLog => EncryptOption::Session,
+            OperationId::Info => EncryptOption::Session,
+        }
+    }
+}
+
 /// Elliptic curve identifier for key generation.
 #[derive(Debug, Clone, Serialize, Deserialize, Display)]
 #[cfg_attr(feature = "openapi", derive(ToSchema))]
@@ -193,10 +225,10 @@ pub enum PakeState {
 #[serde(rename_all = "camelCase")]
 pub struct HsmWorkerRequest {
     pub request_id: String,
-    /// JWS-encoded DeviceHsmState (compact serialization)
+    /// JWS-encoded DeviceHsmState (compact serialization); opaque to hsm-common
     pub state_jws: String,
     /// JWS-encoded OuterRequest (compact serialization)
-    pub outer_request_jws: String,
+    pub outer_request_jws: TypedJws<OuterRequest>,
 }
 
 /// Worker response sent via Kafka (wire format).
@@ -205,10 +237,10 @@ pub struct HsmWorkerRequest {
 #[serde(rename_all = "camelCase")]
 pub struct HsmWorkerResponse {
     pub request_id: String,
-    /// JWS-encoded updated DeviceHsmState (compact serialization)
+    /// JWS-encoded updated DeviceHsmState (compact serialization); opaque to hsm-common
     pub state_jws: Option<String>,
     /// JWS-encoded OuterResponse (compact serialization)
-    pub outer_response_jws: Option<String>,
+    pub outer_response_jws: Option<TypedJws<OuterResponse>>,
     pub status: Status,
     pub error_message: Option<String>,
 }
@@ -246,12 +278,12 @@ pub struct StateInitResponse {
 #[cfg_attr(feature = "openapi", derive(ToSchema))]
 pub struct OuterRequest {
     pub version: u32,
-    pub session_id: Option<String>,
+    pub session_id: Option<SessionId>,
     pub context: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub server_kid: Option<String>,
     /// JWE compact serialization of the encrypted InnerRequest
-    pub inner_jwe: Option<String>,
+    pub inner_jwe: Option<TypedJwe<InnerRequest>>,
 }
 
 /// Decrypted inner request payload.
@@ -270,9 +302,9 @@ pub struct InnerRequest {
 #[cfg_attr(feature = "openapi", derive(ToSchema))]
 pub struct OuterResponse {
     pub version: u32,
-    pub session_id: Option<String>,
+    pub session_id: Option<SessionId>,
     /// JWE compact serialization of the encrypted InnerResponse
-    pub inner_jwe: Option<String>,
+    pub inner_jwe: Option<TypedJwe<InnerResponse>>,
     pub status: Status,
     pub error_message: Option<String>,
 }
@@ -290,6 +322,28 @@ pub struct InnerResponse {
     pub expires_in: Option<iso8601_duration::Duration>,
     pub status: Status,
     pub error_message: Option<String>,
+}
+
+impl OuterResponse {
+    pub fn ok(inner_jwe: TypedJwe<InnerResponse>, session_id: Option<SessionId>) -> Self {
+        Self {
+            version: 1,
+            inner_jwe: Some(inner_jwe),
+            session_id,
+            status: Status::Ok,
+            error_message: None,
+        }
+    }
+
+    pub fn error(error_message: String) -> Self {
+        Self {
+            version: 1,
+            inner_jwe: None,
+            session_id: None,
+            status: Status::Error,
+            error_message: Some(error_message),
+        }
+    }
 }
 
 impl InnerResponse {

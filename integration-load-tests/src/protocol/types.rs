@@ -8,10 +8,11 @@ use serde::{Deserialize, Serialize};
 
 // ─── Re-exported types from hsm-common ───────────────────────────────────────
 
+pub use hsm_common::types::TypedJwe;
 pub use hsm_common::{
     CreateKeyServiceData, CreateKeyServiceDataResponse, Curve, EcPublicJwk, InnerRequest,
     InnerResponse, MessageVector, OperationId, OuterRequest, OuterResponse, PakePayloadVector,
-    PakeRequest, PakeResponse, SignRequest, Status,
+    PakeRequest, PakeResponse, SessionId, SignRequest, Status,
 };
 
 // ─── BFF REST types ───────────────────────────────────────────────────────────

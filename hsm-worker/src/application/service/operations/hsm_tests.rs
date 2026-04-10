@@ -7,9 +7,9 @@ mod tests {
     use crate::application::hsm_spi_port::MockHsmSpiPort;
     use crate::application::service::operations::hsm::{
         HsmDeleteKeyOperation, HsmGenerateKeyOperation, HsmListKeysOperation, HsmSignOperation,
-        MessageVector,
     };
     use crate::application::service::operations::{OperationContext, ServiceOperation};
+    use crate::domain::MessageVector;
     use crate::domain::{
         CreateKeyServiceData, Curve, DeleteKeyServiceData, DeviceHsmState, DeviceKeyEntry,
         EcPublicJwk, HsmKey, InnerRequest, ListKeysResponse, OuterRequest, ServiceRequestError,

@@ -254,7 +254,7 @@ impl AccessMechanismClient {
             .context("No data in HSM generate key response")?;
         let hsm_resp: CreateKeyServiceDataResponse =
             serde_json::from_str(&data_str).context("Failed to parse HSM generate key response")?;
-        let hsm_kid = hsm_resp.public_key.kid.clone().unwrap_or_default();
+        let hsm_kid = hsm_resp.public_key.kid.clone();
 
         Ok(hsm_kid)
     }

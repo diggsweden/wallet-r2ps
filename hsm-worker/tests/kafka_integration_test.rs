@@ -13,14 +13,14 @@ use testcontainers::ContainerAsync;
 use testcontainers::runners::AsyncRunner;
 use testcontainers_modules::kafka::apache::{self, Kafka};
 
+use hsm_worker::application::port::incoming::worker_request_use_case::WorkerRequestError;
 use hsm_worker::application::port::outgoing::state_init_response_spi_port::{
     StateInitResponseError, StateInitResponseSpiPort,
 };
 use hsm_worker::application::{WorkerRequestUseCase, WorkerResponseSpiPort};
-use hsm_worker::domain::value_objects::r2ps::{Status, WorkerRequestError};
+use hsm_worker::domain::Status;
 use hsm_worker::domain::{
-    EcPublicJwk, HsmWorkerRequest, HsmWorkerRequestDto, HsmWorkerResponse, StateInitRequest,
-    StateInitResponse, TypedJws,
+    EcPublicJwk, HsmWorkerRequest, HsmWorkerResponse, StateInitRequest, StateInitResponse, TypedJws,
 };
 use hsm_worker::infrastructure::KafkaConfig;
 use hsm_worker::infrastructure::adapters::incoming::r2ps_request_kafka_message_receiver::WorkerRequestKafkaReceiver;
@@ -211,12 +211,12 @@ async fn test_worker_consumer_receives_and_calls_use_case() {
         .create()
         .expect("producer creation failed");
 
-    let dto = HsmWorkerRequestDto {
+    let request = HsmWorkerRequest {
         request_id: "req-301".to_string(),
         state_jws: TypedJws::new("state-jws-value".to_string()),
         outer_request_jws: TypedJws::new("outer-jws-value".to_string()),
     };
-    let payload = serde_json::to_string(&dto).unwrap();
+    let payload = serde_json::to_string(&request).unwrap();
 
     producer
         .send(
@@ -358,7 +358,7 @@ async fn test_worker_kafka_round_trip() {
         PendingLoginState, SessionKey,
     };
     use hsm_worker::application::service::worker_service::WorkerService;
-    use hsm_worker::domain::value_objects::r2ps::OperationId;
+    use hsm_worker::domain::OperationId;
     use hsm_worker::domain::{HsmKey, InnerRequest, OuterRequest, TypedJwe};
     use hsm_worker::infrastructure::adapters::outgoing::jose_adapter::JoseAdapter;
     use hsm_worker::infrastructure::adapters::outgoing::session_state_memory_cache::SessionStateMemoryCache;
@@ -385,7 +385,7 @@ async fn test_worker_kafka_round_trip() {
             &self,
             _: &[u8],
             _: &str,
-        ) -> Result<hsm_worker::domain::value_objects::r2ps::PakePayloadVector, PakeError> {
+        ) -> Result<hsm_worker::domain::PakePayloadVector, PakeError> {
             unimplemented!()
         }
         fn registration_finish(&self, _: &[u8]) -> Result<RegistrationResult, PakeError> {
@@ -396,13 +396,7 @@ async fn test_worker_kafka_round_trip() {
             _: &[u8],
             _: &hsm_worker::domain::PasswordFileEntry,
             _: &str,
-        ) -> Result<
-            (
-                hsm_worker::domain::value_objects::r2ps::PakePayloadVector,
-                PendingLoginState,
-            ),
-            PakeError,
-        > {
+        ) -> Result<(hsm_worker::domain::PakePayloadVector, PendingLoginState), PakeError> {
             unimplemented!()
         }
         fn authentication_finish(
@@ -420,7 +414,7 @@ async fn test_worker_kafka_round_trip() {
         fn generate_key(
             &self,
             _: &str,
-            _: &hsm_worker::domain::value_objects::r2ps::Curve,
+            _: &hsm_worker::domain::Curve,
         ) -> Result<HsmKey, Box<dyn std::error::Error>> {
             unimplemented!()
         }
@@ -537,12 +531,12 @@ async fn test_worker_kafka_round_trip() {
         josekit::jwt::encode_with_signer(&jwt_payload, &header, &signer).unwrap()
     };
 
-    let dto = HsmWorkerRequestDto {
+    let request = HsmWorkerRequest {
         request_id: "req-501".to_string(),
         state_jws,
         outer_request_jws: TypedJws::new(outer_request_jws),
     };
-    let dto_payload = serde_json::to_string(&dto).unwrap();
+    let request_payload = serde_json::to_string(&request).unwrap();
 
     // Produce to r2ps-requests
     let producer: BaseProducer = ClientConfig::new()
@@ -555,7 +549,7 @@ async fn test_worker_kafka_round_trip() {
         .send(
             BaseRecord::to("r2ps-requests")
                 .key(device_kid)
-                .payload(&dto_payload),
+                .payload(&request_payload),
         )
         .expect("enqueue failed");
     producer.poll(Duration::from_millis(100));

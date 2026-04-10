@@ -8,13 +8,10 @@
 //!   payload JSON -> InnerRequest JSON -> JWE -> OuterRequest JSON -> JWS
 
 use anyhow::{Context, Result};
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use base64::Engine;
-use josekit::jwe::{self, JweHeader};
+use hsm_common::jose;
 use josekit::jwk::Jwk;
-use josekit::jws::{self, JwsHeader};
 
-use super::types::{InnerRequest, OperationId, OuterRequest, PakeRequest};
+use super::types::{InnerRequest, OperationId, OuterRequest, PakeRequest, SessionId, TypedJwe};
 
 /// Build a full OuterRequest JWS for a PAKE operation (registration, login).
 ///
@@ -34,19 +31,22 @@ pub fn build_pake_request_jws(
         request_counter,
         data: Some(serde_json::to_string(pake_request)?),
     };
-
     let inner_bytes = serde_json::to_vec(&inner_request)?;
-    let inner_jwe = jwe_encrypt_device(&inner_bytes, server_public_key)?;
-
+    let inner_jwe = jose::jwe_encrypt_ecdh_es(&inner_bytes, server_public_key, "device")
+        .context("ECDH-ES encrypt failed")?;
     let outer_request = OuterRequest {
         version: 1,
-        session_id: session_id.map(String::from),
+        session_id: session_id.map(|s| SessionId::from(s.to_string())),
         context: "hsm".to_string(),
         server_kid: None,
-        inner_jwe: Some(inner_jwe),
+        inner_jwe: Some(TypedJwe::new(inner_jwe)),
     };
-
-    jws_sign(&outer_request, device_private_key, kid)
+    jose::jws_sign(
+        &serde_json::to_vec(&outer_request)?,
+        device_private_key,
+        kid,
+    )
+    .context("JWS sign failed")
 }
 
 /// Build a full OuterRequest JWS for a session-encrypted operation (HSM sign, etc.).
@@ -67,71 +67,20 @@ pub fn build_session_request_jws(
         request_counter,
         data: Some(serde_json::to_string(data_payload)?),
     };
-
     let inner_bytes = serde_json::to_vec(&inner_request)?;
-    let inner_jwe = jwe_encrypt_session(&inner_bytes, session_key)?;
-
+    let inner_jwe = jose::jwe_encrypt_dir(&inner_bytes, session_key, "session")
+        .context("dir encrypt failed")?;
     let outer_request = OuterRequest {
         version: 1,
-        session_id: Some(session_id.to_string()),
+        session_id: Some(SessionId::from(session_id.to_string())),
         context: "hsm".to_string(),
         server_kid: None,
-        inner_jwe: Some(inner_jwe),
+        inner_jwe: Some(TypedJwe::new(inner_jwe)),
     };
-
-    jws_sign(&outer_request, device_private_key, kid)
-}
-
-// ─── JWS ───
-
-/// Sign a JSON payload as a compact JWS (ES256).
-fn jws_sign<T: serde::Serialize>(payload: &T, private_key: &Jwk, kid: &str) -> Result<String> {
-    let mut header = JwsHeader::new();
-    header.set_algorithm("ES256");
-    header.set_key_id(kid);
-
-    let payload_bytes = serde_json::to_vec(payload)?;
-
-    let signer = jws::ES256
-        .signer_from_jwk(private_key)
-        .context("Failed to create JWS signer")?;
-
-    jws::serialize_compact(&payload_bytes, &header, &signer).context("Failed to sign JWS")
-}
-
-// ─── JWE: ECDH-ES (device encryption) ───
-
-/// Encrypt plaintext bytes as JWE using ECDH-ES + A256GCM with the server's public key.
-fn jwe_encrypt_device(plaintext: &[u8], server_public_key: &Jwk) -> Result<String> {
-    let mut header = JweHeader::new();
-    header.set_algorithm("ECDH-ES");
-    header.set_content_encryption("A256GCM");
-    header.set_key_id("device");
-
-    let encrypter = jwe::ECDH_ES
-        .encrypter_from_jwk(server_public_key)
-        .context("Failed to create ECDH-ES encrypter")?;
-
-    jwe::serialize_compact(plaintext, &header, &encrypter)
-        .context("Failed to encrypt JWE (ECDH-ES)")
-}
-
-// ─── JWE: dir (session encryption) ───
-
-/// Encrypt plaintext bytes as JWE using dir + A256GCM with a 32-byte session key.
-fn jwe_encrypt_session(plaintext: &[u8], session_key: &[u8]) -> Result<String> {
-    let mut header = JweHeader::new();
-    header.set_algorithm("dir");
-    header.set_content_encryption("A256GCM");
-    header.set_key_id("session");
-
-    let k_b64 = URL_SAFE_NO_PAD.encode(session_key);
-    let jwk_json = serde_json::json!({ "kty": "oct", "k": k_b64 });
-    let oct_jwk = Jwk::from_bytes(serde_json::to_vec(&jwk_json)?)?;
-
-    let encrypter = jwe::Dir
-        .encrypter_from_jwk(&oct_jwk)
-        .context("Failed to create dir encrypter")?;
-
-    jwe::serialize_compact(plaintext, &header, &encrypter).context("Failed to encrypt JWE (dir)")
+    jose::jws_sign(
+        &serde_json::to_vec(&outer_request)?,
+        device_private_key,
+        kid,
+    )
+    .context("JWS sign failed")
 }

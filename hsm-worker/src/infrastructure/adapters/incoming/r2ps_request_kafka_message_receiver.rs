@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 
 use crate::application::WorkerRequestUseCase;
-use crate::domain::{HsmWorkerRequest, HsmWorkerRequestDto};
+use crate::domain::HsmWorkerRequest;
 use crate::infrastructure::KafkaConfig;
 use rdkafka::consumer::{BaseConsumer, Consumer};
 use rdkafka::{ClientConfig, Message};
@@ -75,8 +75,7 @@ impl WorkerRequestKafkaReceiver {
                             }
                         };
 
-                        let hsm_worker_request_dto: HsmWorkerRequestDto = match from_slice(payload)
-                        {
+                        let hsm_worker_request: HsmWorkerRequest = match from_slice(payload) {
                             Ok(msg) => msg,
                             Err(e) => {
                                 error!("Failed to deserialize JSON: {:?}", e);
@@ -89,12 +88,6 @@ impl WorkerRequestKafkaReceiver {
                         let key = msg.key_view::<str>().unwrap();
 
                         debug!("Received message: key={:?}", key);
-
-                        let hsm_worker_request = HsmWorkerRequest {
-                            request_id: hsm_worker_request_dto.request_id,
-                            state_jws: hsm_worker_request_dto.state_jws,
-                            outer_request_jws: hsm_worker_request_dto.outer_request_jws,
-                        };
 
                         // Process the message (example: convert to uppercase)
                         match worker_use_case.execute(hsm_worker_request) {
