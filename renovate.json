@@ -4,11 +4,7 @@
     "local>diggsweden/.github:renovate-base",
     ":maintainLockFilesWeekly"
   ],
-  "enabledManagers": [
-    "github-actions",
-    "cargo",
-    "dockerfile"
-  ],
+  "enabledManagers": ["github-actions", "cargo", "dockerfile"],
   "packageRules": [
     {
       "description": "Rust dependencies - Major updates",
@@ -22,6 +18,12 @@
       "matchUpdateTypes": ["minor", "patch"],
       "addLabels": ["rust", "dependencies"],
       "groupName": "rust non-major"
+    },
+    {
+      "description": "Block rand 0.9+ due to rand_core version conflict with p256/elliptic-curve",
+      "matchManagers": ["cargo"],
+      "matchPackageNames": ["rand"],
+      "allowedVersions": "<0.9.0"
     },
     {
       "description": "Docker base images",
