@@ -7,8 +7,8 @@ name: r2ps-dev
 services:
   wallet-bff:
     build:
-      context: ./wallet-bff
-      dockerfile: Containerfile
+      context: .
+      dockerfile: wallet-bff/Containerfile
     ports:
       - "8088:8088"
     restart: on-failure
@@ -34,8 +34,8 @@ services:
 
   hsm-worker:
     build:
-      context: ./hsm-worker
-      dockerfile: Containerfile
+      context: .
+      dockerfile: hsm-worker/Containerfile
     env_file:
       - .env.softhsm
       - .env.opaque

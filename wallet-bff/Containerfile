@@ -15,10 +15,13 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-COPY Cargo.toml ./
-COPY src ./src
+COPY Cargo.toml Cargo.lock ./
+COPY hsm-common ./hsm-common
+COPY hsm-worker ./hsm-worker
+COPY wallet-bff ./wallet-bff
+COPY integration-load-tests ./integration-load-tests
 
-RUN cargo build --release
+RUN cargo build --release -p wallet-bff
 
 FROM debian:bookworm-slim
 
