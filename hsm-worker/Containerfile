@@ -18,7 +18,7 @@ RUN mkdir -p /myuser/softhsm/tokens
 RUN useradd -m myuser
 RUN chown -R myuser:myuser /myuser/softhsm
 
-COPY softhsm/entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY hsm-worker/softhsm/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
 USER myuser
@@ -39,11 +39,14 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-COPY Cargo.toml ./
-COPY src ./src
+COPY Cargo.toml Cargo.lock ./
+COPY hsm-common ./hsm-common
+COPY hsm-worker ./hsm-worker
+COPY wallet-bff ./wallet-bff
+COPY integration-load-tests ./integration-load-tests
 
 # Build static binary
-RUN cargo build --release
+RUN cargo build --release -p hsm-worker
 
 FROM runtime-softhsm
 
