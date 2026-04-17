@@ -78,6 +78,8 @@ pub async fn run() {
         state_init_correlation.clone(),
     );
 
+    let default_initial_key_curve = config.default_initial_key_curve;
+
     // Build HTTP router
     let app_state = Arc::new(AppState {
         device_state_port,
@@ -89,6 +91,7 @@ pub async fn run() {
         sync_timeout_ms: config.sync_timeout_ms,
         state_init_timeout_ms: config.state_init_timeout_ms,
         response_events_template_url: config.response_events_template_url.clone(),
+        default_initial_key_curve,
     });
 
     let rp_state = Arc::new(ReplayProtectionState {

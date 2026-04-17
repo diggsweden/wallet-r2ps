@@ -47,8 +47,9 @@ pub struct WorkerService {
 }
 
 impl WorkerService {
-    pub fn new(ports: WorkerPorts, legacy_key_mode: bool) -> Self {
-        let operation_dispatcher = OperationDispatcher::from_dependencies(ports.pake, ports.hsm);
+    pub fn new(ports: WorkerPorts, hsm_key_label: String, legacy_key_mode: bool) -> Self {
+        let operation_dispatcher =
+            OperationDispatcher::from_dependencies(ports.pake, ports.hsm, hsm_key_label);
 
         let request_decoder = RequestDecoder::new(ports.jose.clone(), legacy_key_mode);
         let response_builder = ResponseBuilder::new(ports.jose);

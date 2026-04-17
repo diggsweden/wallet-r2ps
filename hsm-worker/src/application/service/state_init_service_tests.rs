@@ -2,12 +2,15 @@
 //
 // SPDX-License-Identifier: EUPL-1.2
 
+use crate::application::hsm_spi_port::MockHsmSpiPort;
 use crate::application::port::outgoing::jose_port::{JoseError, MockJosePort};
 use crate::application::port::outgoing::state_init_response_spi_port::{
     StateInitResponseError, StateInitResponseSpiPort,
 };
 use crate::application::service::state_init_service::{StateInitError, StateInitService};
-use crate::domain::{EcPublicJwk, StateInitRequest, StateInitResponse};
+use crate::domain::{
+    Curve, EcPublicJwk, HsmKey, StateInitRequest, StateInitResponse, WrappedPrivateKey,
+};
 use std::sync::{Arc, Mutex};
 
 // -----------------------------------------------------------------------------
@@ -47,16 +50,7 @@ fn create_valid_jwk() -> EcPublicJwk {
     }
 }
 
-// -----------------------------------------------------------------------------
-// Tests
-// -----------------------------------------------------------------------------
-
-#[test]
-fn test_valid_initialization_pipeline() {
-    let mock_spi = Arc::new(MockStateInitResponseSpi {
-        responses: Mutex::new(Vec::new()),
-        fail: false,
-    });
+fn make_mock_jose() -> MockJosePort {
     let mut mock_jose = MockJosePort::new();
     mock_jose
         .expect_jws_sign()
@@ -67,9 +61,48 @@ fn test_valid_initialization_pipeline() {
     mock_jose
         .expect_jws_kid()
         .return_const("mock-kid".to_string());
+    mock_jose
+}
+
+fn make_hsm_key(kid: &str) -> HsmKey {
+    HsmKey {
+        wrapped_private_key: WrappedPrivateKey::new(vec![1, 2, 3]),
+        public_key_jwk: EcPublicJwk {
+            kty: "EC".to_string(),
+            crv: "P-256".to_string(),
+            x: "gen_x".to_string(),
+            y: "gen_y".to_string(),
+            kid: kid.to_string(),
+        },
+        wrap_key_label: "test-wrap-key".to_string(),
+        created_at: chrono::Utc::now(),
+    }
+}
+
+fn make_succeeding_hsm() -> MockHsmSpiPort {
+    let mut mock_hsm = MockHsmSpiPort::new();
+    mock_hsm
+        .expect_generate_key()
+        .once()
+        .returning(|_, _| Ok(make_hsm_key("initial-hsm-kid")));
+    mock_hsm
+}
+
+// -----------------------------------------------------------------------------
+// Tests
+// -----------------------------------------------------------------------------
+
+#[test]
+fn test_valid_initialization_pipeline() {
+    let mock_spi = Arc::new(MockStateInitResponseSpi {
+        responses: Mutex::new(Vec::new()),
+        fail: false,
+    });
     let service = StateInitService::new(
         mock_spi.clone(),
-        Arc::new(mock_jose),
+        Arc::new(make_mock_jose()),
+        Arc::new(make_succeeding_hsm()),
+        "wallet-hsm-key".to_string(),
         "mock-opaque-id".to_string(),
     );
 
@@ -77,15 +110,13 @@ fn test_valid_initialization_pipeline() {
         request_id: "test-req-123".to_string(),
         public_key: create_valid_jwk(),
         response_topic: "test-topic".to_string(),
+        initial_key_curve: Curve::P256,
     };
 
-    // Execute the service
     let result = service.initialize(request);
 
-    // Verify the response ID matches
     assert_eq!(result.unwrap(), "test-req-123");
 
-    // Verify the response was constructed and sent to Kafka successfully
     let responses = mock_spi.responses.lock().unwrap();
     assert_eq!(responses.len(), 1);
 
@@ -93,6 +124,44 @@ fn test_valid_initialization_pipeline() {
     assert_eq!(response.request_id, "test-req-123");
     assert!(response.dev_authorization_code.starts_with("dac_"));
     assert_eq!(response.state_jws.as_str(), "mocked.jws.signature");
+    assert_eq!(response.initial_hsm_key.kid, "initial-hsm-kid");
+    assert_eq!(response.initial_hsm_key.crv, "P-256");
+}
+
+#[test]
+fn test_initialization_fails_on_hsm_key_generation_error() {
+    let mock_spi = Arc::new(MockStateInitResponseSpi {
+        responses: Mutex::new(Vec::new()),
+        fail: false,
+    });
+
+    let mut mock_hsm = MockHsmSpiPort::new();
+    mock_hsm
+        .expect_generate_key()
+        .once()
+        .returning(|_, _| Err("HSM failure".into()));
+
+    let service = StateInitService::new(
+        mock_spi.clone(),
+        Arc::new(make_mock_jose()),
+        Arc::new(mock_hsm),
+        "wallet-hsm-key".to_string(),
+        "mock-opaque-id".to_string(),
+    );
+
+    let request = StateInitRequest {
+        request_id: "test-req-fail".to_string(),
+        public_key: create_valid_jwk(),
+        response_topic: "test-topic".to_string(),
+        initial_key_curve: Curve::P256,
+    };
+
+    let result = service.initialize(request);
+
+    assert!(matches!(result, Err(StateInitError::HsmKeyGenerationError)));
+
+    // Verify no response was sent
+    assert_eq!(mock_spi.responses.lock().unwrap().len(), 0);
 }
 
 #[test]
@@ -109,6 +178,8 @@ fn test_initialization_fails_on_signing_error() {
     let service = StateInitService::new(
         mock_spi.clone(),
         Arc::new(mock_jose),
+        Arc::new(make_succeeding_hsm()),
+        "wallet-hsm-key".to_string(),
         "mock-opaque-id".to_string(),
     );
 
@@ -116,6 +187,7 @@ fn test_initialization_fails_on_signing_error() {
         request_id: "test-req-123".to_string(),
         public_key: create_valid_jwk(),
         response_topic: "test-topic".to_string(),
+        initial_key_curve: Curve::P256,
     };
 
     let result = service.initialize(request);
@@ -134,19 +206,11 @@ fn test_initialization_fails_on_spi_send_error() {
         responses: Mutex::new(Vec::new()),
         fail: true,
     });
-    let mut mock_jose = MockJosePort::new();
-    mock_jose
-        .expect_jws_sign()
-        .returning(|_| Ok("mocked.jws.signature".to_string()));
-    mock_jose
-        .expect_jws_public_key()
-        .return_const(create_valid_jwk());
-    mock_jose
-        .expect_jws_kid()
-        .return_const("mock-kid".to_string());
     let service = StateInitService::new(
         mock_spi.clone(),
-        Arc::new(mock_jose),
+        Arc::new(make_mock_jose()),
+        Arc::new(make_succeeding_hsm()),
+        "wallet-hsm-key".to_string(),
         "mock-opaque-id".to_string(),
     );
 
@@ -154,6 +218,7 @@ fn test_initialization_fails_on_spi_send_error() {
         request_id: "test-req-123".to_string(),
         public_key: create_valid_jwk(),
         response_topic: "test-topic".to_string(),
+        initial_key_curve: Curve::P256,
     };
 
     let result = service.initialize(request);
@@ -184,6 +249,8 @@ fn test_strict_jwk_validation_rejection(
     let service = StateInitService::new(
         mock_spi.clone(),
         Arc::new(MockJosePort::new()),
+        Arc::new(MockHsmSpiPort::new()),
+        "wallet-hsm-key".to_string(),
         "mock-opaque-id".to_string(),
     );
 
@@ -197,6 +264,7 @@ fn test_strict_jwk_validation_rejection(
             kid: kid.to_string(),
         },
         response_topic: "test-topic".to_string(),
+        initial_key_curve: Curve::P256,
     };
 
     let result = service.initialize(request);

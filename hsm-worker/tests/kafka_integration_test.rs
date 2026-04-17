@@ -20,7 +20,8 @@ use hsm_worker::application::port::outgoing::state_init_response_spi_port::{
 use hsm_worker::application::{WorkerRequestUseCase, WorkerResponseSpiPort};
 use hsm_worker::domain::Status;
 use hsm_worker::domain::{
-    EcPublicJwk, HsmWorkerRequest, HsmWorkerResponse, StateInitRequest, StateInitResponse, TypedJws,
+    Curve, EcPublicJwk, HsmWorkerRequest, HsmWorkerResponse, StateInitRequest, StateInitResponse,
+    TypedJws,
 };
 use hsm_worker::infrastructure::KafkaConfig;
 use hsm_worker::infrastructure::adapters::incoming::r2ps_request_kafka_message_receiver::WorkerRequestKafkaReceiver;
@@ -162,6 +163,13 @@ async fn test_state_init_response_sender_produces_to_kafka() {
         },
         server_jws_kid: "test-server-kid".to_string(),
         opaque_server_id: "test-server-id".to_string(),
+        initial_hsm_key: EcPublicJwk {
+            kty: "EC".to_string(),
+            crv: "P-256".to_string(),
+            x: "hsm-x".to_string(),
+            y: "hsm-y".to_string(),
+            kid: "hsm-kid".to_string(),
+        },
     };
 
     sender.send(response, topic).expect("send failed");
@@ -271,9 +279,52 @@ async fn test_state_init_consumer_receives_and_processes() {
     let secret = SecretKey::random(&mut OsRng);
     let jose = Arc::new(JoseAdapter::new(secret).unwrap());
 
+    // Mock HSM that returns a dummy key for state init tests
+    use hsm_worker::application::port::outgoing::hsm_spi_port::HsmSpiPort as StateInitHsmSpiPort;
+    struct StateInitMockHsm;
+    impl StateInitHsmSpiPort for StateInitMockHsm {
+        fn generate_key(
+            &self,
+            _: &str,
+            _: &hsm_worker::domain::Curve,
+        ) -> Result<hsm_worker::domain::HsmKey, Box<dyn std::error::Error>> {
+            Ok(hsm_worker::domain::HsmKey {
+                wrapped_private_key: hsm_worker::domain::WrappedPrivateKey::new(vec![1, 2, 3]),
+                public_key_jwk: EcPublicJwk {
+                    kty: "EC".to_string(),
+                    crv: "P-256".to_string(),
+                    x: "mock-hsm-x".to_string(),
+                    y: "mock-hsm-y".to_string(),
+                    kid: "mock-hsm-kid".to_string(),
+                },
+                wrap_key_label: "test-wrap-key".to_string(),
+                created_at: chrono::Utc::now(),
+            })
+        }
+        fn sign(
+            &self,
+            _: &hsm_worker::domain::HsmKey,
+            _: &[u8],
+        ) -> Result<Vec<u8>, cryptoki::error::Error> {
+            unimplemented!()
+        }
+        fn derive_key(
+            &self,
+            _: &str,
+            _: &str,
+        ) -> Result<
+            hsm_worker::application::port::outgoing::hsm_spi_port::DerivedSecret,
+            cryptoki::error::Error,
+        > {
+            unimplemented!()
+        }
+    }
+
     let state_init_service = Arc::new(StateInitService::new(
         capturing_sink.clone() as Arc<dyn StateInitResponseSpiPort + Send + Sync>,
         jose,
+        Arc::new(StateInitMockHsm),
+        "wallet-hsm-key".to_string(),
         "test-server-id".to_string(),
     ));
 
@@ -309,6 +360,7 @@ async fn test_state_init_consumer_receives_and_processes() {
             kid: "test-device-kid".to_string(),
         },
         response_topic: "test-state-init-response-topic".to_string(),
+        initial_key_curve: Curve::P256,
     };
     let payload = serde_json::to_string(&request).unwrap();
 
@@ -450,7 +502,11 @@ async fn test_worker_kafka_round_trip() {
         pake: Arc::new(NoOpPake),
         hsm: Arc::new(NoOpHsm),
     };
-    let worker_service = Arc::new(WorkerService::new(ports, false));
+    let worker_service = Arc::new(WorkerService::new(
+        ports,
+        "wallet-hsm-key".to_string(),
+        false,
+    ));
 
     let running = Arc::new(AtomicBool::new(true));
     let receiver = WorkerRequestKafkaReceiver::new(

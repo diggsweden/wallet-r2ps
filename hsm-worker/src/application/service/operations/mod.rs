@@ -105,6 +105,7 @@ impl OperationDispatcher {
     pub fn from_dependencies(
         pake_port: Arc<dyn PakePort>,
         hsm_spi_port: Arc<dyn HsmSpiPort + Send + Sync>,
+        hsm_key_label: String,
     ) -> Self {
         Self {
             authenticate_start_op: AuthenticateStartOperation::new(pake_port.clone()),
@@ -114,7 +115,7 @@ impl OperationDispatcher {
             pin_change_start_op: PinChangeStartOperation::new(pake_port.clone()),
             pin_change_finish_op: PinChangeFinishOperation::new(pake_port),
             hsm_ecdsa_op: HsmSignOperation::new(hsm_spi_port.clone()),
-            hsm_keygen_op: HsmGenerateKeyOperation::new(hsm_spi_port.clone()),
+            hsm_keygen_op: HsmGenerateKeyOperation::new(hsm_spi_port.clone(), hsm_key_label),
             hsm_delete_key_op: HsmDeleteKeyOperation,
             hsm_list_keys_op: HsmListKeysOperation,
             session_end_op: SessionEndOperation,

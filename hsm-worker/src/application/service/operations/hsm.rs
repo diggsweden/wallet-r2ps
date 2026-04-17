@@ -68,11 +68,15 @@ impl ServiceOperation for HsmSignOperation {
 
 pub struct HsmGenerateKeyOperation {
     hsm_spi_port: Arc<dyn HsmSpiPort + Send + Sync>,
+    hsm_key_label: String,
 }
 
 impl HsmGenerateKeyOperation {
-    pub fn new(hsm_spi_port: Arc<dyn HsmSpiPort + Send + Sync>) -> Self {
-        Self { hsm_spi_port }
+    pub fn new(hsm_spi_port: Arc<dyn HsmSpiPort + Send + Sync>, hsm_key_label: String) -> Self {
+        Self {
+            hsm_spi_port,
+            hsm_key_label,
+        }
     }
 }
 
@@ -94,7 +98,7 @@ impl ServiceOperation for HsmGenerateKeyOperation {
 
         let hsm_key = self
             .hsm_spi_port
-            .generate_key("foobar", &payload.curve)
+            .generate_key(&self.hsm_key_label, &payload.curve)
             .map_err(|_| ServiceRequestError::Unknown)?;
 
         let mut new_state = context.state;

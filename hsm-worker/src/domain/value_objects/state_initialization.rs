@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 
 use crate::domain::{DeviceHsmState, EcPublicJwk};
-use hsm_common::TypedJws;
+use hsm_common::{Curve, TypedJws};
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "openapi")]
 use utoipa::ToSchema;
@@ -19,6 +19,8 @@ pub struct StateInitRequest {
     pub public_key: EcPublicJwk,
     /// Kafka topic the worker should send its response to
     pub response_topic: String,
+    /// Curve used to generate the initial HSM key during state initialization.
+    pub initial_key_curve: Curve,
 }
 
 /// Response containing the newly created device state and a one-time authorization code.
@@ -41,4 +43,6 @@ pub struct StateInitResponse {
     pub server_jws_kid: String,
     /// OPAQUE server identifier used during registration (must match on authenticate)
     pub opaque_server_id: String,
+    /// Public key of the initial HSM key generated during state initialization.
+    pub initial_hsm_key: EcPublicJwk,
 }

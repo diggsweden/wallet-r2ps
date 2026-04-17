@@ -18,7 +18,11 @@ use std::sync::Arc;
 fn setup_worker_service() -> (WorkerService, Arc<MockWorkerResponseSpi>) {
     let (jose, _) = super::setup_crypto();
     let worker_response_spi = MockWorkerResponseSpi::new();
-    let service = WorkerService::new(make_ports(jose, worker_response_spi.clone()), true);
+    let service = WorkerService::new(
+        make_ports(jose, worker_response_spi.clone()),
+        "wallet-hsm-key".to_string(),
+        true,
+    );
     (service, worker_response_spi)
 }
 
@@ -60,7 +64,11 @@ fn test_execute_sends_error_response_when_decode_fails() {
 #[test]
 fn test_execute_returns_connection_error_when_response_send_fails() {
     let (jose, _) = super::setup_crypto();
-    let service = WorkerService::new(make_ports(jose, Arc::new(FailingWorkerResponseSpi)), true);
+    let service = WorkerService::new(
+        make_ports(jose, Arc::new(FailingWorkerResponseSpi)),
+        "wallet-hsm-key".to_string(),
+        true,
+    );
 
     let request = HsmWorkerRequest {
         request_id: "send-fails".to_string(),
@@ -84,7 +92,11 @@ fn test_execute_returns_response_build_error_when_error_response_signing_fails()
         true,
     );
     let mock_response_port = MockWorkerResponseSpi::new();
-    let service = WorkerService::new(make_ports(jose, mock_response_port.clone()), true);
+    let service = WorkerService::new(
+        make_ports(jose, mock_response_port.clone()),
+        "wallet-hsm-key".to_string(),
+        true,
+    );
 
     let result = service.execute(make_request("response-build-fails"));
 
@@ -138,7 +150,7 @@ fn test_execute_returns_internal_server_error_response_when_transition_fails() {
             Arc::new(mock)
         },
     };
-    let service = WorkerService::new(ports, true);
+    let service = WorkerService::new(ports, "wallet-hsm-key".to_string(), true);
 
     let result = service.execute(make_request("transition-fails"));
 

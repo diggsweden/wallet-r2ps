@@ -17,7 +17,7 @@ use crate::application::port::outgoing::{
     DeviceStatePort, RequestSenderPort, StateInitCorrelationPort, StateInitSenderPort,
 };
 use crate::domain::{
-    AsyncResponseDto, AsyncResponseStatus, BffRequest, CachedResponse, DEFAULT_TTL_SECONDS,
+    AsyncResponseDto, AsyncResponseStatus, BffRequest, CachedResponse, Curve, DEFAULT_TTL_SECONDS,
     HsmWorkerRequest, NewStateRequestDto, NewStateResponseDto, ProblemDetail, StateInitRequest,
     TypedJws,
 };
@@ -34,6 +34,7 @@ pub struct AppState {
     pub sync_timeout_ms: u64,
     pub state_init_timeout_ms: u64,
     pub response_events_template_url: String,
+    pub default_initial_key_curve: Curve,
 }
 
 impl AppState {
@@ -326,6 +327,9 @@ pub async fn create_state(
         public_key: req.public_key,
         // response_topic is injected by the Kafka sender
         response_topic: String::new(),
+        initial_key_curve: req
+            .initial_key_curve
+            .unwrap_or(state.default_initial_key_curve),
     };
 
     if let Err(e) = state

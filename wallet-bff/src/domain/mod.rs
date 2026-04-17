@@ -8,7 +8,7 @@ use uuid::Uuid;
 // Re-export shared protocol types used for Kafka ser/de
 pub use hsm_common::types::TypedJws;
 pub use hsm_common::{
-    EcPublicJwk, HsmWorkerRequest, HsmWorkerResponse, OuterRequest, OuterResponse,
+    Curve, EcPublicJwk, HsmWorkerRequest, HsmWorkerResponse, OuterRequest, OuterResponse,
     StateInitRequest, StateInitResponse, Status,
 };
 
@@ -53,6 +53,8 @@ pub struct NewStateRequestDto {
     #[serde(default)]
     pub overwrite: bool,
     pub ttl: Option<String>,
+    #[serde(default)]
+    pub initial_key_curve: Option<Curve>,
 }
 
 /// Response body for POST /new_state.

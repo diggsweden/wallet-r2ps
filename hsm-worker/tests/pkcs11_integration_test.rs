@@ -40,7 +40,7 @@ fn get_hsm() -> &'static Mutex<HsmWrapper> {
 #[ignore]
 fn gen_ecc_key() -> Result<(), Box<dyn std::error::Error>> {
     let hsm_wrapper = get_hsm().lock()?;
-    let result = hsm_wrapper.generate_key("foobar", &Curve::P256)?;
+    let result = hsm_wrapper.generate_key("wallet-hsm-key", &Curve::P256)?;
     println!("{:?}", result);
 
     Ok(())
@@ -50,8 +50,8 @@ fn gen_ecc_key() -> Result<(), Box<dyn std::error::Error>> {
 #[ignore]
 fn gen_ecc_key_wrap_unwrap_sign() -> Result<(), Box<dyn std::error::Error>> {
     let hsm_wrapper = get_hsm().lock()?;
-    let message = "foobar";
-    let hsm_key = hsm_wrapper.generate_key(message, &Curve::P256)?;
+    let message = "test-message";
+    let hsm_key = hsm_wrapper.generate_key("wallet-hsm-key", &Curve::P256)?;
     let digest = Sha256::digest(message);
     let signature = hsm_wrapper.sign(&hsm_key, &digest);
 

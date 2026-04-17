@@ -14,7 +14,7 @@ use wallet_bff::application::port::outgoing::{
     DeviceStatePort, NoncePort, RequestSenderPort, StateInitCorrelationPort, StateInitSenderPort,
 };
 use wallet_bff::domain::{
-    CachedResponse, HsmWorkerRequest, HsmWorkerResponse, OuterResponse, StateInitRequest,
+    CachedResponse, Curve, HsmWorkerRequest, HsmWorkerResponse, OuterResponse, StateInitRequest,
     StateInitResponse, Status, TypedJws,
 };
 use wallet_bff::infrastructure::adapters::incoming::web;
@@ -176,6 +176,7 @@ fn make_test_app(cfg: TestAppConfig) -> TestContext {
         sync_timeout_ms: cfg.sync_timeout_ms,
         state_init_timeout_ms: cfg.state_init_timeout_ms,
         response_events_template_url: "http://localhost/hsm/v1/requests/%s".to_string(),
+        default_initial_key_curve: Curve::P256,
     });
 
     let rp_state = Arc::new(ReplayProtectionState {
@@ -218,6 +219,7 @@ fn ok_state_init_response() -> StateInitResponse {
         server_jws_public_key: None,
         server_jws_kid: None,
         opaque_server_id: None,
+        initial_hsm_key: None,
     }
 }
 

@@ -393,7 +393,7 @@ fn make_fixture_with_hsm_keys(
         worker_response: response_sink.clone(),
         pake,
     };
-    let service = WorkerService::new(ports, false);
+    let service = WorkerService::new(ports, "wallet-hsm-key".to_string(), false);
 
     TestFixture {
         service,
