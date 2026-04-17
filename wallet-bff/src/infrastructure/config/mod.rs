@@ -5,6 +5,10 @@
 use config::{Config, ConfigError, Environment};
 use serde::Deserialize;
 
+pub fn today_yyyymmdd() -> String {
+    chrono::Utc::now().format("%Y%m%d").to_string()
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct AppConfig {
     /// Kafka bootstrap servers (comma-separated)
@@ -42,8 +46,28 @@ pub struct AppConfig {
     pub nonce_ttl_seconds: u64,
     /// URL template for the polling endpoint (%s = correlationId)
     pub response_events_template_url: String,
-    /// Unique identifier for this BFF instance; used to name per-instance Kafka topics.
+    /// Unique identifier for this BFF instance; used to name per-instance Kafka topics
+    /// (`hsm-worker-responses-{id}-{YYYYMMDD}`, `state-init-responses-{id}-{YYYYMMDD}`).
+    ///
     /// Override with BFF_INSTANCE_ID env var; defaults to a random UUID.
+    ///
+    /// In production (e.g. Kubernetes), set this to a stable, unique value such as the
+    /// pod name via the downward API:
+    ///   env:
+    ///     - name: BFF_INSTANCE_ID
+    ///       valueFrom:
+    ///         fieldRef:
+    ///           fieldPath: metadata.name
+    ///
+    /// On startup, each instance deletes empty per-instance topics older than today,
+    /// bounding orphaned topic accumulation to one pair per calendar day.
+    /// Each live instance also publishes a periodic heartbeat to its topics; once a
+    /// dead instance's heartbeats have expired via `retention.ms`, the topics become
+    /// empty and are cleaned up by the next startup.
+    ///
+    /// **Midnight race**: a pod started at 23:59:xx whose topics are deleted by a
+    /// concurrent cleanup crossing into the new day will detect the failure on its
+    /// first heartbeat, recreate the topics with the new date, and continue normally.
     pub bff_instance_id: String,
 }
 
@@ -76,11 +100,19 @@ impl AppConfig {
     }
 
     pub fn hsm_worker_response_topic(&self) -> String {
-        format!("hsm-worker-responses-{}", self.bff_instance_id)
+        format!(
+            "hsm-worker-responses-{}-{}",
+            self.bff_instance_id,
+            today_yyyymmdd()
+        )
     }
 
     pub fn state_init_response_topic(&self) -> String {
-        format!("state-init-responses-{}", self.bff_instance_id)
+        format!(
+            "state-init-responses-{}-{}",
+            self.bff_instance_id,
+            today_yyyymmdd()
+        )
     }
 
     pub fn redis_url(&self) -> String {

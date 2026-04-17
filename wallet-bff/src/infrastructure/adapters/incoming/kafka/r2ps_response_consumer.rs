@@ -35,19 +35,23 @@ pub fn start(
         .expect("Failed to subscribe to hsm-worker response topic");
 
     info!("Starting hsm-worker response consumer on topic: {}", topic);
+    let topic = topic.to_string();
 
     tokio::spawn(async move {
         loop {
             match consumer.recv().await {
                 Ok(msg) => {
+                    if msg.key() == Some(super::HEARTBEAT_KEY) {
+                        continue;
+                    }
                     let Some(payload) = msg.payload() else {
                         continue;
                     };
                     match serde_json::from_slice::<HsmWorkerResponse>(payload) {
                         Ok(response) => {
                             info!(
-                                "Received worker response for requestId: {}",
-                                response.request_id
+                                "Received worker response for requestId: {} on topic: {}",
+                                response.request_id, topic
                             );
                             response_use_case.response_ready(response);
                         }

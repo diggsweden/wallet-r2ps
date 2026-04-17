@@ -35,11 +35,15 @@ pub fn start(
         .expect("Failed to subscribe to state-init response topic");
 
     info!("Starting state-init response consumer on topic: {}", topic);
+    let topic = topic.to_string();
 
     tokio::spawn(async move {
         loop {
             match consumer.recv().await {
                 Ok(msg) => {
+                    if msg.key() == Some(super::HEARTBEAT_KEY) {
+                        continue;
+                    }
                     let Some(payload) = msg.payload() else {
                         continue;
                     };
@@ -56,8 +60,8 @@ pub fn start(
                     };
 
                     info!(
-                        "Received state-init response for requestId: {}",
-                        response.request_id
+                        "Received state-init response for requestId: {} on topic: {}",
+                        response.request_id, topic
                     );
 
                     correlation_port.response_received(response).await;
