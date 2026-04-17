@@ -15,10 +15,15 @@ const STATE_INIT_REQUESTS_TOPIC: &str = "state-init-requests";
 
 pub struct KafkaRequestSender {
     producer: FutureProducer,
+    response_topic: String,
 }
 
 impl KafkaRequestSender {
-    pub fn new(bootstrap_servers: &str, broker_address_family: &str) -> Self {
+    pub fn new(
+        bootstrap_servers: &str,
+        broker_address_family: &str,
+        response_topic: String,
+    ) -> Self {
         let producer: FutureProducer = ClientConfig::new()
             .set("bootstrap.servers", bootstrap_servers)
             .set("broker.address.family", broker_address_family)
@@ -27,14 +32,19 @@ impl KafkaRequestSender {
             .create()
             .expect("Failed to create Kafka producer");
 
-        Self { producer }
+        Self {
+            producer,
+            response_topic,
+        }
     }
 }
 
 #[async_trait::async_trait]
 impl RequestSenderPort for KafkaRequestSender {
     async fn send(&self, request: &HsmWorkerRequest, device_id: &str) -> Result<(), String> {
-        let payload = serde_json::to_string(request).map_err(|e| e.to_string())?;
+        let mut req = request.clone();
+        req.response_topic = self.response_topic.clone();
+        let payload = serde_json::to_string(&req).map_err(|e| e.to_string())?;
         self.producer
             .send(
                 FutureRecord::to(R2PS_REQUESTS_TOPIC)
@@ -53,10 +63,15 @@ impl RequestSenderPort for KafkaRequestSender {
 
 pub struct KafkaStateInitSender {
     producer: FutureProducer,
+    response_topic: String,
 }
 
 impl KafkaStateInitSender {
-    pub fn new(bootstrap_servers: &str, broker_address_family: &str) -> Self {
+    pub fn new(
+        bootstrap_servers: &str,
+        broker_address_family: &str,
+        response_topic: String,
+    ) -> Self {
         let producer: FutureProducer = ClientConfig::new()
             .set("bootstrap.servers", bootstrap_servers)
             .set("broker.address.family", broker_address_family)
@@ -65,14 +80,19 @@ impl KafkaStateInitSender {
             .create()
             .expect("Failed to create Kafka state-init producer");
 
-        Self { producer }
+        Self {
+            producer,
+            response_topic,
+        }
     }
 }
 
 #[async_trait::async_trait]
 impl StateInitSenderPort for KafkaStateInitSender {
     async fn send(&self, request: &StateInitRequest, device_id: &str) -> Result<(), String> {
-        let payload = serde_json::to_string(request).map_err(|e| e.to_string())?;
+        let mut req = request.clone();
+        req.response_topic = self.response_topic.clone();
+        let payload = serde_json::to_string(&req).map_err(|e| e.to_string())?;
         self.producer
             .send(
                 FutureRecord::to(STATE_INIT_REQUESTS_TOPIC)

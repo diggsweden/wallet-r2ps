@@ -11,10 +11,14 @@ use tracing::{error, info};
 use crate::application::port::incoming::ResponseUseCase;
 use crate::domain::HsmWorkerResponse;
 
-const R2PS_RESPONSES_TOPIC: &str = "r2ps-responses";
-
-/// Starts a background task that consumes from r2ps-responses and calls the response use case.
-pub fn start(bootstrap_servers: &str, group_id: &str, response_use_case: Arc<dyn ResponseUseCase>) {
+/// Starts a background task that consumes from the per-instance response topic
+/// and calls the response use case.
+pub fn start(
+    bootstrap_servers: &str,
+    group_id: &str,
+    topic: &str,
+    response_use_case: Arc<dyn ResponseUseCase>,
+) {
     let consumer: StreamConsumer = ClientConfig::new()
         .set("bootstrap.servers", bootstrap_servers)
         .set("group.id", group_id)
@@ -24,13 +28,13 @@ pub fn start(bootstrap_servers: &str, group_id: &str, response_use_case: Arc<dyn
         .set("heartbeat.interval.ms", "2000")
         .set("partition.assignment.strategy", "cooperative-sticky")
         .create()
-        .expect("Failed to create r2ps-responses consumer");
+        .expect("Failed to create hsm-worker response consumer");
 
     consumer
-        .subscribe(&[R2PS_RESPONSES_TOPIC])
-        .expect("Failed to subscribe to r2ps-responses");
+        .subscribe(&[topic])
+        .expect("Failed to subscribe to hsm-worker response topic");
 
-    info!("Starting r2ps-responses consumer");
+    info!("Starting hsm-worker response consumer on topic: {}", topic);
 
     tokio::spawn(async move {
         loop {
@@ -45,7 +49,7 @@ pub fn start(bootstrap_servers: &str, group_id: &str, response_use_case: Arc<dyn
                                 "Received worker response for requestId: {}",
                                 response.request_id
                             );
-                            response_use_case.response_ready(response).await;
+                            response_use_case.response_ready(response);
                         }
                         Err(e) => {
                             error!(
@@ -57,7 +61,7 @@ pub fn start(bootstrap_servers: &str, group_id: &str, response_use_case: Arc<dyn
                     }
                 }
                 Err(e) => {
-                    error!("Kafka consumer error on r2ps-responses: {}", e);
+                    error!("Kafka consumer error on hsm-worker response topic: {}", e);
                 }
             }
         }

@@ -20,7 +20,11 @@ struct MockStateInitResponseSpi {
 }
 
 impl StateInitResponseSpiPort for MockStateInitResponseSpi {
-    fn send(&self, response: StateInitResponse) -> Result<(), StateInitResponseError> {
+    fn send(
+        &self,
+        response: StateInitResponse,
+        _response_topic: &str,
+    ) -> Result<(), StateInitResponseError> {
         if self.fail {
             return Err(StateInitResponseError::ConnectionError);
         }
@@ -72,6 +76,7 @@ fn test_valid_initialization_pipeline() {
     let request = StateInitRequest {
         request_id: "test-req-123".to_string(),
         public_key: create_valid_jwk(),
+        response_topic: "test-topic".to_string(),
     };
 
     // Execute the service
@@ -110,6 +115,7 @@ fn test_initialization_fails_on_signing_error() {
     let request = StateInitRequest {
         request_id: "test-req-123".to_string(),
         public_key: create_valid_jwk(),
+        response_topic: "test-topic".to_string(),
     };
 
     let result = service.initialize(request);
@@ -147,6 +153,7 @@ fn test_initialization_fails_on_spi_send_error() {
     let request = StateInitRequest {
         request_id: "test-req-123".to_string(),
         public_key: create_valid_jwk(),
+        response_topic: "test-topic".to_string(),
     };
 
     let result = service.initialize(request);
@@ -189,6 +196,7 @@ fn test_strict_jwk_validation_rejection(
             y: y.to_string(),
             kid: kid.to_string(),
         },
+        response_topic: "test-topic".to_string(),
     };
 
     let result = service.initialize(request);

@@ -72,6 +72,7 @@ impl WorkerRequestUseCase for WorkerService {
     ) -> Result<WorkerRequestId, WorkerRequestError> {
         let start = Instant::now();
         let request_id = hsm_worker_request.request_id.clone();
+        let response_topic = hsm_worker_request.response_topic.clone();
 
         let response = match self.process_request(hsm_worker_request) {
             Ok(res) => res,
@@ -94,7 +95,7 @@ impl WorkerRequestUseCase for WorkerService {
         };
 
         self.worker_response_spi_port
-            .send(response)
+            .send(response, &response_topic)
             .map_err(|_| WorkerRequestError::ConnectionError)?;
 
         info!(

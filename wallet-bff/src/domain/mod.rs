@@ -12,16 +12,8 @@ pub use hsm_common::{
     StateInitRequest, StateInitResponse, Status,
 };
 
-/// Pending request metadata stored in Redis.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PendingRequestContext {
-    pub state_key: String,
-    pub ttl_seconds: u64,
-}
-
-/// Cached worker response stored in Redis for polling.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Cached worker response stored in memory for polling.
+#[derive(Debug, Clone)]
 pub struct CachedResponse {
     pub request_id: String,
     pub state_jws: Option<String>,

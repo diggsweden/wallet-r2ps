@@ -28,6 +28,7 @@ services:
       SERVE_SYNC: "true"
       SYNC_TIMEOUT_MS: 3000
       RESPONSE_TTL_SECONDS: 600
+      BFF_INSTANCE_ID: "bff-1"
       RUST_LOG: "wallet_bff=info,rdkafka=warn,redis=warn"
     networks:
       - wallet-network

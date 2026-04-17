@@ -84,7 +84,11 @@ impl CapturingStateInitResponseSink {
 }
 
 impl StateInitResponseSpiPort for CapturingStateInitResponseSink {
-    fn send(&self, response: StateInitResponse) -> Result<(), StateInitResponseError> {
+    fn send(
+        &self,
+        response: StateInitResponse,
+        _response_topic: &str,
+    ) -> Result<(), StateInitResponseError> {
         self.responses.lock().unwrap().push(response);
         Ok(())
     }
@@ -97,6 +101,7 @@ impl StateInitResponseSpiPort for CapturingStateInitResponseSink {
 async fn test_worker_response_sender_produces_to_kafka() {
     let (_container, bootstrap) = start_kafka().await;
     let config = make_kafka_config(&bootstrap);
+    let topic = "test-response-topic";
 
     let sender = WorkerResponseKafkaSender::new(&config);
     let response = HsmWorkerResponse {
@@ -107,7 +112,7 @@ async fn test_worker_response_sender_produces_to_kafka() {
         error_message: None,
     };
 
-    sender.send(response).expect("send failed");
+    sender.send(response, topic).expect("send failed");
 
     // Consume and verify
     let consumer: BaseConsumer = ClientConfig::new()
@@ -117,7 +122,7 @@ async fn test_worker_response_sender_produces_to_kafka() {
         .create()
         .expect("consumer creation failed");
 
-    consumer.subscribe(&["r2ps-responses"]).unwrap();
+    consumer.subscribe(&[topic]).unwrap();
 
     let deadline = std::time::Instant::now() + Duration::from_secs(30);
     loop {
@@ -140,6 +145,7 @@ async fn test_worker_response_sender_produces_to_kafka() {
 async fn test_state_init_response_sender_produces_to_kafka() {
     let (_container, bootstrap) = start_kafka().await;
     let config = make_kafka_config(&bootstrap);
+    let topic = "test-state-init-response-topic";
 
     let sender = StateInitResponseKafkaMessageSender::new(&config);
     let response = StateInitResponse {
@@ -157,7 +163,7 @@ async fn test_state_init_response_sender_produces_to_kafka() {
         opaque_server_id: "test-server-id".to_string(),
     };
 
-    sender.send(response).expect("send failed");
+    sender.send(response, topic).expect("send failed");
 
     let consumer: BaseConsumer = ClientConfig::new()
         .set("bootstrap.servers", &bootstrap)
@@ -166,7 +172,7 @@ async fn test_state_init_response_sender_produces_to_kafka() {
         .create()
         .expect("consumer creation failed");
 
-    consumer.subscribe(&["state-init-responses"]).unwrap();
+    consumer.subscribe(&[topic]).unwrap();
 
     let deadline = std::time::Instant::now() + Duration::from_secs(30);
     loop {
@@ -215,6 +221,7 @@ async fn test_worker_consumer_receives_and_calls_use_case() {
         request_id: "req-301".to_string(),
         state_jws: TypedJws::new("state-jws-value".to_string()),
         outer_request_jws: TypedJws::new("outer-jws-value".to_string()),
+        response_topic: "test-response-topic".to_string(),
     };
     let payload = serde_json::to_string(&request).unwrap();
 
@@ -300,6 +307,7 @@ async fn test_state_init_consumer_receives_and_processes() {
             y: BASE64_URL_SAFE_NO_PAD.encode(ec_point.y().unwrap()),
             kid: "test-device-kid".to_string(),
         },
+        response_topic: "test-state-init-response-topic".to_string(),
     };
     let payload = serde_json::to_string(&request).unwrap();
 
@@ -535,6 +543,7 @@ async fn test_worker_kafka_round_trip() {
         request_id: "req-501".to_string(),
         state_jws,
         outer_request_jws: TypedJws::new(outer_request_jws),
+        response_topic: "test-response-topic".to_string(),
     };
     let request_payload = serde_json::to_string(&request).unwrap();
 

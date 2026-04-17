@@ -31,6 +31,7 @@ fn test_execute_sends_error_response_when_decode_fails() {
         request_id: "someRequest".to_string(),
         state_jws: TypedJws::new("invalid.state".to_string()),
         outer_request_jws: TypedJws::new("invalid.outer".to_string()),
+        response_topic: "test-topic".to_string(),
     };
 
     let result = service.execute(request);
@@ -65,6 +66,7 @@ fn test_execute_returns_connection_error_when_response_send_fails() {
         request_id: "send-fails".to_string(),
         state_jws: TypedJws::new("invalid.state".to_string()),
         outer_request_jws: TypedJws::new("invalid.outer".to_string()),
+        response_topic: "test-topic".to_string(),
     };
 
     let result = service.execute(request);

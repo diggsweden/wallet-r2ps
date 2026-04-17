@@ -124,7 +124,11 @@ impl MockWorkerResponseSpi {
     }
 }
 impl WorkerResponseSpiPort for MockWorkerResponseSpi {
-    fn send(&self, worker_response: HsmWorkerResponse) -> Result<(), WorkerResponseError> {
+    fn send(
+        &self,
+        worker_response: HsmWorkerResponse,
+        _response_topic: &str,
+    ) -> Result<(), WorkerResponseError> {
         self.responses.lock().unwrap().push(worker_response);
         Ok(())
     }
@@ -132,7 +136,11 @@ impl WorkerResponseSpiPort for MockWorkerResponseSpi {
 
 pub struct FailingWorkerResponseSpi;
 impl WorkerResponseSpiPort for FailingWorkerResponseSpi {
-    fn send(&self, _worker_response: HsmWorkerResponse) -> Result<(), WorkerResponseError> {
+    fn send(
+        &self,
+        _worker_response: HsmWorkerResponse,
+        _response_topic: &str,
+    ) -> Result<(), WorkerResponseError> {
         Err(WorkerResponseError::ConnectionError)
     }
 }
@@ -201,6 +209,7 @@ pub fn make_request(request_id: &str) -> HsmWorkerRequest {
         request_id: request_id.to_string(),
         state_jws: TypedJws::new("state.jws".to_string()),
         outer_request_jws: TypedJws::new("outer.jws".to_string()),
+        response_topic: "test-response-topic".to_string(),
     }
 }
 

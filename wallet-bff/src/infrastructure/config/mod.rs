@@ -42,6 +42,9 @@ pub struct AppConfig {
     pub nonce_ttl_seconds: u64,
     /// URL template for the polling endpoint (%s = correlationId)
     pub response_events_template_url: String,
+    /// Unique identifier for this BFF instance; used to name per-instance Kafka topics.
+    /// Override with BFF_INSTANCE_ID env var; defaults to a random UUID.
+    pub bff_instance_id: String,
 }
 
 impl AppConfig {
@@ -66,9 +69,18 @@ impl AppConfig {
                 "response_events_template_url",
                 "http://localhost:8088/hsm/v1/requests/%s",
             )?
+            .set_default("bff_instance_id", uuid::Uuid::new_v4().to_string())?
             .add_source(Environment::default())
             .build()?
             .try_deserialize()
+    }
+
+    pub fn hsm_worker_response_topic(&self) -> String {
+        format!("hsm-worker-responses-{}", self.bff_instance_id)
+    }
+
+    pub fn state_init_response_topic(&self) -> String {
+        format!("state-init-responses-{}", self.bff_instance_id)
     }
 
     pub fn redis_url(&self) -> String {

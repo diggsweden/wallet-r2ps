@@ -3,76 +3,70 @@
 // SPDX-License-Identifier: EUPL-1.2
 
 use std::collections::HashMap;
-use std::sync::Arc;
-use std::time::Duration;
-use tokio::sync::Mutex;
+use std::sync::{Arc, Mutex};
+use tokio::sync::oneshot;
 use tracing::warn;
 
-use crate::application::port::outgoing::StateInitCachePort;
+use crate::application::port::outgoing::{DeviceStatePort, StateInitCorrelationPort};
 use crate::domain::StateInitResponse;
 
-/// In-memory cache for state-init responses, shared between the consumer thread
-/// and the HTTP request handler that polls for the result.
-pub struct StateInitResponseCache {
-    inner: Arc<Mutex<HashMap<String, StateInitResponse>>>,
+struct StateInitPending {
+    state_key: String,
+    ttl_seconds: u64,
+    tx: oneshot::Sender<StateInitResponse>,
 }
 
-impl Default for StateInitResponseCache {
-    fn default() -> Self {
-        Self::new()
-    }
+pub struct StateInitCorrelationService {
+    pending: Mutex<HashMap<String, StateInitPending>>,
+    device_state_port: Arc<dyn DeviceStatePort>,
 }
 
-impl StateInitResponseCache {
-    pub fn new() -> Self {
+impl StateInitCorrelationService {
+    pub fn new(device_state_port: Arc<dyn DeviceStatePort>) -> Self {
         Self {
-            inner: Arc::new(Mutex::new(HashMap::new())),
-        }
-    }
-
-    // Inherent method — called directly by the Kafka consumer.
-    pub async fn put(&self, request_id: String, response: StateInitResponse) {
-        self.inner.lock().await.insert(request_id, response);
-    }
-
-    /// Polls every 50 ms until the response for `request_id` appears or `timeout` elapses.
-    /// Also available via the `StateInitCachePort` trait.
-    pub async fn wait_for_response(
-        &self,
-        request_id: &str,
-        timeout: Duration,
-    ) -> Option<StateInitResponse> {
-        let deadline = tokio::time::Instant::now() + timeout;
-        loop {
-            {
-                let mut map = self.inner.lock().await;
-                if let Some(resp) = map.remove(request_id) {
-                    return Some(resp);
-                }
-            }
-            if tokio::time::Instant::now() >= deadline {
-                warn!(
-                    "Timeout waiting for state-init response for requestId: {}",
-                    request_id
-                );
-                return None;
-            }
-            tokio::time::sleep(Duration::from_millis(50)).await;
+            pending: Mutex::new(HashMap::new()),
+            device_state_port,
         }
     }
 }
 
 #[async_trait::async_trait]
-impl StateInitCachePort for StateInitResponseCache {
-    async fn wait_for_response(
+impl StateInitCorrelationPort for StateInitCorrelationService {
+    async fn register_pending(
         &self,
         request_id: &str,
-        timeout: Duration,
-    ) -> Option<StateInitResponse> {
-        self.wait_for_response(request_id, timeout).await
+        state_key: &str,
+        ttl_seconds: u64,
+    ) -> oneshot::Receiver<StateInitResponse> {
+        let (tx, rx) = oneshot::channel();
+        self.pending.lock().unwrap().insert(
+            request_id.to_string(),
+            StateInitPending {
+                state_key: state_key.to_string(),
+                ttl_seconds,
+                tx,
+            },
+        );
+        rx
     }
 
-    async fn put(&self, request_id: String, response: StateInitResponse) {
-        self.put(request_id, response).await
+    async fn response_received(&self, response: StateInitResponse) {
+        let entry = self.pending.lock().unwrap().remove(&response.request_id);
+
+        let Some(e) = entry else {
+            warn!(
+                "No pending context for state-init requestId: {}, ignoring",
+                response.request_id
+            );
+            return;
+        };
+
+        // Save device state before notifying the waiter.
+        self.device_state_port
+            .save(&e.state_key, &response.state_jws, e.ttl_seconds)
+            .await;
+
+        // Ignore send error: HTTP handler may have already timed out.
+        let _ = e.tx.send(response);
     }
 }

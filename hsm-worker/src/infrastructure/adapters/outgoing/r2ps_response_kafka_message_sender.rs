@@ -28,12 +28,16 @@ impl WorkerResponseKafkaSender {
 }
 
 impl WorkerResponseSpiPort for WorkerResponseKafkaSender {
-    fn send(&self, worker_response: HsmWorkerResponse) -> Result<(), WorkerResponseError> {
+    fn send(
+        &self,
+        worker_response: HsmWorkerResponse,
+        response_topic: &str,
+    ) -> Result<(), WorkerResponseError> {
         let response = match serde_json::to_string(&worker_response) {
             Ok(output_json) => {
                 let key = &worker_response.request_id;
                 let request_id = &worker_response.request_id;
-                let record = BaseRecord::to("r2ps-responses")
+                let record = BaseRecord::to(response_topic)
                     .key(key)
                     .payload(&output_json);
 

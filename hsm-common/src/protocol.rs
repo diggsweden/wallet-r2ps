@@ -229,6 +229,8 @@ pub struct HsmWorkerRequest {
     pub state_jws: String,
     /// JWS-encoded OuterRequest (compact serialization)
     pub outer_request_jws: TypedJws<OuterRequest>,
+    /// Kafka topic the hsm-worker should send its response to
+    pub response_topic: String,
 }
 
 /// Worker response sent via Kafka (wire format).
@@ -252,6 +254,8 @@ pub struct HsmWorkerResponse {
 pub struct StateInitRequest {
     pub request_id: String,
     pub public_key: EcPublicJwk,
+    /// Kafka topic the hsm-worker should send its response to
+    pub response_topic: String,
 }
 
 /// State initialisation response received from Kafka.

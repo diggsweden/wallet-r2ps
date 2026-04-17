@@ -2,11 +2,9 @@
 //
 // SPDX-License-Identifier: EUPL-1.2
 
-use std::time::Duration;
+use tokio::sync::oneshot;
 
-use crate::domain::{
-    CachedResponse, HsmWorkerRequest, PendingRequestContext, StateInitRequest, StateInitResponse,
-};
+use crate::domain::{HsmWorkerRequest, StateInitRequest, StateInitResponse};
 
 /// SPI port: load and save device state (JWS) in the state store.
 #[async_trait::async_trait]
@@ -15,30 +13,16 @@ pub trait DeviceStatePort: Send + Sync {
     async fn load(&self, key: &str) -> Option<String>;
 }
 
-/// SPI port: send worker requests to r2ps-requests.
+/// SPI port: send worker requests to the hsm-worker request topic.
 #[async_trait::async_trait]
 pub trait RequestSenderPort: Send + Sync {
     async fn send(&self, request: &HsmWorkerRequest, device_id: &str) -> Result<(), String>;
 }
 
-/// SPI port: send state-init requests to state-init-requests.
+/// SPI port: send state-init requests to the hsm-worker state-init topic.
 #[async_trait::async_trait]
 pub trait StateInitSenderPort: Send + Sync {
     async fn send(&self, request: &StateInitRequest, device_id: &str) -> Result<(), String>;
-}
-
-/// SPI port: load and save pending request context.
-#[async_trait::async_trait]
-pub trait PendingContextPort: Send + Sync {
-    async fn save(&self, request_id: &str, ctx: &PendingRequestContext);
-    async fn load(&self, request_id: &str) -> Option<PendingRequestContext>;
-}
-
-/// SPI port: store and load cached worker responses for polling.
-#[async_trait::async_trait]
-pub trait ResponseSinkPort: Send + Sync {
-    async fn store(&self, response: &CachedResponse);
-    async fn load(&self, request_id: &str) -> Option<CachedResponse>;
 }
 
 /// SPI port: replay-attack nonce store.
@@ -55,17 +39,18 @@ pub trait NoncePort: Send + Sync {
     ) -> Result<bool, String>;
 }
 
-/// SPI port: in-memory cache for state-init responses, shared between the Kafka consumer
-/// and the HTTP request handler that polls for the result.
+/// SPI port: register and correlate state-init requests with their responses.
 #[async_trait::async_trait]
-pub trait StateInitCachePort: Send + Sync {
-    /// Block until a response for `request_id` appears or `timeout` elapses.
-    async fn wait_for_response(
+pub trait StateInitCorrelationPort: Send + Sync {
+    /// Register a pending state-init request. Returns a receiver that resolves
+    /// when the response arrives (or is dropped on timeout/cleanup).
+    async fn register_pending(
         &self,
         request_id: &str,
-        timeout: Duration,
-    ) -> Option<StateInitResponse>;
+        state_key: &str,
+        ttl_seconds: u64,
+    ) -> oneshot::Receiver<StateInitResponse>;
 
-    /// Insert a response into the cache.
-    async fn put(&self, request_id: String, response: StateInitResponse);
+    /// Called by the Kafka consumer when a response arrives.
+    async fn response_received(&self, response: StateInitResponse);
 }

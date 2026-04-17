@@ -47,6 +47,7 @@ impl RequestDecoder {
             request_id,
             state_jws,
             outer_request_jws,
+            ..
         } = hsm_worker_request;
 
         let state = DeviceHsmState::from_jws(state_jws.as_str(), self.jose.as_ref())
