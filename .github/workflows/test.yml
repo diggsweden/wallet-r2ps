@@ -11,14 +11,10 @@ permissions:
 
 jobs:
   test:
-    name: Test (${{ matrix.crate }})
+    name: Test
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    strategy:
-      matrix:
-        crate: [hsm-worker, wallet-bff]
-      fail-fast: false
 
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -35,26 +31,22 @@ jobs:
             ~/.cargo/bin
             ~/.cargo/registry
             ~/.cargo/git
-            ${{ matrix.crate }}/target
-          key: ${{ runner.os }}-cargo-${{ matrix.crate }}-${{ hashFiles(format('{0}/Cargo.lock', matrix.crate)) }}
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-${{ matrix.crate }}-
+            ${{ runner.os }}-cargo-
 
       - name: Install cargo-audit
         run: command -v cargo-audit || cargo install cargo-audit --locked
 
       - name: Audit dependencies for vulnerabilities
-        working-directory: ${{ matrix.crate }}
         run: cargo audit
 
       - name: Check formatting
-        working-directory: ${{ matrix.crate }}
         run: cargo fmt --check
 
       - name: Run clippy
-        working-directory: ${{ matrix.crate }}
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
-      - name: Run unit tests
-        working-directory: ${{ matrix.crate }}
-        run: cargo test --lib
+      - name: Run tests
+        run: cargo test --workspace --exclude integration-load-tests

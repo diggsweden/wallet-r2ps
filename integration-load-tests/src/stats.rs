@@ -63,11 +63,7 @@ impl Stats {
         sorted.sort_unstable();
         let total = sorted.len() as u64;
 
-        let avg = if total > 0 {
-            sorted.iter().sum::<u64>() / total
-        } else {
-            0
-        };
+        let avg = sorted.iter().sum::<u64>().checked_div(total).unwrap_or(0);
         let p50 = percentile(&sorted, 0.50);
         let p95 = percentile(&sorted, 0.95);
         let p99 = percentile(&sorted, 0.99);

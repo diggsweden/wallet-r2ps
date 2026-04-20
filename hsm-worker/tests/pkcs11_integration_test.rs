@@ -37,6 +37,7 @@ fn get_hsm() -> &'static Mutex<HsmWrapper> {
 }
 
 #[test]
+#[ignore]
 fn gen_ecc_key() -> Result<(), Box<dyn std::error::Error>> {
     let hsm_wrapper = get_hsm().lock()?;
     let result = hsm_wrapper.generate_key("foobar", &Curve::P256)?;
@@ -46,6 +47,7 @@ fn gen_ecc_key() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[test]
+#[ignore]
 fn gen_ecc_key_wrap_unwrap_sign() -> Result<(), Box<dyn std::error::Error>> {
     let hsm_wrapper = get_hsm().lock()?;
     let message = "foobar";

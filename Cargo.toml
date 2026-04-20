@@ -9,4 +9,4 @@ members = [
     "integration-load-tests",
     "hsm-common",
 ]
-resolver = "2"
+resolver = "3"
