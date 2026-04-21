@@ -63,7 +63,7 @@ setup-devtools:
 # Check required tools are installed
 [group('setup')]
 check-tools: _ensure-devtools
-    @{{devtools_dir}}/scripts/check-tools.sh --check-devtools mise git just cargo cargo-audit rumdl yamlfmt actionlint gitleaks shellcheck shfmt gommitlint reuse hadolint
+    @{{devtools_dir}}/scripts/check-tools.sh --check-devtools mise git just cargo rumdl yamlfmt actionlint gitleaks shellcheck shfmt gommitlint reuse hadolint
 
 # Install tools via mise
 [group('setup')]
@@ -88,6 +88,8 @@ verify: _ensure-devtools check-tools
 # ▪ Run all linters with summary
 [group('lint')]
 lint-all: _ensure-devtools
+    @just lint-rust
+    @just lint-rust-fmt
     @{{devtools_dir}}/scripts/verify.sh
 
 # Validate version control
@@ -152,15 +154,12 @@ lint-rust:
     set -euo pipefail
     source "{{colors}}"
     just_header "Clippy" "cargo clippy"
-    for crate in {{crates}}; do
-        printf "  %s ... " "$crate"
-        if cargo clippy --manifest-path "$crate/Cargo.toml" --all-targets -- -D warnings 2>&1 | tail -1; then
-            printf "\033[32m✓\033[0m\n"
-        else
-            printf "\033[31m✗\033[0m\n"
-            exit 1
-        fi
-    done
+    if cargo clippy --workspace --all-targets -- -D warnings 2>&1; then
+        printf "\033[32m✓\033[0m\n"
+    else
+        printf "\033[31m✗\033[0m\n"
+        exit 1
+    fi
     just_success "Clippy passed"
 
 # Check Rust formatting
@@ -170,15 +169,12 @@ lint-rust-fmt:
     set -euo pipefail
     source "{{colors}}"
     just_header "Rust fmt check" "cargo fmt --check"
-    for crate in {{crates}}; do
-        printf "  %s ... " "$crate"
-        if cargo fmt --check --manifest-path "$crate/Cargo.toml" 2>&1; then
-            printf "\033[32m✓\033[0m\n"
-        else
-            printf "\033[31m✗\033[0m\n"
-            exit 1
-        fi
-    done
+    if cargo fmt --check 2>&1; then
+        printf "\033[32m✓\033[0m\n"
+    else
+        printf "\033[31m✗\033[0m\n"
+        exit 1
+    fi
     just_success "Rust formatting OK"
 
 # ==================================================================================== #
@@ -214,11 +210,8 @@ lint-rust-fmt-fix:
     set -euo pipefail
     source "{{colors}}"
     just_header "Rust fmt fix" "cargo fmt"
-    for crate in {{crates}}; do
-        printf "  %s ... " "$crate"
-        cargo fmt --manifest-path "$crate/Cargo.toml"
-        printf "\033[32m✓\033[0m\n"
-    done
+    cargo fmt
+    printf "\033[32m✓\033[0m\n"
     just_success "Rust formatting fixed"
 
 # ==================================================================================== #
@@ -226,12 +219,14 @@ lint-rust-fmt-fix:
 # ==================================================================================== #
 
 # Audit crate dependencies for known vulnerabilities
+
 [group('security')]
 audit:
     #!/usr/bin/env bash
     set -euo pipefail
     source "{{colors}}"
     just_header "Audit" "cargo audit"
+    command -v cargo-audit >/dev/null 2>&1 || cargo install cargo-audit --locked
     cargo audit -f Cargo.lock
     just_success "No known vulnerabilities"
 

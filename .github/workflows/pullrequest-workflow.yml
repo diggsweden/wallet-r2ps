@@ -43,4 +43,5 @@ jobs:
     permissions:
       contents: read # Access test resources and source code
       packages: read # Fetch dependencies from GitHub Packages
+      checks: write # Allow rustsec/audit-check to post advisory annotations
     uses: ./.github/workflows/test.yml
