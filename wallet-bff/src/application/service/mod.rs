@@ -99,7 +99,11 @@ impl ResponseUseCase for ResponseService {
                 self.store_in_cache(cached);
             }
         } else {
-            // No sync waiter registered; park in cache for GET polling.
+            // No sync waiter — this can happen when a pod restarts and reuses a
+            // topic that still has responses from the previous session.
+            // TODO: forward undeliverable responses to a shared durable store
+            // (e.g. a dedicated Kafka topic) so clients can reconnect and
+            // retrieve the result of a request that outlived its original pod.
             warn!(
                 "No pending entry for requestId: {}, caching for polling",
                 cached.request_id
@@ -109,6 +113,9 @@ impl ResponseUseCase for ResponseService {
     }
 
     async fn wait_for_response(&self, request_id: &str, timeout_ms: u64) -> Option<CachedResponse> {
+        // TODO: cache is in-memory — async GET polling requires sticky sessions in the load
+        // balancer, otherwise a poll landing on a different instance than the original POST
+        // will miss the response.
         let deadline = tokio::time::Instant::now() + Duration::from_millis(timeout_ms);
         loop {
             {

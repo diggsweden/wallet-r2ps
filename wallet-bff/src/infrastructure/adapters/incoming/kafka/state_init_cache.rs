@@ -16,6 +16,9 @@ struct StateInitPending {
     tx: oneshot::Sender<StateInitResponse>,
 }
 
+/// Separate from ResponseService intentionally: state initialisation may be
+/// performed by a different set of HSMs (and hsm-worker instances) than regular
+/// operations, so the two response flows must remain independent.
 pub struct StateInitCorrelationService {
     pending: Mutex<HashMap<String, StateInitPending>>,
     device_state_port: Arc<dyn DeviceStatePort>,

@@ -29,8 +29,8 @@ use crate::infrastructure::config::{AppConfig, today_yyyymmdd};
 
 const TOPIC_PARTITIONS: i32 = 1;
 const TOPIC_REPLICATION: i32 = 1;
-const TOPIC_RETENTION_MS: &str = "600000"; // 10 minutes
-const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(300); // 5 min < retention
+const TOPIC_RETENTION_MS: &str = "661000"; // ~11 min (661 is prime — avoids sync with heartbeat interval)
+const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(307); // ~5 min (307 is prime — avoids sync with retention)
 
 fn make_admin_client(config: &AppConfig) -> AdminClient<DefaultClientContext> {
     ClientConfig::new()
@@ -108,8 +108,7 @@ async fn wait_for_topics(config: &AppConfig, topics: &[String]) {
                     _ => {}
                 }
                 if std::time::Instant::now() >= deadline {
-                    warn!("Timed out waiting for topic {} to become available", topic);
-                    break;
+                    panic!("Timed out waiting for Kafka topic {} — cannot start", topic);
                 }
                 std::thread::sleep(Duration::from_millis(200));
             }
@@ -267,54 +266,77 @@ async fn send_heartbeats(producer: &FutureProducer, topics: &[String]) -> Vec<St
 ///
 /// On subsequent heartbeats, any failure is treated as fatal and the process exits
 /// so Kubernetes can restart it with fresh topics.
-fn start_heartbeat_task(config: AppConfig) {
-    tokio::spawn(async move {
-        let producer: FutureProducer = ClientConfig::new()
-            .set("bootstrap.servers", &config.kafka_bootstrap_servers)
-            .set("broker.address.family", &config.kafka_broker_address_family)
-            .set("message.timeout.ms", "5000")
-            .create()
-            .expect("Failed to create heartbeat producer");
+///
+/// TODO: transient Kafka unavailability (e.g. broker rolling restart) will kill
+/// healthy pods. Replace the immediate exit with a backoff retry loop (e.g. retry
+/// every 10s for ~3-5 minutes) before giving up, since a dead topic is not
+/// immediately fatal within that window.
+fn make_heartbeat_producer(config: &AppConfig) -> FutureProducer {
+    ClientConfig::new()
+        .set("bootstrap.servers", &config.kafka_bootstrap_servers)
+        .set("broker.address.family", &config.kafka_broker_address_family)
+        .set("message.timeout.ms", "5000")
+        .create()
+        .expect("Failed to create heartbeat producer")
+}
 
-        let mut first = true;
+/// Writes the first heartbeat synchronously. Called before the HTTP listener is
+/// bound, so the server never accepts requests without a live, heartbeated topic.
+///
+/// If the topics were deleted by a concurrent midnight cleanup, recreates them
+/// with the current date and retries once. Panics on failure — the pod cannot
+/// serve requests without confirmed response topics.
+async fn write_initial_heartbeat(config: &AppConfig, producer: &FutureProducer) {
+    let topics = [
+        config.hsm_worker_response_topic(),
+        config.state_init_response_topic(),
+    ];
+    let failed = send_heartbeats(producer, &topics).await;
+    if !failed.is_empty() {
+        warn!(
+            "Initial heartbeat failed for {:?} — sleeping 1s then recreating topics",
+            failed
+        );
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        create_per_instance_topics(config).await;
+        let new_topics = [
+            config.hsm_worker_response_topic(),
+            config.state_init_response_topic(),
+        ];
+        wait_for_topics(config, &new_topics).await;
+        let retry_failed = send_heartbeats(producer, &new_topics).await;
+        if !retry_failed.is_empty() {
+            panic!(
+                "Initial heartbeat retry failed for {:?} — cannot start",
+                retry_failed
+            );
+        }
+        info!("Initial heartbeat succeeded after topic recreation");
+    }
+}
+
+/// Spawns the recurring heartbeat task. Must be called after [`write_initial_heartbeat`].
+///
+/// TODO: transient Kafka unavailability (e.g. broker rolling restart) will kill
+/// healthy pods. Replace the immediate exit with a backoff retry loop (e.g. retry
+/// every 10s for ~3-5 minutes) before giving up, since a dead topic is not
+/// immediately fatal within that window.
+fn start_heartbeat_task(config: AppConfig, producer: FutureProducer) {
+    tokio::spawn(async move {
         loop {
+            tokio::time::sleep(HEARTBEAT_INTERVAL).await;
             let topics = [
                 config.hsm_worker_response_topic(),
                 config.state_init_response_topic(),
             ];
             let failed = send_heartbeats(&producer, &topics).await;
-
             if !failed.is_empty() {
-                if first {
-                    warn!(
-                        "First heartbeat failed for {:?} — sleeping 1s then recreating topics",
-                        failed
-                    );
-                    tokio::time::sleep(Duration::from_secs(1)).await;
-                    // Recompute names: date may have flipped past midnight
-                    let new_topics = [
-                        config.hsm_worker_response_topic(),
-                        config.state_init_response_topic(),
-                    ];
-                    create_per_instance_topics(&config).await;
-                    wait_for_topics(&config, &new_topics).await;
-                    let retry_failed = send_heartbeats(&producer, &new_topics).await;
-                    if !retry_failed.is_empty() {
-                        error!("Heartbeat retry failed for {:?} — exiting", retry_failed);
-                        std::process::exit(1);
-                    }
-                    info!("Heartbeat retry succeeded after topic recreation");
-                } else {
-                    error!(
-                        "Heartbeat failed for {:?} during operation — exiting",
-                        failed
-                    );
-                    std::process::exit(1);
-                }
+                error!(
+                    "Heartbeat failed for {:?} during operation — exiting",
+                    failed
+                );
+                std::process::exit(1);
             }
-
-            first = false;
-            tokio::time::sleep(HEARTBEAT_INTERVAL).await;
         }
     });
 }
@@ -358,7 +380,9 @@ pub async fn run() {
     ];
     create_per_instance_topics(&config).await;
     wait_for_topics(&config, &instance_topics).await;
-    start_heartbeat_task(config.clone());
+    let heartbeat_producer = make_heartbeat_producer(&config);
+    write_initial_heartbeat(&config, &heartbeat_producer).await;
+    start_heartbeat_task(config.clone(), heartbeat_producer);
 
     // Redis — device state only
     let redis_client = Client::open(config.redis_url()).expect("Failed to create Redis client");
@@ -437,6 +461,11 @@ pub async fn run() {
         res = serve => { res.expect("Server error"); }
         _ = tokio::signal::ctrl_c() => {
             info!("Shutting down, deleting per-instance Kafka topics");
+            // TODO: drain in-flight requests before deleting topics.
+            // ResponseService::pending and StateInitCorrelationService::pending
+            // already track counts; stop the listener, poll until both are zero
+            // (or a hard timeout), then delete. Without this, requests in-flight
+            // at shutdown lose their response.
             delete_per_instance_topics(&config).await;
         }
     }
