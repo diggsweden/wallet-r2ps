@@ -21,14 +21,14 @@ concurrency:
 
 jobs:
   pr-checks:
-    uses: diggsweden/reusable-ci/.github/workflows/pullrequest-orchestrator.yml@a89d880d9a859491c09c300428caa17c9644b39b # v2.8.0
+    uses: diggsweden/reusable-ci/.github/workflows/pullrequest-orchestrator.yml@cd56d63b88cf6f1ebb4dc3431986f4208ab85fc5 # v2.8.1
     secrets: inherit
     permissions:
       contents: read # Clone repository and read source code
       packages: read # Access GitHub Packages
       security-events: write # Upload security scan results to Security tab
     with:
-      reusable-ci-ref: v2.7.9
+      reusable-ci-ref: cd56d63b88cf6f1ebb4dc3431986f4208ab85fc5
       project-type: rust
       # Use devbase-check linting (replaces megalint, commitlint, licenselint)
       linters.devbasecheck: true

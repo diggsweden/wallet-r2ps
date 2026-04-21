@@ -8,6 +8,7 @@
 devtools_repo := env("DEVBASE_CHECK_REPO", "https://github.com/diggsweden/devbase-check")
 devtools_dir := env("XDG_DATA_HOME", env("HOME") + "/.local/share") + "/devbase-check"
 lint := devtools_dir + "/linters"
+rust_lint := devtools_dir + "/linters/rust"
 colors := devtools_dir + "/utils/colors.sh"
 
 # Rust crate directories
@@ -88,8 +89,6 @@ verify: _ensure-devtools check-tools
 # ▪ Run all linters with summary
 [group('lint')]
 lint-all: _ensure-devtools
-    @just lint-rust
-    @just lint-rust-fmt
     @{{devtools_dir}}/scripts/verify.sh
 
 # Validate version control
@@ -149,33 +148,13 @@ lint-xml:
 
 # Run cargo clippy on all crates
 [group('lint')]
-lint-rust:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    source "{{colors}}"
-    just_header "Clippy" "cargo clippy"
-    if cargo clippy --workspace --all-targets -- -D warnings 2>&1; then
-        printf "\033[32m✓\033[0m\n"
-    else
-        printf "\033[31m✗\033[0m\n"
-        exit 1
-    fi
-    just_success "Clippy passed"
+lint-rust-clippy:
+    @{{rust_lint}}/clippy.sh
 
 # Check Rust formatting
 [group('lint')]
 lint-rust-fmt:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    source "{{colors}}"
-    just_header "Rust fmt check" "cargo fmt --check"
-    if cargo fmt --check 2>&1; then
-        printf "\033[32m✓\033[0m\n"
-    else
-        printf "\033[31m✗\033[0m\n"
-        exit 1
-    fi
-    just_success "Rust formatting OK"
+    @{{rust_lint}}/format.sh check
 
 # ==================================================================================== #
 # LINT-FIX - Auto-fix code issues
@@ -206,13 +185,7 @@ lint-shell-fmt-fix:
 # Fix Rust formatting
 [group('lint-fix')]
 lint-rust-fmt-fix:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    source "{{colors}}"
-    just_header "Rust fmt fix" "cargo fmt"
-    cargo fmt
-    printf "\033[32m✓\033[0m\n"
-    just_success "Rust formatting fixed"
+    @{{rust_lint}}/format.sh fix
 
 # ==================================================================================== #
 # SECURITY - Dependency auditing
