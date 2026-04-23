@@ -11,7 +11,7 @@ use wallet_bff::application::port::outgoing::DeviceStatePort;
 use wallet_bff::application::service::ResponseService;
 use wallet_bff::domain::{HsmWorkerResponse, OuterResponse, Status, TypedJws};
 
-// ── Mocks ─────────────────────────────────────────────────────────────────────
+// ── Mocks ────────────────────────────────────────────────────────────────
 
 struct MockDeviceState {
     saves: Mutex<Vec<(String, String, u64)>>,
@@ -38,7 +38,7 @@ impl DeviceStatePort for MockDeviceState {
     }
 }
 
-// ── Fixtures ──────────────────────────────────────────────────────────────────
+// ── Fixtures ─────────────────────────────────────────────────────────────
 
 fn make_service() -> (Arc<MockDeviceState>, ResponseService) {
     let ds = MockDeviceState::new();
@@ -56,7 +56,7 @@ fn worker_response(state_jws: Option<&str>) -> HsmWorkerResponse {
     }
 }
 
-// ── Tests ─────────────────────────────────────────────────────────────────────
+// ── Tests ─────────────────────────────────────────────────────────────────
 
 #[tokio::test]
 async fn response_ready_delivers_to_registered_pending() {
