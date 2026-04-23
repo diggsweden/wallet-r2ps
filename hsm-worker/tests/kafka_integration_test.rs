@@ -210,7 +210,7 @@ async fn test_worker_consumer_receives_and_calls_use_case() {
     // Give consumer time to subscribe and join group
     tokio::time::sleep(Duration::from_secs(3)).await;
 
-    // Produce an HsmWorkerRequestDto to r2ps-requests
+    // Produce an HsmWorkerRequestDto to hsm-requests
     let producer: BaseProducer = ClientConfig::new()
         .set("bootstrap.servers", &bootstrap)
         .set("message.timeout.ms", "5000")
@@ -227,7 +227,7 @@ async fn test_worker_consumer_receives_and_calls_use_case() {
 
     producer
         .send(
-            BaseRecord::to("r2ps-requests")
+            BaseRecord::to("hsm-requests")
                 .key("device-1")
                 .payload(&payload),
         )
@@ -547,7 +547,7 @@ async fn test_worker_kafka_round_trip() {
     };
     let request_payload = serde_json::to_string(&request).unwrap();
 
-    // Produce to r2ps-requests
+    // Produce to hsm-requests
     let producer: BaseProducer = ClientConfig::new()
         .set("bootstrap.servers", &bootstrap)
         .set("message.timeout.ms", "5000")
@@ -556,7 +556,7 @@ async fn test_worker_kafka_round_trip() {
 
     producer
         .send(
-            BaseRecord::to("r2ps-requests")
+            BaseRecord::to("hsm-requests")
                 .key(device_kid)
                 .payload(&request_payload),
         )

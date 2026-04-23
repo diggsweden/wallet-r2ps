@@ -10,7 +10,7 @@ use tracing::error;
 use crate::application::port::outgoing::{RequestSenderPort, StateInitSenderPort};
 use crate::domain::{HsmWorkerRequest, StateInitRequest};
 
-const R2PS_REQUESTS_TOPIC: &str = "r2ps-requests";
+const HSM_REQUESTS_TOPIC: &str = "hsm-requests";
 const STATE_INIT_REQUESTS_TOPIC: &str = "state-init-requests";
 
 pub struct KafkaRequestSender {
@@ -47,7 +47,7 @@ impl RequestSenderPort for KafkaRequestSender {
         let payload = serde_json::to_string(&req).map_err(|e| e.to_string())?;
         self.producer
             .send(
-                FutureRecord::to(R2PS_REQUESTS_TOPIC)
+                FutureRecord::to(HSM_REQUESTS_TOPIC)
                     .key(device_id)
                     .payload(&payload),
                 Duration::from_secs(5),
@@ -55,7 +55,7 @@ impl RequestSenderPort for KafkaRequestSender {
             .await
             .map(|_| ())
             .map_err(|(e, _)| {
-                error!("Failed to send to {}: {}", R2PS_REQUESTS_TOPIC, e);
+                error!("Failed to send to {}: {}", HSM_REQUESTS_TOPIC, e);
                 e.to_string()
             })
     }

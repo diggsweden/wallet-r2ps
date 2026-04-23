@@ -186,9 +186,14 @@ services:
       kafka-3:
         condition: service_healthy
     entrypoint: ["/bin/sh", "-e", "/tmp/init-kafka-topics.sh"]
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: "kafka-1:19092,kafka-2:19092,kafka-3:19092"
+      WALLET_STATE_TOPIC: "wallet-state"
+      REQUEST_TOPICS: "hsm-requests,state-init-requests"
+      RESPONSE_TOPICS: "hsm-worker-responses-bff-1,state-init-responses-bff-1,hsm-worker-responses-bff-2,state-init-responses-bff-2"
+      REQUEST_TOPIC_PARTITIONS: 10
     volumes:
       - ./config/init-kafka-topics.sh:/tmp/init-kafka-topics.sh
-
     networks:
       - wallet-network
   # Optional: Kafka UI for management
