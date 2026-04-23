@@ -42,7 +42,7 @@ moka = { version = "0.12", features = ["sync"] }
 strum_macros = "0.27.2"
 cryptoki = "0.10.0"
 opaque-ke = { version = "4.0.1", features = ["std"] }
-rand = "0.8"
+rand = "0.9"
 sha2 = "0.10.9"
 hkdf = "0.12"
 josekit = "0.10.3"
