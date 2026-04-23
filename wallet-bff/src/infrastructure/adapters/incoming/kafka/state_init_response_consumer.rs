@@ -41,9 +41,6 @@ pub fn start(
         loop {
             match consumer.recv().await {
                 Ok(msg) => {
-                    if msg.key() == Some(super::HEARTBEAT_KEY) {
-                        continue;
-                    }
                     let Some(payload) = msg.payload() else {
                         continue;
                     };
