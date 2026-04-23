@@ -20,7 +20,7 @@ use crate::infrastructure::adapters::outgoing::kafka::request_sender::{
 use crate::infrastructure::adapters::outgoing::redis::{
     device_state::DeviceStateRedisAdapter, nonce::NonceRedisAdapter,
 };
-use crate::infrastructure::config::AppConfig; 6069316 (refactor(wallet-bff): externalize topic lifecycle, remove BFF admin rights)
+use crate::infrastructure::config::AppConfig;
 
 pub async fn run() {
     let config = AppConfig::new().expect("Failed to load configuration");

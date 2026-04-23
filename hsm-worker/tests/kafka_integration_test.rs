@@ -563,7 +563,7 @@ async fn test_worker_kafka_round_trip() {
         .expect("enqueue failed");
     producer.poll(Duration::from_millis(100));
 
-    // Consume from r2ps-responses
+    // Consume from the per-instance response topic set in the request
     let resp_consumer: BaseConsumer = ClientConfig::new()
         .set("bootstrap.servers", &bootstrap)
         .set("group.id", "test-rt-resp-consumer")
@@ -571,7 +571,7 @@ async fn test_worker_kafka_round_trip() {
         .create()
         .expect("consumer creation failed");
 
-    resp_consumer.subscribe(&["r2ps-responses"]).unwrap();
+    resp_consumer.subscribe(&["test-response-topic"]).unwrap();
 
     let deadline = std::time::Instant::now() + Duration::from_secs(30);
     loop {
