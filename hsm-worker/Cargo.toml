@@ -41,11 +41,11 @@ dotenvy = "0.15.7"
 config = "0.15.19"
 moka = { version = "0.12", features = ["sync"] }
 strum_macros = "0.28.0"
-cryptoki = "0.12.0"
+cryptoki = "0.10.0"
 opaque-ke = { version = "4.0.1", features = ["std"] }
-rand = "0.10"
-sha2 = "0.11.0"
-hkdf = "0.13"
+rand = "0.8"
+sha2 = "0.10.9"
+hkdf = "0.12"
 josekit = "0.10.3"
 base64 = "0.22.1"
 p256 = { version = "0.13", default-features = false, features = [
@@ -59,11 +59,11 @@ p256 = { version = "0.13", default-features = false, features = [
 ] }
 elliptic-curve = { version = "0.13", features = ["sec1", "jwk"] }
 pem = "3"
-der = "0.8.0"
+der = "0.7.10"
 argon2 = { version = "0.5", features = ["std"] }
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1.18.1", features = ["v4", "serde"] }
-digest = "0.11.0"
+digest = "0.10.7"
 hex = "0.4.3"
 clap = { version = "4", features = ["derive"] }
 utoipa = { version = "5", features = ["uuid"], optional = true }
