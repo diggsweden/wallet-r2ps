@@ -41,7 +41,7 @@ dotenvy = "0.15.7"
 config = "0.15.19"
 moka = { version = "0.12", features = ["sync"] }
 strum_macros = "0.28.0"
-cryptoki = "0.10.0"
+cryptoki = "0.12.0"
 opaque-ke = { version = "4.0.1", features = ["std"] }
 rand = "0.8"
 sha2 = "0.10.9"
