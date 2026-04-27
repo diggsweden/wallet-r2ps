@@ -29,9 +29,9 @@
       "addLabels": ["docker", "infrastructure"]
     },
     {
-      "description": "Breaking upgrades tracked in dedicated PRs: der (0.7→0.8 OctetStringRef DST change), rand (0.8→0.10 thread_rng/OsRng API changes). Remove this rule when each upgrade PR lands.",
+      "description": "Breaking upgrades tracked in dedicated PRs: rand (0.8→0.10 thread_rng/OsRng API changes). Remove this rule when each upgrade PR lands.",
       "matchManagers": ["cargo"],
-      "matchPackageNames": ["der", "rand"],
+      "matchPackageNames": ["rand"],
       "enabled": false
     },
     {

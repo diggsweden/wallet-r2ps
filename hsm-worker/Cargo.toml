@@ -59,7 +59,7 @@ p256 = { version = "0.13", default-features = false, features = [
 ] }
 elliptic-curve = { version = "0.13", features = ["sec1", "jwk"] }
 pem = "3"
-der = "0.7.10"
+der = "0.8.0"
 argon2 = { version = "0.5", features = ["std"] }
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1.18.1", features = ["v4", "serde"] }
@@ -67,7 +67,6 @@ digest = "0.10.7"
 hex = "0.4.3"
 clap = { version = "4", features = ["derive"] }
 utoipa = { version = "5", features = ["uuid"], optional = true }
-spki = "0"
 iso8601-duration = { version = "0.2.0", features = ["serde"] }
 problem_details = "0.9.0"
 

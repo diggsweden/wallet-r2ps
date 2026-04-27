@@ -269,7 +269,7 @@ impl HsmWrapper {
         curve: &Curve,
         point: &[u8],
     ) -> Result<EcPublicJwk, Box<dyn std::error::Error>> {
-        let octet_string = OctetStringRef::from_der(point).map_err(|e| e.to_string())?;
+        let octet_string = <&OctetStringRef>::from_der(point).map_err(|e| e.to_string())?;
 
         let verifying_key =
             VerifyingKey::from_sec1_bytes(octet_string.as_bytes()).map_err(|e| e.to_string())?;
