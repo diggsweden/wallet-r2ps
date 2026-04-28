@@ -386,7 +386,7 @@ mod tests {
     use crate::domain::Curve;
     use crate::infrastructure::hsm_wrapper::HsmWrapper;
     use p256::ecdsa::SigningKey;
-    use rand::rngs::OsRng;
+    use rand_core::OsRng;
 
     // Verify that the EcPublicJwk generated is a valid JWK according to JOSE.
     #[test]

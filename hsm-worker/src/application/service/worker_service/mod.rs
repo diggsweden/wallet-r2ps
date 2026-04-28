@@ -204,8 +204,9 @@ fn setup_crypto() -> (
     use crate::infrastructure::adapters::outgoing::jose_adapter::JoseAdapter;
     use p256::SecretKey;
     use p256::pkcs8::EncodePublicKey;
+    use rand_core::OsRng;
 
-    let secret_key = SecretKey::random(&mut rand::thread_rng());
+    let secret_key = SecretKey::random(&mut OsRng);
     let public_key_pem = secret_key
         .public_key()
         .to_public_key_pem(Default::default())

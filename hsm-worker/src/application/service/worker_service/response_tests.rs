@@ -17,6 +17,7 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use josekit::jws::alg::ecdsa::EcdsaJwsVerifier;
 use p256::SecretKey;
 use p256::elliptic_curve::sec1::ToEncodedPoint;
+use rand_core::OsRng;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
@@ -38,7 +39,7 @@ fn setup_builder() -> BuilderFixture {
 }
 
 fn mock_context(request_id: &str, op_id: OperationId) -> ResponseContext {
-    let secret_key = SecretKey::random(&mut rand::thread_rng());
+    let secret_key = SecretKey::random(&mut OsRng);
     let public_key = secret_key.public_key();
     let encoded_point = public_key.to_encoded_point(false);
     let x = URL_SAFE_NO_PAD.encode(encoded_point.x().unwrap());

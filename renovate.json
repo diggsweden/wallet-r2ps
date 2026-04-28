@@ -29,12 +29,6 @@
       "addLabels": ["docker", "infrastructure"]
     },
     {
-      "description": "Breaking upgrades tracked in dedicated PRs: rand (0.8→0.10 thread_rng/OsRng API changes). Remove this rule when each upgrade PR lands.",
-      "matchManagers": ["cargo"],
-      "matchPackageNames": ["rand"],
-      "enabled": false
-    },
-    {
       "description": "sha2 and digest are capped below 0.11 — opaque-ke 4.x requires the digest 0.10 trait family. Patch updates within 0.10.x still flow through. When upgrading opaque-ke to a digest-0.11-compatible version, update this allowedVersions in the same PR.",
       "matchManagers": ["cargo"],
       "matchPackageNames": ["sha2", "digest"],

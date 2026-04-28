@@ -7,13 +7,13 @@ use crate::application::port::outgoing::session_state_spi_port::{PendingLoginSta
 use crate::domain;
 use crate::domain::PakePayloadVector;
 use crate::domain::value_objects::client_metadata::PasswordFileEntry;
-use argon2::password_hash::rand_core::OsRng;
 use base64::Engine;
 use base64::prelude::BASE64_STANDARD;
 use opaque_ke;
 use p256::NistP256;
 use p256::SecretKey;
 use p256::elliptic_curve::sec1::ToEncodedPoint;
+use rand_core::OsRng;
 use tracing::{debug, info, warn};
 
 #[derive(Clone, Copy)]
