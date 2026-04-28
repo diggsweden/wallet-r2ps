@@ -17,6 +17,8 @@ pub struct StateInitRequest {
     /// Correlation ID for this initialization request
     pub request_id: String,
     pub public_key: EcPublicJwk,
+    /// Kafka topic the worker should send its response to
+    pub response_topic: String,
 }
 
 /// Response containing the newly created device state and a one-time authorization code.

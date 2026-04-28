@@ -28,6 +28,8 @@ pub struct HsmWorkerRequest {
     pub state_jws: TypedJws<DeviceHsmState>,
     /// JWS-encoded outer request envelope (OuterRequest)
     pub outer_request_jws: TypedJws<OuterRequest>,
+    /// Kafka topic the worker should send its response to
+    pub response_topic: String,
 }
 
 /// Worker response sent via Kafka.

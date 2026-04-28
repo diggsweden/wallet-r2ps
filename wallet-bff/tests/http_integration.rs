@@ -6,17 +6,16 @@ use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use tokio::sync::oneshot;
 use tower::ServiceExt;
 
 use wallet_bff::application::port::incoming::ResponseUseCase;
 use wallet_bff::application::port::outgoing::{
-    DeviceStatePort, NoncePort, PendingContextPort, RequestSenderPort, StateInitCachePort,
-    StateInitSenderPort,
+    DeviceStatePort, NoncePort, RequestSenderPort, StateInitCorrelationPort, StateInitSenderPort,
 };
 use wallet_bff::domain::{
-    CachedResponse, HsmWorkerRequest, HsmWorkerResponse, OuterResponse, PendingRequestContext,
-    StateInitRequest, StateInitResponse, Status, TypedJws,
+    CachedResponse, HsmWorkerRequest, HsmWorkerResponse, OuterResponse, StateInitRequest,
+    StateInitResponse, Status, TypedJws,
 };
 use wallet_bff::infrastructure::adapters::incoming::web;
 use wallet_bff::infrastructure::adapters::incoming::web::handlers::AppState;
@@ -59,23 +58,28 @@ impl StateInitSenderPort for MockStateInitSenderPort {
     }
 }
 
-struct MockPendingContextPort;
-
-#[async_trait::async_trait]
-impl PendingContextPort for MockPendingContextPort {
-    async fn save(&self, _request_id: &str, _ctx: &PendingRequestContext) {}
-    async fn load(&self, _request_id: &str) -> Option<PendingRequestContext> {
-        None
-    }
-}
-
 struct MockResponseUseCase {
     sync_response: Option<CachedResponse>,
 }
 
 #[async_trait::async_trait]
 impl ResponseUseCase for MockResponseUseCase {
-    async fn response_ready(&self, _response: HsmWorkerResponse) {}
+    fn register_pending(
+        &self,
+        _request_id: &str,
+        _state_key: &str,
+        _ttl_seconds: u64,
+    ) -> oneshot::Receiver<CachedResponse> {
+        let (tx, rx) = oneshot::channel();
+        if let Some(ref r) = self.sync_response {
+            let _ = tx.send(r.clone());
+        }
+        // If sync_response is None, tx is dropped and rx returns Err on await.
+        rx
+    }
+
+    fn response_ready(&self, _response: HsmWorkerResponse) {}
+
     async fn wait_for_response(
         &self,
         _request_id: &str,
@@ -99,21 +103,26 @@ impl NoncePort for MockNoncePort {
     }
 }
 
-struct MockStateInitCachePort {
+struct MockStateInitCorrelationPort {
     response: Option<StateInitResponse>,
 }
 
 #[async_trait::async_trait]
-impl StateInitCachePort for MockStateInitCachePort {
-    async fn wait_for_response(
+impl StateInitCorrelationPort for MockStateInitCorrelationPort {
+    async fn register_pending(
         &self,
         _request_id: &str,
-        _timeout: Duration,
-    ) -> Option<StateInitResponse> {
-        self.response.clone()
+        _state_key: &str,
+        _ttl_seconds: u64,
+    ) -> oneshot::Receiver<StateInitResponse> {
+        let (tx, rx) = oneshot::channel();
+        if let Some(ref r) = self.response {
+            let _ = tx.send(r.clone());
+        }
+        rx
     }
 
-    async fn put(&self, _request_id: String, _response: StateInitResponse) {}
+    async fn response_received(&self, _response: StateInitResponse) {}
 }
 
 // ---------------------------------------------------------------------------
@@ -157,11 +166,10 @@ fn make_test_app(cfg: TestAppConfig) -> TestContext {
             sent: sent_requests.clone(),
         }),
         state_init_sender_port: Arc::new(MockStateInitSenderPort),
-        pending_context_port: Arc::new(MockPendingContextPort),
         response_use_case: Arc::new(MockResponseUseCase {
             sync_response: cfg.sync_response,
         }),
-        state_init_cache: Arc::new(MockStateInitCachePort {
+        state_init_correlation: Arc::new(MockStateInitCorrelationPort {
             response: cfg.state_init_response,
         }),
         serve_sync: cfg.serve_sync,

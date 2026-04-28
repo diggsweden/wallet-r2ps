@@ -58,7 +58,7 @@ impl WorkerRequestKafkaReceiver {
 
             // Subscribe to input topic
             consumer
-                .subscribe(&["r2ps-requests"])
+                .subscribe(&["hsm-requests"])
                 .expect("Failed to subscribe to topic");
 
             debug!("Starting Kafka consumer-producer pipeline...");

@@ -30,7 +30,11 @@ impl StateInitResponseKafkaMessageSender {
 }
 
 impl StateInitResponseSpiPort for StateInitResponseKafkaMessageSender {
-    fn send(&self, response: StateInitResponse) -> Result<(), StateInitResponseError> {
+    fn send(
+        &self,
+        response: StateInitResponse,
+        response_topic: &str,
+    ) -> Result<(), StateInitResponseError> {
         let output_json = serde_json::to_string(&response).map_err(|e| {
             error!("Failed to serialize state init response: {:?}", e);
             StateInitResponseError::SerializationError
@@ -39,7 +43,7 @@ impl StateInitResponseSpiPort for StateInitResponseKafkaMessageSender {
         let key = &response.request_id;
         let request_id = &response.request_id;
 
-        let record = BaseRecord::to("state-init-responses")
+        let record = BaseRecord::to(response_topic)
             .key(key)
             .payload(&output_json);
 

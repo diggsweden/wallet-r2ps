@@ -14,12 +14,12 @@ use uuid::Uuid;
 use super::problem_response;
 use crate::application::port::incoming::ResponseUseCase;
 use crate::application::port::outgoing::{
-    DeviceStatePort, PendingContextPort, RequestSenderPort, StateInitCachePort, StateInitSenderPort,
+    DeviceStatePort, RequestSenderPort, StateInitCorrelationPort, StateInitSenderPort,
 };
 use crate::domain::{
     AsyncResponseDto, AsyncResponseStatus, BffRequest, CachedResponse, DEFAULT_TTL_SECONDS,
-    HsmWorkerRequest, NewStateRequestDto, NewStateResponseDto, PendingRequestContext,
-    ProblemDetail, StateInitRequest, TypedJws,
+    HsmWorkerRequest, NewStateRequestDto, NewStateResponseDto, ProblemDetail, StateInitRequest,
+    TypedJws,
 };
 
 pub const PROBLEM_CONTENT_TYPE: &str = "application/problem+json";
@@ -28,9 +28,8 @@ pub struct AppState {
     pub device_state_port: Arc<dyn DeviceStatePort>,
     pub request_sender_port: Arc<dyn RequestSenderPort>,
     pub state_init_sender_port: Arc<dyn StateInitSenderPort>,
-    pub pending_context_port: Arc<dyn PendingContextPort>,
     pub response_use_case: Arc<dyn ResponseUseCase>,
-    pub state_init_cache: Arc<dyn StateInitCachePort>,
+    pub state_init_correlation: Arc<dyn StateInitCorrelationPort>,
     pub serve_sync: bool,
     pub sync_timeout_ms: u64,
     pub state_init_timeout_ms: u64,
@@ -148,21 +147,20 @@ pub async fn service(
     let request_id = Uuid::new_v4();
     let request_id_str = request_id.to_string();
 
-    state
-        .pending_context_port
-        .save(
-            &request_id_str,
-            &PendingRequestContext {
-                state_key: req.client_id.clone(),
-                ttl_seconds: DEFAULT_TTL_SECONDS,
-            },
-        )
-        .await;
+    // Register the pending entry before sending to Kafka so the response can
+    // never arrive before we are ready to receive it.
+    let rx = state.response_use_case.register_pending(
+        &request_id_str,
+        &req.client_id,
+        DEFAULT_TTL_SECONDS,
+    );
 
     let worker_req = HsmWorkerRequest {
         request_id: request_id_str.clone(),
         state_jws,
         outer_request_jws: TypedJws::new(req.outer_request_jws),
+        // response_topic is injected by the Kafka sender
+        response_topic: String::new(),
     };
 
     if let Err(e) = state
@@ -184,10 +182,12 @@ pub async fn service(
             "Waiting for synchronous response for requestId: {}",
             request_id_str
         );
-        let cached = state
-            .response_use_case
-            .wait_for_response(&request_id_str, state.sync_timeout_ms)
-            .await;
+        let cached = tokio::time::timeout(Duration::from_millis(state.sync_timeout_ms), async {
+            rx.await.ok()
+        })
+        .await
+        .ok()
+        .flatten();
         let polling_url = state.polling_url(&request_id_str);
         return build_async_response(request_id, cached, polling_url, &instance);
     }
@@ -315,20 +315,17 @@ pub async fn create_state(
 
     let request_id = Uuid::new_v4().to_string();
 
-    state
-        .pending_context_port
-        .save(
-            &request_id,
-            &PendingRequestContext {
-                state_key: client_id.clone(),
-                ttl_seconds,
-            },
-        )
+    // Register before sending to Kafka.
+    let rx = state
+        .state_init_correlation
+        .register_pending(&request_id, &client_id, ttl_seconds)
         .await;
 
     let init_request = StateInitRequest {
         request_id: request_id.clone(),
         public_key: req.public_key,
+        // response_topic is injected by the Kafka sender
+        response_topic: String::new(),
     };
 
     if let Err(e) = state
@@ -351,13 +348,13 @@ pub async fn create_state(
         client_id, request_id
     );
 
-    let init_response = state
-        .state_init_cache
-        .wait_for_response(
-            &request_id,
-            Duration::from_millis(state.state_init_timeout_ms),
-        )
-        .await;
+    let init_response =
+        tokio::time::timeout(Duration::from_millis(state.state_init_timeout_ms), async {
+            rx.await.ok()
+        })
+        .await
+        .ok()
+        .flatten();
 
     match init_response {
         Some(resp) => {

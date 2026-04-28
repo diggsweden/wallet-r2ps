@@ -38,7 +38,7 @@ pub fn build_pake_request_jws(
         context: "hsm".to_string(),
         server_kid: None,
         inner_jwe: Some(TypedJwe::new(inner_jwe)),
-        nonce: "some_nonce".to_string(),
+        nonce: uuid::Uuid::new_v4().to_string(),
     };
     jose::jws_sign(
         &serde_json::to_vec(&outer_request)?,

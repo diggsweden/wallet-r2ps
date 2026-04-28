@@ -5,7 +5,11 @@
 use crate::domain::HsmWorkerResponse;
 
 pub trait WorkerResponseSpiPort {
-    fn send(&self, worker_response: HsmWorkerResponse) -> Result<(), WorkerResponseError>;
+    fn send(
+        &self,
+        worker_response: HsmWorkerResponse,
+        response_topic: &str,
+    ) -> Result<(), WorkerResponseError>;
 }
 
 #[derive(Debug)]

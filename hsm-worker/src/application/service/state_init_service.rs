@@ -39,6 +39,7 @@ impl StateInitService {
     /// Initialize a new DeviceHsmState for a client
     pub fn initialize(&self, request: StateInitRequest) -> Result<String, StateInitError> {
         debug!("Initializing state, request id: {}", request.request_id);
+        let response_topic = request.response_topic.clone();
 
         // 1. Validate public_key JWK (EC P-256)
         validate_ec_public_jwk(&request.public_key)?;
@@ -82,10 +83,12 @@ impl StateInitService {
         };
 
         // 6. Send response via Kafka
-        self.response_spi_port.send(response).map_err(|e| {
-            error!("Failed to send state init response: {:?}", e);
-            StateInitError::SendError
-        })?;
+        self.response_spi_port
+            .send(response, &response_topic)
+            .map_err(|e| {
+                error!("Failed to send state init response: {:?}", e);
+                StateInitError::SendError
+            })?;
 
         info!(
             "State initialization complete for request_id: {}",

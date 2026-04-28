@@ -5,12 +5,12 @@
 name: r2ps-dev
 
 services:
-  wallet-bff:
+  wallet-bff-1:
     build:
       context: .
       dockerfile: wallet-bff/Containerfile
     ports:
-      - "8088:8088"
+      - "8091:8088"
     restart: on-failure
     depends_on:
       init-kafka:
@@ -28,7 +28,51 @@ services:
       SERVE_SYNC: "true"
       SYNC_TIMEOUT_MS: 3000
       RESPONSE_TTL_SECONDS: 600
+      HSM_WORKER_RESPONSE_TOPIC: "hsm-worker-responses-bff-1"
+      STATE_INIT_RESPONSE_TOPIC: "state-init-responses-bff-1"
       RUST_LOG: "wallet_bff=info,rdkafka=warn,redis=warn"
+    networks:
+      - wallet-network
+
+  wallet-bff-2:
+    build:
+      context: .
+      dockerfile: wallet-bff/Containerfile
+    ports:
+      - "8092:8088"
+    restart: on-failure
+    depends_on:
+      init-kafka:
+        condition: service_completed_successfully
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: "kafka-1:19092,kafka-2:19092,kafka-3:19092"
+      KAFKA_BROKER_ADDRESS_FAMILY: "v4"
+      KAFKA_GROUP_ID: "r2ps-rest-api-group"
+      REDIS_HOST: "valkey"
+      REDIS_PORT: 6379
+      REDIS_USERNAME: "default"
+      REDIS_PASSWORD: "secret"
+      REDIS_DATABASE: 0
+      SERVER_PORT: 8088
+      SERVE_SYNC: "true"
+      SYNC_TIMEOUT_MS: 3000
+      RESPONSE_TTL_SECONDS: 600
+      HSM_WORKER_RESPONSE_TOPIC: "hsm-worker-responses-bff-2"
+      STATE_INIT_RESPONSE_TOPIC: "state-init-responses-bff-2"
+      RUST_LOG: "wallet_bff=info,rdkafka=warn,redis=warn"
+    networks:
+      - wallet-network
+
+  wallet-bff-lb:
+    image: nginx:alpine
+    ports:
+      - "8088:8088"
+    restart: on-failure
+    volumes:
+      - ./config/nginx-bff.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - wallet-bff-1
+      - wallet-bff-2
     networks:
       - wallet-network
 
@@ -142,9 +186,14 @@ services:
       kafka-3:
         condition: service_healthy
     entrypoint: ["/bin/sh", "-e", "/tmp/init-kafka-topics.sh"]
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: "kafka-1:19092,kafka-2:19092,kafka-3:19092"
+      WALLET_STATE_TOPIC: "wallet-state"
+      REQUEST_TOPICS: "hsm-requests,state-init-requests"
+      RESPONSE_TOPICS: "hsm-worker-responses-bff-1,state-init-responses-bff-1,hsm-worker-responses-bff-2,state-init-responses-bff-2"
+      REQUEST_TOPIC_PARTITIONS: 10
     volumes:
       - ./config/init-kafka-topics.sh:/tmp/init-kafka-topics.sh
-
     networks:
       - wallet-network
   # Optional: Kafka UI for management

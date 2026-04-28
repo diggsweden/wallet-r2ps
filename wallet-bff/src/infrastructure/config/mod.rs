@@ -42,6 +42,16 @@ pub struct AppConfig {
     pub nonce_ttl_seconds: u64,
     /// URL template for the polling endpoint (%s = correlationId)
     pub response_events_template_url: String,
+
+    /// Kafka topic for HSM worker responses directed to this instance.
+    /// Must be set via HSM_WORKER_RESPONSE_TOPIC env var.
+    /// In production, pre-provisioned by the platform team and injected at scheduling time.
+    pub hsm_worker_response_topic: String,
+
+    /// Kafka topic for state-init responses directed to this instance.
+    /// Must be set via STATE_INIT_RESPONSE_TOPIC env var.
+    /// In production, pre-provisioned by the platform team and injected at scheduling time.
+    pub state_init_response_topic: String,
 }
 
 impl AppConfig {

@@ -106,7 +106,7 @@ impl CapturingResponseSink {
 }
 
 impl WorkerResponseSpiPort for CapturingResponseSink {
-    fn send(&self, r: HsmWorkerResponse) -> Result<(), WorkerResponseError> {
+    fn send(&self, r: HsmWorkerResponse, _response_topic: &str) -> Result<(), WorkerResponseError> {
         self.responses.lock().unwrap().push(r);
         Ok(())
     }
@@ -326,6 +326,7 @@ impl TestFixture {
             request_id: req_id.to_string(),
             state_jws: self.state_jws.clone(),
             outer_request_jws: TypedJws::new(outer_jws),
+            response_topic: "test-response-topic".to_string(),
         }
     }
 }
