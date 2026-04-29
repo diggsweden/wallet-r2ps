@@ -11,6 +11,7 @@ use p256::pkcs8::EncodePublicKey;
 use rstest::{fixture, rstest};
 
 use super::jose_adapter::JoseAdapter;
+use rand_core::OsRng;
 
 struct JoseFixture {
     adapter: JoseAdapter,
@@ -19,7 +20,7 @@ struct JoseFixture {
 
 #[fixture]
 fn jose() -> JoseFixture {
-    let secret_key = SecretKey::random(&mut rand::thread_rng());
+    let secret_key = SecretKey::random(&mut OsRng);
     let public_pem_str = secret_key
         .public_key()
         .to_public_key_pem(Default::default())

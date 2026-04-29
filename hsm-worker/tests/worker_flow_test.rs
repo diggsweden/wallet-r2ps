@@ -32,6 +32,7 @@ use mockall::mock;
 use p256::SecretKey;
 use p256::elliptic_curve::sec1::ToEncodedPoint;
 use p256::pkcs8::{EncodePrivateKey, EncodePublicKey};
+use rand_core::OsRng;
 use std::sync::{Arc, Mutex};
 
 // ---------------------------------------------------------------------------
@@ -124,7 +125,7 @@ fn setup_server_crypto() -> (
     josekit::jws::alg::ecdsa::EcdsaJwsVerifier,
     String,
 ) {
-    let secret = SecretKey::random(&mut rand::thread_rng());
+    let secret = SecretKey::random(&mut OsRng);
     let pub_pem_str = secret
         .public_key()
         .to_public_key_pem(Default::default())
@@ -194,7 +195,7 @@ fn client_decrypt_inner_device(jwe_str: &str, device_private_pem_str: &str) -> V
 
 /// Create a synthetic HsmKey for testing with a given kid.
 fn make_synthetic_hsm_key(kid: &str) -> HsmKey {
-    let secret = SecretKey::random(&mut rand::thread_rng());
+    let secret = SecretKey::random(&mut OsRng);
     let ec_point = secret.public_key().to_encoded_point(false);
     HsmKey {
         wrapped_private_key: WrappedPrivateKey::new(vec![1, 2, 3, 4]),
@@ -355,7 +356,7 @@ fn make_fixture_with_hsm_keys(
     let shared_cache = Arc::new(SessionStateMemoryCache::new());
     let response_sink = CapturingResponseSink::new();
 
-    let device_secret = SecretKey::random(&mut rand::thread_rng());
+    let device_secret = SecretKey::random(&mut OsRng);
     let device_private_pem = device_secret
         .to_pkcs8_pem(Default::default())
         .unwrap()

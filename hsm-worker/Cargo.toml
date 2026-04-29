@@ -31,7 +31,7 @@ testcontainers = []
 
 [dependencies]
 hsm-common = { path = "../hsm-common" }
-rdkafka = { version = "0.38.0", features = ["cmake-build", "curl-static"] }
+rdkafka = { version = "0.39.0", features = ["cmake-build", "curl-static"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tracing = "0.1"
@@ -40,10 +40,9 @@ ctrlc = { version = "3.4", features = ["termination"] }
 dotenvy = "0.15.7"
 config = "0.15.19"
 moka = { version = "0.12", features = ["sync"] }
-strum_macros = "0.27.2"
-cryptoki = "0.10.0"
+strum_macros = "0.28.0"
+cryptoki = "0.12.0"
 opaque-ke = { version = "4.0.1", features = ["std"] }
-rand = "0.8"
 sha2 = "0.10.9"
 hkdf = "0.12"
 josekit = "0.10.3"
@@ -59,21 +58,21 @@ p256 = { version = "0.13", default-features = false, features = [
 ] }
 elliptic-curve = { version = "0.13", features = ["sec1", "jwk"] }
 pem = "3"
-der = "0.7.10"
+der = "0.8.0"
 argon2 = { version = "0.5", features = ["std"] }
+rand_core = { version = "0.6", features = ["getrandom"] }
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1.18.1", features = ["v4", "serde"] }
 digest = "0.10.7"
 hex = "0.4.3"
 clap = { version = "4", features = ["derive"] }
 utoipa = { version = "5", features = ["uuid"], optional = true }
-spki = "0"
 iso8601-duration = { version = "0.2.0", features = ["serde"] }
 problem_details = "0.9.0"
 
 [dev-dependencies]
-rstest = "0.23"
-mockall = "0.13"
+rstest = "0.26"
+mockall = "0.14"
 testcontainers = "0.27"
 testcontainers-modules = { version = "0.15", features = ["kafka"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }

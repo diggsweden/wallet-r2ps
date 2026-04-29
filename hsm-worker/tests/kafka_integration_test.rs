@@ -27,6 +27,7 @@ use hsm_worker::infrastructure::adapters::incoming::r2ps_request_kafka_message_r
 use hsm_worker::infrastructure::adapters::incoming::state_init_request_kafka_receiver::StateInitRequestKafkaReceiver;
 use hsm_worker::infrastructure::adapters::outgoing::r2ps_response_kafka_message_sender::WorkerResponseKafkaSender;
 use hsm_worker::infrastructure::adapters::outgoing::state_init_response_kafka_sender::StateInitResponseKafkaMessageSender;
+use rand_core::OsRng;
 
 // ── Container helper ─────────────────────────────────────────────────────────
 
@@ -267,7 +268,7 @@ async fn test_state_init_consumer_receives_and_processes() {
     use hsm_worker::infrastructure::adapters::outgoing::jose_adapter::JoseAdapter;
     use p256::SecretKey;
 
-    let secret = SecretKey::random(&mut rand::thread_rng());
+    let secret = SecretKey::random(&mut OsRng);
     let jose = Arc::new(JoseAdapter::new(secret).unwrap());
 
     let state_init_service = Arc::new(StateInitService::new(
@@ -295,7 +296,7 @@ async fn test_state_init_consumer_receives_and_processes() {
     use base64::prelude::BASE64_URL_SAFE_NO_PAD;
     use p256::elliptic_curve::sec1::ToEncodedPoint;
 
-    let device_secret = SecretKey::random(&mut rand::thread_rng());
+    let device_secret = SecretKey::random(&mut OsRng);
     let ec_point = device_secret.public_key().to_encoded_point(false);
 
     let request = StateInitRequest {
@@ -378,7 +379,7 @@ async fn test_worker_kafka_round_trip() {
 
     // Generate server key pair
     use hsm_worker::application::port::outgoing::jose_port::JosePort;
-    let server_secret = SecretKey::random(&mut rand::thread_rng());
+    let server_secret = SecretKey::random(&mut OsRng);
     let pub_pem_str = server_secret
         .public_key()
         .to_public_key_pem(Default::default())
@@ -463,7 +464,7 @@ async fn test_worker_kafka_round_trip() {
 
     // Build a valid HsmWorkerRequestDto for a "list-keys" operation on a fresh device
     // 1) Generate device key pair
-    let device_secret = SecretKey::random(&mut rand::thread_rng());
+    let device_secret = SecretKey::random(&mut OsRng);
     let device_pub = device_secret.public_key();
     let device_point = device_pub.to_encoded_point(false);
 

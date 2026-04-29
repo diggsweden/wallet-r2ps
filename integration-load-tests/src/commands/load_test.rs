@@ -16,7 +16,7 @@
 //!   - If mean_delay_ms=0, workers send as fast as possible (burst mode)
 
 use anyhow::Result;
-use rand::Rng;
+use rand::RngExt;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -184,7 +184,7 @@ async fn worker_loop(
     };
 
     while running.load(Ordering::Relaxed) {
-        let idx = rand::thread_rng().gen_range(0..clients.len());
+        let idx = rand::rng().random_range(0..clients.len());
         let (am, pin, client_id, hsm_kid) = &clients[idx];
 
         match run_one_cycle(am, pin, client_id, hsm_kid, args, stats, running).await {
@@ -228,7 +228,7 @@ async fn run_one_cycle(
 
         poisson_delay(args.mean_delay_ms).await;
 
-        let message: [u8; 32] = rand::thread_rng().gen();
+        let message: [u8; 32] = rand::rng().random();
         let t_sign = Instant::now();
         match am
             .hsm_sign(&session_key, &session_id, client_id, hsm_kid, &message)
@@ -259,7 +259,7 @@ async fn poisson_delay(mean_ms: u64) {
 
     let mean = mean_ms as f64;
     // -mean * ln(1 - U) where U ~ Uniform(0,1)
-    let u: f64 = rand::thread_rng().gen();
+    let u: f64 = rand::rng().random();
     let raw = -mean * (1.0 - u).ln();
     let clamped = raw.min(5.0 * mean);
 

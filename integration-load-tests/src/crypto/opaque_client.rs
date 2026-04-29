@@ -15,7 +15,7 @@ use opaque_ke::{
     CipherSuite, ClientLogin, ClientLoginFinishParameters, ClientRegistration,
     ClientRegistrationFinishParameters, CredentialResponse, Identifiers, RegistrationResponse,
 };
-use rand::rngs::OsRng;
+use rand_core::OsRng;
 
 // ─── Cipher suite (must match server + Android/Swift) ───
 

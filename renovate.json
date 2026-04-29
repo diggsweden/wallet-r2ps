@@ -27,6 +27,18 @@
       "description": "Docker base images",
       "matchManagers": ["dockerfile"],
       "addLabels": ["docker", "infrastructure"]
+    },
+    {
+      "description": "sha2 and digest are capped below 0.11 — opaque-ke 4.x requires the digest 0.10 trait family. Patch updates within 0.10.x still flow through. When upgrading opaque-ke to a digest-0.11-compatible version, update this allowedVersions in the same PR.",
+      "matchManagers": ["cargo"],
+      "matchPackageNames": ["sha2", "digest"],
+      "allowedVersions": "<0.11"
+    },
+    {
+      "description": "hkdf is capped below 0.13 — opaque-ke 4.x requires hkdf 0.12 (digest 0.10 trait family). Patch updates within 0.12.x still flow through. Update in the same PR as the opaque-ke upgrade.",
+      "matchManagers": ["cargo"],
+      "matchPackageNames": ["hkdf"],
+      "allowedVersions": "<0.13"
     }
   ]
 }

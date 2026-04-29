@@ -7,6 +7,7 @@
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use p256::ecdsa::SigningKey;
+use rand_core::OsRng;
 use sha2::{Digest, Sha256};
 
 /// EC P-256 key pair with base64url-no-pad encoded coordinates.
@@ -23,7 +24,7 @@ pub struct EcKeyPair {
 /// Returns an `EcKeyPair` with base64url-no-pad encoded x, y, d coordinates
 /// and a kid computed as the JWK thumbprint (RFC 7638).
 pub fn generate_ec_p256_keypair() -> EcKeyPair {
-    let signing_key = SigningKey::random(&mut rand::rngs::OsRng);
+    let signing_key = SigningKey::random(&mut OsRng);
     let public_key = signing_key.verifying_key();
     let ec_point = public_key.to_encoded_point(false);
 

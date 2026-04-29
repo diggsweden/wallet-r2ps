@@ -7,7 +7,7 @@ use crate::application::port::outgoing::hsm_spi_port::DerivedSecret;
 use crate::domain::{Curve, EcPublicJwk, HsmKey, WrappedPrivateKey};
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use cryptoki::context::{CInitializeArgs, Pkcs11};
+use cryptoki::context::{CInitializeArgs, CInitializeFlags, Pkcs11};
 use cryptoki::error::Error;
 use cryptoki::mechanism::Mechanism;
 use cryptoki::object::{Attribute, AttributeType, KeyType, ObjectClass, ObjectHandle};
@@ -46,7 +46,7 @@ impl HsmWrapper {
         // 1. Initialize the PKCS#11 context
         let pkcs11 = Arc::new(Pkcs11::new(config.lib_path)?);
 
-        pkcs11.initialize(CInitializeArgs::OsThreads)?;
+        pkcs11.initialize(CInitializeArgs::new(CInitializeFlags::OS_LOCKING_OK))?;
         // 2. Find the target slot ID
         let slots = pkcs11.get_slots_with_token()?;
 
@@ -73,7 +73,9 @@ impl HsmWrapper {
             });
 
         // initialize a test token
-        let user_pin = config.user_pin.map(AuthPin::new);
+        let user_pin = config
+            .user_pin
+            .map(|pin| AuthPin::new(pin.into_boxed_str()));
 
         let wrap_key_alias = config.wrap_key_alias.as_bytes().to_vec();
 
@@ -129,7 +131,6 @@ impl HsmWrapper {
             Attribute::Class(class),
             Attribute::Label(label.as_bytes().to_vec()),
         ])?;
-        session.close();
         Ok(!handles.is_empty())
     }
 
@@ -144,7 +145,6 @@ impl HsmWrapper {
         for handle in handles {
             session.destroy_object(handle)?;
         }
-        session.close();
         Ok(())
     }
 
@@ -165,7 +165,6 @@ impl HsmWrapper {
         let session = self.pkcs11.open_rw_session(self.slot)?;
         session.login(UserType::User, self.user_pin.as_ref())?;
         session.generate_key(&Mechanism::GenericSecretKeyGen, &template)?;
-        session.close();
         Ok(())
     }
 
@@ -213,7 +212,6 @@ impl HsmWrapper {
         let session = self.pkcs11.open_rw_session(self.slot)?;
         session.login(UserType::User, self.user_pin.as_ref())?;
         session.generate_key(&Mechanism::AesKeyGen, &aes_template)?;
-        session.close();
         Ok(())
     }
 
@@ -271,7 +269,7 @@ impl HsmWrapper {
         curve: &Curve,
         point: &[u8],
     ) -> Result<EcPublicJwk, Box<dyn std::error::Error>> {
-        let octet_string = OctetStringRef::from_der(point).map_err(|e| e.to_string())?;
+        let octet_string = <&OctetStringRef>::from_der(point).map_err(|e| e.to_string())?;
 
         let verifying_key =
             VerifyingKey::from_sec1_bytes(octet_string.as_bytes()).map_err(|e| e.to_string())?;
@@ -325,7 +323,6 @@ impl HsmSpiPort for HsmWrapper {
         let wrapped_private_key = self.wrap_private_key(&session, ec_private_key)?;
         let public_key_jwk = self.create_ec_public_key_jwk(&session, ec_public_key, curve)?;
 
-        session.close();
         debug!(
             "Successfully generated EC key pair with label: {} {:?}",
             ec_public_key, wrapped_private_key
@@ -365,7 +362,6 @@ impl HsmSpiPort for HsmWrapper {
             domain_separator.as_bytes(),
         )?;
 
-        session.close();
         Ok(DerivedSecret::new(hmac))
     }
 
@@ -375,7 +371,6 @@ impl HsmSpiPort for HsmWrapper {
         let private_key =
             self.unwrap_private_key(&session, key.wrapped_private_key.as_bytes().to_vec())?;
         let signature = session.sign(&Mechanism::Ecdsa, private_key, sign_payload)?;
-        session.close();
         Ok(signature)
     }
 }
@@ -391,7 +386,7 @@ mod tests {
     use crate::domain::Curve;
     use crate::infrastructure::hsm_wrapper::HsmWrapper;
     use p256::ecdsa::SigningKey;
-    use rand::rngs::OsRng;
+    use rand_core::OsRng;
 
     // Verify that the EcPublicJwk generated is a valid JWK according to JOSE.
     #[test]
