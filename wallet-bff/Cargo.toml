@@ -33,9 +33,9 @@ utoipa = { version = "5", features = ["uuid"] }
 utoipa-swagger-ui = { version = "9", features = ["axum"] }
 
 [dev-dependencies]
-uuid = { version = "1", features = ["v4"] }
-rstest = "0.26"
-tower = { version = "0.5", features = ["util"] }
-testcontainers = "0.27"
-testcontainers-modules = { version = "0.15", features = ["kafka", "valkey"] }
-base64 = "0.22"
+uuid = { version = "=1.23.1", features = ["v4"] }
+rstest = "=0.26.1"
+tower = { version = "=0.5.3", features = ["util"] }
+testcontainers = "=0.27.3"
+testcontainers-modules = { version = "=0.15.0", features = ["kafka", "valkey"] }
+base64 = "=0.22.1"
