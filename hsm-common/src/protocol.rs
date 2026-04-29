@@ -194,7 +194,7 @@ impl OperationId {
 }
 
 /// Elliptic curve identifier for key generation.
-#[derive(Debug, Clone, Serialize, Deserialize, Display)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Display)]
 #[cfg_attr(feature = "openapi", derive(ToSchema))]
 pub enum Curve {
     #[serde(rename = "P-256")]
@@ -256,6 +256,8 @@ pub struct StateInitRequest {
     pub public_key: EcPublicJwk,
     /// Kafka topic the hsm-worker should send its response to
     pub response_topic: String,
+    /// Curve used to generate the initial HSM key during state initialization.
+    pub initial_key_curve: Curve,
 }
 
 /// State initialisation response received from Kafka.
@@ -273,6 +275,9 @@ pub struct StateInitResponse {
     pub server_jws_kid: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub opaque_server_id: Option<String>,
+    /// Public key of the initial HSM key, present when `initial_key_curve` was set in the request.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub initial_hsm_key: Option<EcPublicJwk>,
 }
 
 // ─── Protocol envelope types ──────────────────────────────────────────────────

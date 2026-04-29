@@ -26,6 +26,8 @@ pub struct AppConfig {
     pub pkcs11_so_pin: Option<String>,
     pub pkcs11_user_pin: Option<String>,
     pub pkcs11_wrap_key_alias: String,
+    /// Label used for ephemeral EC key pairs generated in the HSM (PKCS#11 session objects).
+    pub hsm_key_label: String,
     /// bootstrap servers, comma separated list
     /// <https://github.com/confluentinc/librdkafka/blob/master/CONFIGURATION.md>
     pub kafka_bootstrap_servers: String,
@@ -45,6 +47,7 @@ impl AppConfig {
             .set_default("kafka_broker_address_family", "v4")?
             .set_default("opaque_context", "RPS-Ops")?
             .set_default("opaque_server_identifier", "cloud-wallet.digg.se")?
+            .set_default("hsm_key_label", "wallet-hsm-key")?
             .add_source(Environment::default())
             .build()?
             .try_deserialize()

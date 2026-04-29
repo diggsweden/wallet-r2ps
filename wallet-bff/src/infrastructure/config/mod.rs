@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 
 use config::{Config, ConfigError, Environment};
+use hsm_common::Curve;
 use serde::Deserialize;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -52,6 +53,8 @@ pub struct AppConfig {
     /// Must be set via STATE_INIT_RESPONSE_TOPIC env var.
     /// In production, pre-provisioned by the platform team and injected at scheduling time.
     pub state_init_response_topic: String,
+    /// Default curve for initial HSM key generation when the client does not specify one (e.g. "P-256")
+    pub default_initial_key_curve: Curve,
 }
 
 impl AppConfig {
@@ -76,6 +79,7 @@ impl AppConfig {
                 "response_events_template_url",
                 "http://localhost:8088/hsm/v1/requests/%s",
             )?
+            .set_default("default_initial_key_curve", "P-256")?
             .add_source(Environment::default())
             .build()?
             .try_deserialize()

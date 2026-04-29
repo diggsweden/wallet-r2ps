@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 
 use crate::application::StateInitResponseSpiPort;
+use crate::application::port::outgoing::hsm_spi_port::HsmSpiPort;
 use crate::application::port::outgoing::jose_port::JosePort;
 use crate::domain::{DeviceHsmState, DeviceKeyEntry, StateInitRequest, StateInitResponse};
 use std::sync::Arc;
@@ -12,6 +13,8 @@ use uuid::Uuid;
 pub struct StateInitService {
     response_spi_port: Arc<dyn StateInitResponseSpiPort + Send + Sync>,
     jose: Arc<dyn JosePort>,
+    hsm_spi_port: Arc<dyn HsmSpiPort + Send + Sync>,
+    hsm_key_label: String,
     opaque_server_id: String,
 }
 
@@ -21,17 +24,22 @@ pub enum StateInitError {
     InvalidPublicKey(String),
     SigningError,
     SendError,
+    HsmKeyGenerationError,
 }
 
 impl StateInitService {
     pub fn new(
         response_spi_port: Arc<dyn StateInitResponseSpiPort + Send + Sync>,
         jose: Arc<dyn JosePort>,
+        hsm_spi_port: Arc<dyn HsmSpiPort + Send + Sync>,
+        hsm_key_label: String,
         opaque_server_id: String,
     ) -> Self {
         Self {
             response_spi_port,
             jose,
+            hsm_spi_port,
+            hsm_key_label,
             opaque_server_id,
         }
     }
@@ -53,7 +61,24 @@ impl StateInitService {
         let dev_auth_code = format!("dac_{}", Uuid::new_v4());
         debug!("Generated dev_authorization_code: {}", dev_auth_code);
 
-        // 3. Create DeviceHsmState
+        // 3. Generate the initial HSM key
+        let curve = request.initial_key_curve;
+
+        info!(
+            "Generating initial HSM key with curve: {:?} label: {}",
+            curve, self.hsm_key_label
+        );
+        let hsm_key = self
+            .hsm_spi_port
+            .generate_key(&self.hsm_key_label, &curve)
+            .map_err(|e| {
+                error!("Failed to generate initial HSM key: {:?}", e);
+                StateInitError::HsmKeyGenerationError
+            })?;
+        let initial_hsm_key = hsm_key.public_key_jwk.clone();
+        let hsm_keys = vec![hsm_key];
+
+        // 4. Create DeviceHsmState
         let state = DeviceHsmState {
             version: 1,
             device_keys: vec![DeviceKeyEntry {
@@ -61,18 +86,18 @@ impl StateInitService {
                 password_files: vec![],
                 dev_authorization_code: Some(dev_auth_code.clone()),
             }],
-            hsm_keys: vec![],
+            hsm_keys,
         };
 
         debug!("Created initial DeviceHsmState: {:#?}", state);
 
-        // 4. Encode state as JWS
+        // 5. Encode state as JWS
         let state_jws = state.sign(self.jose.as_ref()).map_err(|e| {
             error!("Failed to sign state JWS: {:?}", e);
             StateInitError::SigningError
         })?;
 
-        // 5. Create response
+        // 6. Create response
         let response = StateInitResponse {
             request_id: request.request_id.clone(),
             state_jws,
@@ -80,6 +105,7 @@ impl StateInitService {
             server_jws_public_key: self.jose.jws_public_key().clone(),
             server_jws_kid: self.jose.jws_kid().to_owned(),
             opaque_server_id: self.opaque_server_id.clone(),
+            initial_hsm_key,
         };
 
         // 6. Send response via Kafka

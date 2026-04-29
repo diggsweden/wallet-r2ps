@@ -21,8 +21,8 @@ use wallet_bff::application::port::outgoing::{
 };
 use wallet_bff::application::service::ResponseService;
 use wallet_bff::domain::{
-    CachedResponse, EcPublicJwk, HsmWorkerRequest, HsmWorkerResponse, OuterRequest, OuterResponse,
-    StateInitRequest, StateInitResponse, Status, TypedJws,
+    CachedResponse, Curve, EcPublicJwk, HsmWorkerRequest, HsmWorkerResponse, OuterRequest,
+    OuterResponse, StateInitRequest, StateInitResponse, Status, TypedJws,
 };
 use wallet_bff::infrastructure::adapters::incoming::kafka::state_init_cache::StateInitCorrelationService;
 use wallet_bff::infrastructure::adapters::incoming::kafka::{
@@ -220,6 +220,7 @@ async fn test_state_init_sender_produces_to_kafka() {
         request_id: "req-200".to_string(),
         public_key: test_ec_jwk(),
         response_topic: String::new(), // overwritten by sender
+        initial_key_curve: Curve::P256,
     };
 
     use wallet_bff::application::port::outgoing::StateInitSenderPort;
@@ -379,6 +380,7 @@ async fn test_state_init_consumer_receives_and_notifies_correlation_service() {
         server_jws_public_key: None,
         server_jws_kid: None,
         opaque_server_id: None,
+        initial_hsm_key: None,
     };
     let payload = serde_json::to_string(&response).unwrap();
 

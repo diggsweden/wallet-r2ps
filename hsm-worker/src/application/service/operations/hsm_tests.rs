@@ -94,7 +94,7 @@ mod tests {
                 created_at: chrono::Utc::now(),
             })
         });
-        let op = HsmGenerateKeyOperation::new(Arc::new(mock_hsm));
+        let op = HsmGenerateKeyOperation::new(Arc::new(mock_hsm), "wallet-hsm-key".to_string());
 
         let payload = CreateKeyServiceData { curve: Curve::P256 };
         let inner_request = InnerRequest {

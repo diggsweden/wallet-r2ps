@@ -102,16 +102,25 @@ pub fn build_services(
         jose: jose.clone(),
         worker_response: Arc::new(WorkerResponseKafkaSender::new(&kafka_config)),
         session_state: Arc::new(SessionStateMemoryCache::new()),
-        hsm,
+        hsm: hsm.clone(),
         pake,
     };
 
-    let worker_service = WorkerService::new(ports, mode.legacy_key_mode);
+    let worker_service = WorkerService::new(
+        ports,
+        app_config.hsm_key_label.clone(),
+        mode.legacy_key_mode,
+    );
 
     let state_init_response_sender =
         Arc::new(StateInitResponseKafkaMessageSender::new(&kafka_config));
-    let state_init_service =
-        StateInitService::new(state_init_response_sender, jose, mode.opaque_server_id);
+    let state_init_service = StateInitService::new(
+        state_init_response_sender,
+        jose,
+        hsm,
+        app_config.hsm_key_label.clone(),
+        mode.opaque_server_id,
+    );
 
     (worker_service, state_init_service)
 }
