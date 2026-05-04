@@ -45,12 +45,15 @@ COPY hsm-worker ./hsm-worker
 COPY wallet-bff ./wallet-bff
 COPY integration-load-tests ./integration-load-tests
 
-# Build static binary
 RUN cargo build --release -p hsm-worker
 
-FROM runtime-softhsm
+# Lets reusable-ci's extract.binary export the built binaries.
+FROM scratch AS export-binary
+COPY --from=builder /app/target/release/hsm-worker /hsm-worker
+COPY --from=builder /app/target/release/digg-hsm-keytool /digg-hsm-keytool
 
-# Copy the binaries from builder
+FROM runtime-softhsm AS runtime
+
 COPY --from=builder /app/target/release/hsm-worker /hsm-worker
 COPY --from=builder /app/target/release/digg-hsm-keytool /usr/local/bin/digg-hsm-keytool
 

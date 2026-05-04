@@ -8,6 +8,7 @@
 devtools_repo := env("DEVBASE_CHECK_REPO", "https://github.com/diggsweden/devbase-check")
 devtools_dir := env("XDG_DATA_HOME", env("HOME") + "/.local/share") + "/devbase-check"
 lint := devtools_dir + "/linters"
+rust_lint := devtools_dir + "/linters/rust"
 colors := devtools_dir + "/utils/colors.sh"
 
 # Rust crate directories
@@ -37,28 +38,16 @@ default:
 [group('setup')]
 install: setup-devtools tools-install
 
-# ▪ Setup devtools (clone or update)
+# ▪ Setup devtools (clone on first run, then delegate to devbase-check)
 [group('setup')]
 setup-devtools:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    if [[ -d "{{devtools_dir}}" ]]; then
-        # setup.sh handles update checks with 1-hour cache
-        if [[ -f "{{devtools_dir}}/scripts/setup.sh" ]]; then
-            "{{devtools_dir}}/scripts/setup.sh" "{{devtools_repo}}" "{{devtools_dir}}"
-        fi
-    else
-        printf "Cloning devbase-check to %s...\n" "{{devtools_dir}}"
-        mkdir -p "$(dirname "{{devtools_dir}}")"
-        git clone --depth 1 "{{devtools_repo}}" "{{devtools_dir}}"
-        git -C "{{devtools_dir}}" fetch --tags --depth 1 --quiet
-        latest=$(git -C "{{devtools_dir}}" describe --tags --abbrev=0 origin/main 2>/dev/null || echo "")
-        if [[ -n "$latest" ]]; then
-            git -C "{{devtools_dir}}" fetch --depth 1 origin tag "$latest" --quiet
-            git -C "{{devtools_dir}}" checkout "$latest" --quiet
-        fi
-        printf "Installed devbase-check %s\n" "${latest:-main}"
-    fi
+    @[ -d "{{devtools_dir}}" ] || { mkdir -p "$(dirname "{{devtools_dir}}")" && git clone --depth 1 "{{devtools_repo}}" "{{devtools_dir}}"; }
+    @"{{devtools_dir}}/scripts/setup.sh" "{{devtools_repo}}" "{{devtools_dir}}"
+
+# ▪ Force-update devtools to latest release tag (or --ref <branch/tag/sha>)
+[group('setup')]
+update-devtools *ARGS:
+    @"{{devtools_dir}}/scripts/update.sh" "{{devtools_dir}}" {{ ARGS }}
 
 # Check required tools are installed
 [group('setup')]
@@ -78,7 +67,7 @@ tools-install: _ensure-devtools
 [group('verify')]
 verify: _ensure-devtools check-tools
     @{{devtools_dir}}/scripts/verify.sh
-    @just audit
+    @just cargo-audit
     @just test
 
 # ==================================================================================== #
@@ -88,8 +77,6 @@ verify: _ensure-devtools check-tools
 # ▪ Run all linters with summary
 [group('lint')]
 lint-all: _ensure-devtools
-    @just lint-rust
-    @just lint-rust-fmt
     @{{devtools_dir}}/scripts/verify.sh
 
 # Validate version control
@@ -147,35 +134,20 @@ lint-container:
 lint-xml:
     @echo "ⓘ No XML files in this project — skipping"
 
-# Run cargo clippy on all crates
+# Run all Rust linters (clippy; rustfmt check is a separate recipe)
 [group('lint')]
-lint-rust:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    source "{{colors}}"
-    just_header "Clippy" "cargo clippy"
-    if cargo clippy --workspace --all-targets -- -D warnings 2>&1; then
-        printf "\033[32m✓\033[0m\n"
-    else
-        printf "\033[31m✗\033[0m\n"
-        exit 1
-    fi
-    just_success "Clippy passed"
+lint-rust: _rust-toolchain-ready
+    @{{rust_lint}}/lint.sh
 
-# Check Rust formatting
+# Run cargo clippy only (alternative entry point parallel to lint-rust)
 [group('lint')]
-lint-rust-fmt:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    source "{{colors}}"
-    just_header "Rust fmt check" "cargo fmt --check"
-    if cargo fmt --check 2>&1; then
-        printf "\033[32m✓\033[0m\n"
-    else
-        printf "\033[31m✗\033[0m\n"
-        exit 1
-    fi
-    just_success "Rust formatting OK"
+lint-rust-clippy: _rust-toolchain-ready
+    @{{rust_lint}}/clippy.sh
+
+# Check Rust formatting (delegates to devbase-check; uses --all for workspace)
+[group('lint')]
+lint-rust-fmt: _rust-toolchain-ready
+    @{{rust_lint}}/format.sh check
 
 # ==================================================================================== #
 # LINT-FIX - Auto-fix code issues
@@ -205,30 +177,18 @@ lint-shell-fmt-fix:
 
 # Fix Rust formatting
 [group('lint-fix')]
-lint-rust-fmt-fix:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    source "{{colors}}"
-    just_header "Rust fmt fix" "cargo fmt"
-    cargo fmt
-    printf "\033[32m✓\033[0m\n"
-    just_success "Rust formatting fixed"
+lint-rust-fmt-fix: _rust-toolchain-ready
+    @{{rust_lint}}/format.sh fix
 
 # ==================================================================================== #
 # SECURITY - Dependency auditing
 # ==================================================================================== #
 
-# Audit crate dependencies for known vulnerabilities
-
+# Audit crate dependencies. Named `cargo-audit` so verify.sh skips it —
+# audit is slow and shouldn't gate `just lint-all`.
 [group('security')]
-audit:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    source "{{colors}}"
-    just_header "Audit" "cargo audit"
-    command -v cargo-audit >/dev/null 2>&1 || cargo install cargo-audit --locked
-    cargo audit -f Cargo.lock
-    just_success "No known vulnerabilities"
+cargo-audit: _rust-toolchain-ready
+    @{{rust_lint}}/audit.sh
 
 # ==================================================================================== #
 # TEST - Run tests
@@ -309,3 +269,8 @@ clean:
 [private]
 _ensure-devtools:
     @just setup-devtools
+
+# mise's core:rust skips rust-toolchain.toml's `components` — add them.
+[private]
+_rust-toolchain-ready:
+    @rustup component add clippy rustfmt 2>/dev/null || true

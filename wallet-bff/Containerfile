@@ -23,7 +23,11 @@ COPY integration-load-tests ./integration-load-tests
 
 RUN cargo build --release -p wallet-bff
 
-FROM debian:bookworm-slim@sha256:f9c6a2fd2ddbc23e336b6257a5245e31f996953ef06cd13a59fa0a1df2d5c252
+# Lets reusable-ci's extract.binary export the built binary.
+FROM scratch AS export-binary
+COPY --from=builder /app/target/release/wallet-bff /wallet-bff
+
+FROM debian:bookworm-slim@sha256:f9c6a2fd2ddbc23e336b6257a5245e31f996953ef06cd13a59fa0a1df2d5c252 AS runtime
 
 RUN apt-get update && apt-get install -y \
     zlib1g \

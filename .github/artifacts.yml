@@ -3,33 +3,51 @@
 # SPDX-License-Identifier: CC0-1.0
 
 # Artifacts Configuration for wallet-r2ps
-# Defines what to build and where to publish
+# Defines what to build and where to publish.
+#
+# Pattern B (compiled-native): the Containerfile is the build environment.
+# sbom-cargo.yml emits a manifest-derived SBOM only; the actual cargo build
+# happens inside each service's multi-stage Containerfile, which is also
+# where native deps live. See
+# https://github.com/diggsweden/reusable-ci/blob/main/docs/ecosystems.md
+# for the full framing.
+#
+# Workspace-level cargo test (with testcontainers features) runs separately
+# via .github/workflows/test.yml from pullrequest-workflow.yml. Per-artefact
+# tests would re-run the full workspace twice and miss the required features.
 
 artifacts:
   - name: hsm-worker
-    project-type: rust
+    project-type: cargo
     working-directory: ./hsm-worker
-    build-type: application
-
   - name: wallet-bff
-    project-type: rust
+    project-type: cargo
     working-directory: ./wallet-bff
-    build-type: application
 
 containers:
   - name: hsm-worker
     from: [hsm-worker]
-    container-file: Containerfile
-    context: ./hsm-worker
+    container-file: hsm-worker/Containerfile
+    context: .
+    target: runtime
     platforms: linux/amd64,linux/arm64
     registry: ghcr.io
+    extract:
+      binary:
+        target: export-binary
+        names: [hsm-worker, digg-hsm-keytool]
 
   - name: wallet-bff
     from: [wallet-bff]
-    container-file: Containerfile
-    context: ./wallet-bff
+    container-file: wallet-bff/Containerfile
+    context: .
+    target: runtime
     platforms: linux/amd64,linux/arm64
     registry: ghcr.io
+    extract:
+      binary:
+        target: export-binary
+        names: [wallet-bff]
 
 publishers:
   - type: github-packages
