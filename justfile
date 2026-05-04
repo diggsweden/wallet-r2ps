@@ -79,7 +79,6 @@ tools-install: _ensure-devtools
 [group('verify')]
 verify: _ensure-devtools check-tools
     @{{devtools_dir}}/scripts/verify.sh
-    @just audit
     @just test
 
 # ==================================================================================== #
@@ -202,6 +201,10 @@ audit:
     command -v cargo-audit >/dev/null 2>&1 || cargo install cargo-audit --locked
     cargo audit -f Cargo.lock
     just_success "No known vulnerabilities"
+
+[group('security')]
+rust-audit:
+    @{{rust_lint}}/audit.sh
 
 # ==================================================================================== #
 # TEST - Run tests
