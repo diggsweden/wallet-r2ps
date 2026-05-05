@@ -21,21 +21,23 @@ concurrency:
 
 jobs:
   pr-checks:
-    uses: diggsweden/reusable-ci/.github/workflows/pullrequest-orchestrator.yml@a89d880d9a859491c09c300428caa17c9644b39b # v2.8.0
+    uses: diggsweden/reusable-ci/.github/workflows/pullrequest-orchestrator.yml@d31c989acd139c3e8754e116496c826af8dbbca0 # v2.8.2
     secrets: inherit
     permissions:
       contents: read # Clone repository and read source code
       packages: read # Access GitHub Packages
       security-events: write # Upload security scan results to Security tab
     with:
-      reusable-ci-ref: v2.7.9
-      project-type: rust
+      reusable-ci-ref: d31c989acd139c3e8754e116496c826af8dbbca0
+      project-type: cargo
       # Use devbase-check linting (replaces megalint, commitlint, licenselint)
       linters.devbasecheck: true
       linters.megalint: false
       linters.commitlint: false
       linters.licenselint: false
       linters.dependencyreview: true
+      # Rust quality gates run via devbase-check's lint-rust*/rust-audit
+      # recipes (see justfile), invoked through linters.devbasecheck above.
 
   test:
     permissions:
