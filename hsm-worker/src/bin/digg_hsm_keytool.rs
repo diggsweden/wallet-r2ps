@@ -99,11 +99,8 @@ fn main() {
                 .expect("Failed to search HSM")
             {
                 if !force {
-                    eprintln!(
-                        "Error: wrapping key '{}' already exists. Use --force to overwrite.",
-                        label
-                    );
-                    std::process::exit(1);
+                    println!("Wrapping key '{}' already exists, skipping.", label);
+                    return;
                 }
                 hsm_bare
                     .destroy_objects_by_label(ObjectClass::SECRET_KEY, &label)

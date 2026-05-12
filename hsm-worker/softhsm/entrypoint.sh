@@ -15,5 +15,13 @@ else
   echo "SoftHSM token already initialized, skipping..."
 fi
 
+# Create the AES wrapping key if not already present
+echo "Ensuring AES wrapping key '${PKCS11_WRAP_KEY_ALIAS}' exists..."
+/usr/local/bin/digg-hsm-keytool \
+  --hsm-lib "${PKCS11_LIB}" \
+  --slot-token-label "${PKCS11_SLOT_TOKEN_LABEL}" \
+  --pin "${PKCS11_USER_PIN}" \
+  create-wrapping-key --label "${PKCS11_WRAP_KEY_ALIAS}"
+
 # Execute the main command
 exec "$@"
