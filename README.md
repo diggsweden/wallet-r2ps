@@ -101,6 +101,24 @@ make logs
 make down
 ```
 
+## Local k3s development
+
+Requires a running k3s-environment cluster with `wallet-accessmechanism-gitops` registered (`make k3s-register` in that repo).
+
+```bash
+make k3s-deploy      # build + push images to local Zot registry (no pod restart)
+make k3s-rollout-now # force immediate pod restart, bypassing Flux reconciliation
+make k3s-setup       # full init: seal secrets, push+register gitops, deploy, rollout
+```
+
+Variables (all optional):
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `K3S_REGISTRY` | `registry.dev.local:8443` | Zot registry endpoint |
+| `K3S_NAMESPACE` | `wallet-hsm` | Target namespace |
+| `K3S_TAG` | `k3s` | Image tag |
+
 ## Troubleshooting
 
 ### Permission Denied on softhsm-tokens
