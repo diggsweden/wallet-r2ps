@@ -28,8 +28,7 @@ mod tests {
             outer_request: OuterRequest {
                 version: 1,
                 session_id: None,
-                context: "hsm".to_string(),
-                inner_jwe: None, // Simplified for testing HSM ops
+                inner_jwe: None,
                 server_kid: None,
                 nonce: "test-nonce".to_string(),
             },

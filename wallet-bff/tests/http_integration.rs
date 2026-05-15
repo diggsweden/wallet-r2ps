@@ -232,7 +232,6 @@ fn build_test_outer_jws() -> String {
     let header = URL_SAFE_NO_PAD.encode(r#"{"alg":"ES256","kid":"test-key"}"#);
     let payload_json = serde_json::json!({
         "version": 1,
-        "context": "hsm",
         "nonce": "some_nonce"
     });
     let payload = URL_SAFE_NO_PAD.encode(serde_json::to_string(&payload_json).unwrap());

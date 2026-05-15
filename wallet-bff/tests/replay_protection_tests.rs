@@ -58,7 +58,7 @@ fn jws_with_nonce(nonce: &str) -> String {
     use base64::Engine;
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
     let header = URL_SAFE_NO_PAD.encode(r#"{"alg":"ES256","kid":"test-key"}"#);
-    let payload = serde_json::json!({ "version": 1, "context": "hsm", "nonce": nonce });
+    let payload = serde_json::json!({ "version": 1, "nonce": nonce });
     let payload_enc = URL_SAFE_NO_PAD.encode(serde_json::to_string(&payload).unwrap());
     let sig = URL_SAFE_NO_PAD.encode(b"fakesig");
     format!("{}.{}.{}", header, payload_enc, sig)
@@ -159,7 +159,7 @@ async fn missing_nonce_field_returns_400() {
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
     let header = URL_SAFE_NO_PAD.encode(r#"{"alg":"ES256"}"#);
     // Valid JWS structure but payload contains no 'nonce' field
-    let payload = URL_SAFE_NO_PAD.encode(r#"{"version":1,"context":"hsm"}"#);
+    let payload = URL_SAFE_NO_PAD.encode(r#"{"version":1}"#);
     let sig = URL_SAFE_NO_PAD.encode(b"fakesig");
     let jws = format!("{}.{}.{}", header, payload, sig);
 

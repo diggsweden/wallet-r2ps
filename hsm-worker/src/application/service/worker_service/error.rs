@@ -27,7 +27,6 @@ pub enum OuterError {
     InnerJweDecryptFailed,
     UnknownEncryptionOption,
     SessionKeyMissing,
-    UnsupportedContext,
 }
 
 /// An error tagged by who can see it on the return path.

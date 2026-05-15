@@ -288,7 +288,6 @@ pub struct StateInitResponse {
 pub struct OuterRequest {
     pub version: u32,
     pub session_id: Option<SessionId>,
-    pub context: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub server_kid: Option<String>,
     /// JWE compact serialization of the encrypted InnerRequest

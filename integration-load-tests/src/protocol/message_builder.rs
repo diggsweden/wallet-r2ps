@@ -35,7 +35,6 @@ pub fn build_pake_request_jws(
     let outer_request = OuterRequest {
         version: 1,
         session_id: session_id.map(|s| SessionId::from(s.to_string())),
-        context: "hsm".to_string(),
         server_kid: None,
         inner_jwe: Some(TypedJwe::new(inner_jwe)),
         nonce: uuid::Uuid::new_v4().to_string(),
@@ -70,7 +69,6 @@ pub fn build_session_request_jws(
     let outer_request = OuterRequest {
         version: 1,
         session_id: Some(SessionId::from(session_id.to_string())),
-        context: "hsm".to_string(),
         server_kid: None,
         inner_jwe: Some(TypedJwe::new(inner_jwe)),
         nonce: uuid::Uuid::new_v4().to_string(),

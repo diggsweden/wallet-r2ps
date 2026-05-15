@@ -213,11 +213,10 @@ pub fn make_request(request_id: &str) -> HsmWorkerRequest {
     }
 }
 
-pub fn make_outer(context: &str, session_id: Option<SessionId>) -> OuterRequest {
+pub fn make_outer(session_id: Option<SessionId>) -> OuterRequest {
     OuterRequest {
         version: 1,
         session_id,
-        context: context.to_string(),
         inner_jwe: Some(TypedJwe::new("inner.jwe".to_string())),
         server_kid: None,
         nonce: "some_nonce".to_string(),
