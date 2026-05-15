@@ -45,13 +45,13 @@ pub struct AppConfig {
     pub response_events_template_url: String,
 
     /// Kafka topic for HSM worker responses directed to this instance.
-    /// Must be set via HSM_WORKER_RESPONSE_TOPIC env var.
-    /// In production, pre-provisioned by the platform team and injected at scheduling time.
+    /// Set explicitly via HSM_WORKER_RESPONSE_TOPIC, or defaulted to
+    /// `hsm-worker-responses-${POD_NAME}` when POD_NAME is injected (StatefulSet).
     pub hsm_worker_response_topic: String,
 
     /// Kafka topic for state-init responses directed to this instance.
-    /// Must be set via STATE_INIT_RESPONSE_TOPIC env var.
-    /// In production, pre-provisioned by the platform team and injected at scheduling time.
+    /// Set explicitly via STATE_INIT_RESPONSE_TOPIC, or defaulted to
+    /// `state-init-responses-${POD_NAME}` when POD_NAME is injected (StatefulSet).
     pub state_init_response_topic: String,
     /// Default curve for initial HSM key generation when the client does not specify one (e.g. "P-256")
     pub default_initial_key_curve: Curve,
@@ -60,6 +60,7 @@ pub struct AppConfig {
 impl AppConfig {
     pub fn new() -> Result<Self, ConfigError> {
         dotenvy::dotenv().ok();
+        let pod_name = std::env::var("POD_NAME").unwrap_or_else(|_| "default".to_string());
         Config::builder()
             .set_default("kafka_group_id", "r2ps-rest-api-group")?
             .set_default("kafka_broker_address_family", "v4")?
@@ -80,6 +81,14 @@ impl AppConfig {
                 "http://localhost:8088/hsm/v1/requests/%s",
             )?
             .set_default("default_initial_key_curve", "P-256")?
+            .set_default(
+                "hsm_worker_response_topic",
+                format!("hsm-worker-responses-{pod_name}"),
+            )?
+            .set_default(
+                "state_init_response_topic",
+                format!("state-init-responses-{pod_name}"),
+            )?
             .add_source(Environment::default())
             .build()?
             .try_deserialize()
