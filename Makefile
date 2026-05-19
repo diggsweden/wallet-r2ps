@@ -63,6 +63,7 @@ down:
 logs:
 	docker compose logs -f hsm-worker
 
+# REUSE-IgnoreStart
 ## k3s-seal-secrets: seal .env.softhsm + .env.opaque into gitops sealed-secrets.yaml
 ## Re-run after cluster rebuild (new sealed-secrets key) or when .env files change.
 ## Requires: k3s-environment 'make up' done, kubeseal shim in PATH.
@@ -87,6 +88,7 @@ k3s-seal-secrets:
 	  _seal hsm-worker-opaque .env.opaque; \
 	} > "$(K3S_GITOPS_DIR)/apps/hsm-worker/sealed-secrets.yaml"
 	@echo "Sealed: $(K3S_GITOPS_DIR)/apps/hsm-worker/sealed-secrets.yaml"
+# REUSE-IgnoreEnd
 
 ## k3s-deploy: build + push :k3s images to local registry (no pod restart)
 ## Run k3s-rollout in wallet-accessmechanism-gitops to trigger the actual rollout.
