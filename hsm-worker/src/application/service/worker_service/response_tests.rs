@@ -167,7 +167,7 @@ mod error_handling {
         } = setup_builder();
         let request_id = "someRequest";
         let process_err = ProcessError {
-            error: WorkerError::Outer(OuterError::UnsupportedContext),
+            error: WorkerError::Outer(OuterError::InnerJweMissing),
             context: None,
         };
 
@@ -195,7 +195,7 @@ mod error_handling {
         assert!(
             outer_response
                 .error_message
-                .is_some_and(|msg| msg.contains("UnsupportedContext"))
+                .is_some_and(|msg| msg.contains("InnerJweMissing"))
         );
     }
 

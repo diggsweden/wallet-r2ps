@@ -7,7 +7,7 @@ use crate::application::port::outgoing::session_state_spi_port::SessionKey;
 use crate::application::protocol::OuterRequestExt;
 use crate::application::service::operations::OperationContext;
 use crate::application::service::worker_service::context::{ResponseContext, WorkerInput};
-use crate::application::service::worker_service::error::{OuterError, UpstreamError, WorkerError};
+use crate::application::service::worker_service::error::{UpstreamError, WorkerError};
 use crate::domain::OuterRequest;
 use crate::domain::{DeviceHsmState, EcPublicJwk, HsmWorkerRequest, SessionId};
 use std::sync::Arc;
@@ -69,10 +69,6 @@ impl RequestDecoder {
             self.jose.as_ref(),
             &device_public_key,
         )?;
-
-        if outer_request.context != "hsm" {
-            return Err(OuterError::UnsupportedContext.into());
-        }
 
         match &outer_request.server_kid {
             Some(kid) if kid != self.jose.jws_kid() => {

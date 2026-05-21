@@ -313,7 +313,6 @@ impl TestFixture {
         let outer = OuterRequest {
             version: 1,
             session_id,
-            context: "hsm".to_string(),
             server_kid: Some(self.server_jose.jws_kid().to_string()),
             inner_jwe: Some(TypedJwe::new(inner_jwe)),
             nonce: "some_nonce".to_string(),

@@ -51,8 +51,6 @@ pub enum ServiceRequestError {
     DuplicateKey,
     /// The referenced HSM key was not found
     HsmKeyNotFound,
-    /// The request context is not supported
-    UnsupportedContext,
     /// The operation is not permitted in the current session state
     InvalidOperation,
     /// An internal server error occurred

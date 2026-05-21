@@ -86,7 +86,7 @@ fn test_execute_returns_connection_error_when_response_send_fails() {
 fn test_execute_returns_response_build_error_when_error_response_signing_fails() {
     let jose = MockJoseDeterministic::new(
         &make_state("device-kid"),
-        &make_outer("unsupported-context", Some(SessionId::new())),
+        &make_outer(Some(SessionId::new())),
         &[],
         "session",
         true,
@@ -120,10 +120,9 @@ fn test_execute_returns_internal_server_error_response_when_transition_fails() {
         data: Some(serde_json::to_string(&pake_request).unwrap()),
     })
     .unwrap();
-    // context "hsm" routes to the HSM context handler; the inner OperationId drives the actual operation
     let jose = MockJoseDeterministic::new(
         &make_state_with_password_file("device-kid"),
-        &make_outer("hsm", None),
+        &make_outer(None),
         &inner_bytes,
         "device",
         false,

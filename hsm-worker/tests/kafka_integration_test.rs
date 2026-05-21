@@ -574,7 +574,6 @@ async fn test_worker_kafka_round_trip() {
     let outer_request = OuterRequest {
         version: 1,
         session_id: None,
-        context: "hsm".to_string(),
         server_kid: Some(jose.jws_kid().to_string()),
         inner_jwe: Some(TypedJwe::new(inner_jwe_str)),
         nonce: "some_nonce".to_string(),
