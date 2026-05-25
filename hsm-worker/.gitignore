@@ -10,8 +10,9 @@ openapi.json
 # Generated mdbook output
 docs/book/book/
 
-# Generated API reference markdown
+# Generated API reference markdown (README.md is the static landing page)
 docs/book/src/api-reference/*.md
+!docs/book/src/api-reference/README.md
 
 # Old HTML documentation artifacts (can be removed after migration)
 docs/domain-model.html
