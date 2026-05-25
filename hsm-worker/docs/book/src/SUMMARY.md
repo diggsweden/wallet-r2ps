@@ -11,8 +11,8 @@ SPDX-License-Identifier: EUPL-1.2
 ## API Reference
 
 - [API Reference](api-reference/README.md)
-  - [HsmWorkerRequestDto](api-reference/hsm-worker-request-dto.md)
-  - [WorkerResponseJws](api-reference/worker-response-jws.md)
+  - [HsmWorkerRequest](api-reference/hsm-worker-request.md)
+  - [HsmWorkerResponse](api-reference/hsm-worker-response.md)
   - [DeviceHsmState](api-reference/device-hsm-state.md)
   - [OuterRequest](api-reference/outer-request.md)
   - [OuterResponse](api-reference/outer-response.md)
