@@ -148,11 +148,11 @@ mod tests {
         // Verify no state mutation (Sign doesn't change state)
         assert!(result.state.is_none());
 
-        // Verify response contains a valid DER-encoded P-256 signature
+        // Verify response contains a valid P1363-encoded P-256 signature (raw r‖s, 64 bytes)
         let serialized = result.data.serialize().unwrap();
         let response: SignatureResponse = serde_json::from_slice(&serialized).unwrap();
-        p256::ecdsa::Signature::from_der(&response.signature)
-            .expect("response should contain a valid DER-encoded P-256 signature");
+        p256::ecdsa::Signature::from_slice(&response.signature)
+            .expect("response should contain a valid P1363-encoded P-256 signature");
     }
 
     #[test]

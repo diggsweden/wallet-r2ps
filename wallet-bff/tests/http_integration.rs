@@ -584,6 +584,146 @@ async fn test_post_legacy_operations_timeout_returns_408() {
 }
 
 // ---------------------------------------------------------------------------
+// state_jws passthrough tests
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_post_hsm_request_state_jws_in_body_bypasses_port_lookup() {
+    // No state in port — request should succeed because stateJws is in the body.
+    let ctx = make_test_app(TestAppConfig {
+        device_state: None,
+        ..Default::default()
+    });
+
+    let body = serde_json::json!({
+        "clientId": "test-client",
+        "outerRequestJws": build_test_outer_jws(),
+        "stateJws": "inline-state-token"
+    });
+
+    let response = ctx
+        .app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/hsm/v1/requests")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&body).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        response.status(),
+        StatusCode::ACCEPTED,
+        "stateJws in body must prevent 404 even when port has no state"
+    );
+}
+
+#[tokio::test]
+async fn test_post_device_state_existing_overwrite_false_returns_state_jws() {
+    // Default config has device_state = Some("mock-state-jws").
+    let ctx = make_test_app(TestAppConfig::default());
+
+    let body = serde_json::json!({
+        "publicKey": dummy_public_key_json(),
+        "overwrite": false
+    });
+
+    let response = ctx
+        .app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/hsm/v1/device-states")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&body).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let dto = read_body_json(response).await;
+    assert_eq!(
+        dto["stateJws"], "mock-state-jws",
+        "existing stateJws must be returned when overwrite=false"
+    );
+}
+
+#[tokio::test]
+async fn test_post_device_state_init_success_includes_state_jws() {
+    let ctx = make_test_app(TestAppConfig {
+        device_state: None,
+        state_init_response: Some(ok_state_init_response()),
+        ..Default::default()
+    });
+
+    let body = serde_json::json!({
+        "publicKey": dummy_public_key_json(),
+        "overwrite": false
+    });
+
+    let response = ctx
+        .app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/hsm/v1/device-states")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&body).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let dto = read_body_json(response).await;
+    assert_eq!(
+        dto["stateJws"], "mock-state-jws",
+        "stateJws from StateInitResponse must be present in success response"
+    );
+}
+
+#[tokio::test]
+async fn test_post_hsm_request_sync_complete_includes_state_jws() {
+    let mut cached = ok_cached_response();
+    cached.state_jws = Some("updated-state-token".to_string());
+
+    let ctx = make_test_app(TestAppConfig {
+        serve_sync: true,
+        sync_response: Some(cached),
+        ..Default::default()
+    });
+
+    let body = serde_json::json!({
+        "clientId": "test-client",
+        "outerRequestJws": build_test_outer_jws()
+    });
+
+    let response = ctx
+        .app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/hsm/v1/requests")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&body).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let dto = read_body_json(response).await;
+    assert_eq!(
+        dto["stateJws"], "updated-state-token",
+        "stateJws from worker response must be forwarded in complete async response"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Contract tests
 // ---------------------------------------------------------------------------
 
