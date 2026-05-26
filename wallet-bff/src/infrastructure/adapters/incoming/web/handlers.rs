@@ -132,20 +132,23 @@ pub async fn service(
     };
     let instance = uri.path().to_string();
 
-    let state_jws = match state.device_state_port.load(&req.client_id).await {
+    let state_jws = match req.state_jws {
         Some(s) => s,
-        None => {
-            info!("No state found for clientId: {}", req.client_id);
-            return problem_response(
-                StatusCode::NOT_FOUND,
-                "Device Not Found",
-                Some(&format!(
-                    "No device state found for clientId: {}",
-                    req.client_id
-                )),
-                &instance,
-            );
-        }
+        None => match state.device_state_port.load(&req.client_id).await {
+            Some(s) => s,
+            None => {
+                info!("No state found for clientId: {}", req.client_id);
+                return problem_response(
+                    StatusCode::NOT_FOUND,
+                    "Device Not Found",
+                    Some(&format!(
+                        "No device state found for clientId: {}",
+                        req.client_id
+                    )),
+                    &instance,
+                );
+            }
+        },
     };
 
     let request_id = Uuid::new_v4();
@@ -203,6 +206,7 @@ pub async fn service(
         status: AsyncResponseStatus::Pending,
         result: None,
         result_url: Some(location.clone()),
+        state_jws: None,
     };
     let mut headers = HeaderMap::new();
     if let Ok(v) = location.parse() {
@@ -309,7 +313,7 @@ pub async fn create_state(
     };
 
     if !req.overwrite
-        && let Some(_existing) = state.device_state_port.load(&client_id).await
+        && let Some(existing_state) = state.device_state_port.load(&client_id).await
     {
         let dto = NewStateResponseDto {
             status: "OK".to_string(),
@@ -317,6 +321,7 @@ pub async fn create_state(
             dev_authorization_code: None,
             server_jws_public_key: None,
             opaque_server_id: None,
+            state_jws: Some(existing_state),
         };
         return Json(dto).into_response();
     }
@@ -380,6 +385,7 @@ pub async fn create_state(
                 dev_authorization_code: Some(resp.dev_authorization_code),
                 server_jws_public_key: resp.server_jws_public_key,
                 opaque_server_id: resp.opaque_server_id,
+                state_jws: Some(resp.state_jws),
             };
             Json(dto).into_response()
         }
@@ -410,6 +416,7 @@ pub fn build_async_response(
                 status: AsyncResponseStatus::Pending,
                 result: None,
                 result_url: Some(polling_url.clone()),
+                state_jws: None,
             };
             let mut headers = HeaderMap::new();
             if let Ok(v) = polling_url.parse() {
@@ -444,6 +451,7 @@ pub fn build_async_response(
                 status: AsyncResponseStatus::Complete,
                 result: resp.outer_response_jws.map(|j| j.into_string()),
                 result_url: None,
+                state_jws: resp.state_jws,
             };
             Json(body).into_response()
         }
