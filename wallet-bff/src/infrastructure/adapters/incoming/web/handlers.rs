@@ -4,14 +4,14 @@
 
 use axum::Json;
 use axum::extract::{OriginalUri, Path, State, rejection::JsonRejection};
-use axum::http::{HeaderMap, StatusCode, header};
+use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::IntoResponse;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 use tracing::info;
 use uuid::Uuid;
 
-use super::problem_response;
+use super::{problem_response, tracked_problem_response};
 use crate::application::port::incoming::ResponseUseCase;
 use crate::application::port::outgoing::{
     DeviceStatePort, RequestSenderPort, StateInitCorrelationPort, StateInitSenderPort,
@@ -23,6 +23,13 @@ use crate::domain::{
 };
 
 pub const PROBLEM_CONTENT_TYPE: &str = "application/problem+json";
+
+static PROBLEM_CONTENT_TYPE_HEADER: OnceLock<HeaderValue> = OnceLock::new();
+
+pub(super) fn problem_content_type_header() -> &'static HeaderValue {
+    PROBLEM_CONTENT_TYPE_HEADER
+        .get_or_init(|| PROBLEM_CONTENT_TYPE.parse().expect("valid content type"))
+}
 
 pub struct AppState {
     pub device_state_port: Arc<dyn DeviceStatePort>,
@@ -42,15 +49,6 @@ impl AppState {
         self.response_events_template_url
             .replace("%s", correlation_id)
     }
-}
-
-/// Returns a pre-built RFC 9457 JSON string (from the worker) as a problem+json response.
-fn forward_problem_response(status: StatusCode, raw_json: String) -> axum::response::Response {
-    let mut response = (status, raw_json).into_response();
-    response
-        .headers_mut()
-        .insert(header::CONTENT_TYPE, PROBLEM_CONTENT_TYPE.parse().unwrap());
-    response
 }
 
 /// Maps a JsonRejection to the appropriate RFC 9457 status + messages (SAK.25/26: no internals).
@@ -87,8 +85,10 @@ fn json_rejection_response(e: JsonRejection, instance: &str) -> axum::response::
     params(("correlationId" = Uuid, Path, description = "Correlation ID returned by a prior POST /hsm/requests")),
     responses(
         (status = 200, description = "Request completed", body = AsyncResponseDto),
-        (status = 202, description = "Request still pending", body = AsyncResponseDto),
+        (status = 202, description = "Request still pending", body = AsyncResponseDto,
+            headers(("Location" = String, description = "URL to poll for the result"))),
         (status = 500, description = "Internal server error", body = ProblemDetail, content_type = "application/problem+json"),
+        (status = "default", description = "Unexpected error", body = ProblemDetail, content_type = "application/problem+json"),
     )
 )]
 pub async fn task_response(
@@ -113,9 +113,12 @@ pub async fn task_response(
     request_body(content = BffRequest, content_type = "application/json"),
     responses(
         (status = 200, description = "Request completed synchronously", body = AsyncResponseDto),
-        (status = 202, description = "Request accepted, poll for result", body = AsyncResponseDto),
+        (status = 202, description = "Request accepted, poll for result", body = AsyncResponseDto,
+            headers(("Location" = String, description = "URL to poll for the result"))),
         (status = 404, description = "Device state not found", body = ProblemDetail, content_type = "application/problem+json"),
+        (status = 409, description = "Duplicate nonce — generate a new nonce and retry", body = ProblemDetail, content_type = "application/problem+json"),
         (status = 500, description = "Internal server error", body = ProblemDetail, content_type = "application/problem+json"),
+        (status = "default", description = "Unexpected error", body = ProblemDetail, content_type = "application/problem+json"),
     )
 )]
 pub async fn service(
@@ -170,11 +173,12 @@ pub async fn service(
         .await
     {
         tracing::error!("Failed to send worker request: {}", e);
-        return problem_response(
+        return tracked_problem_response(
             StatusCode::INTERNAL_SERVER_ERROR,
             "Internal Server Error",
             Some("Failed to enqueue the request."),
             &instance,
+            &request_id_str,
         );
     }
 
@@ -199,7 +203,6 @@ pub async fn service(
         status: AsyncResponseStatus::Pending,
         result: None,
         result_url: Some(location.clone()),
-        error: None,
     };
     let mut headers = HeaderMap::new();
     if let Ok(v) = location.parse() {
@@ -214,9 +217,12 @@ pub async fn service(
     path = "/hsm/v1/operations",
     request_body(content = BffRequest, content_type = "application/json"),
     responses(
-        (status = 200, description = "Worker result (plain JWS string)"),
+        (status = 200, description = "Worker result (plain JWS string)", content_type = "text/plain"),
+        (status = 404, description = "Device state not found", body = ProblemDetail, content_type = "application/problem+json"),
         (status = 408, description = "Request timeout", body = ProblemDetail, content_type = "application/problem+json"),
+        (status = 409, description = "Duplicate nonce — generate a new nonce and retry", body = ProblemDetail, content_type = "application/problem+json"),
         (status = 500, description = "Internal server error", body = ProblemDetail, content_type = "application/problem+json"),
+        (status = "default", description = "Unexpected error", body = ProblemDetail, content_type = "application/problem+json"),
     )
 )]
 pub async fn legacy_service(
@@ -273,6 +279,7 @@ pub async fn legacy_service(
     responses(
         (status = 200, description = "State initialized successfully", body = NewStateResponseDto),
         (status = 500, description = "Internal server error", body = ProblemDetail, content_type = "application/problem+json"),
+        (status = "default", description = "Unexpected error", body = ProblemDetail, content_type = "application/problem+json"),
     )
 )]
 pub async fn create_state(
@@ -338,11 +345,12 @@ pub async fn create_state(
         .await
     {
         tracing::error!("Failed to send state-init request: {}", e);
-        return problem_response(
+        return tracked_problem_response(
             StatusCode::INTERNAL_SERVER_ERROR,
             "Internal Server Error",
             Some("Failed to enqueue state initialization."),
             &instance,
+            &request_id,
         )
         .into_response();
     }
@@ -377,11 +385,12 @@ pub async fn create_state(
         }
         None => {
             tracing::error!("State initialization timeout for clientId: {}", client_id);
-            problem_response(
+            tracked_problem_response(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Internal Server Error",
                 Some("State initialization did not complete within the expected time."),
                 &instance,
+                &request_id,
             )
             .into_response()
         }
@@ -401,7 +410,6 @@ pub fn build_async_response(
                 status: AsyncResponseStatus::Pending,
                 result: None,
                 result_url: Some(polling_url.clone()),
-                error: None,
             };
             let mut headers = HeaderMap::new();
             if let Ok(v) = polling_url.parse() {
@@ -410,19 +418,25 @@ pub fn build_async_response(
             (StatusCode::ACCEPTED, headers, Json(body)).into_response()
         }
         Some(resp) if resp.status != hsm_common::Status::Ok => {
-            // Forward the worker's pre-built RFC 9457 JSON if available.
-            if let Some(problem_response_str) = resp.error_message {
-                return forward_problem_response(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    problem_response_str,
-                );
-            }
-            problem_response(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Internal Server Error",
-                Some("The worker returned a non-OK status."),
-                instance,
-            )
+            let worker_detail = resp
+                .error_message
+                .as_deref()
+                .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+                .and_then(|v| v["detail"].as_str().map(str::to_string))
+                .unwrap_or_else(|| "Worker returned a non-OK status".to_string());
+            let body = ProblemDetail {
+                problem_type: None,
+                title: "Internal Server Error".to_string(),
+                status: StatusCode::INTERNAL_SERVER_ERROR.as_u16(),
+                detail: Some(worker_detail),
+                instance: Some(instance.to_string()),
+                request_id: Some(correlation_id.to_string()),
+            };
+            let mut response = (StatusCode::INTERNAL_SERVER_ERROR, Json(body)).into_response();
+            response
+                .headers_mut()
+                .insert(header::CONTENT_TYPE, problem_content_type_header().clone());
+            response
         }
         Some(resp) => {
             let body = AsyncResponseDto {
@@ -430,7 +444,6 @@ pub fn build_async_response(
                 status: AsyncResponseStatus::Complete,
                 result: resp.outer_response_jws.map(|j| j.into_string()),
                 result_url: None,
-                error: None,
             };
             Json(body).into_response()
         }
