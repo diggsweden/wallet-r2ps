@@ -24,7 +24,6 @@ use tracing::{debug, error, info};
 pub struct HsmWrapper {
     pkcs11: Arc<Pkcs11>,
     slot: Slot,
-    user_pin: Option<AuthPin>,
     wrap_key_alias: Vec<u8>,
 }
 
@@ -87,7 +86,6 @@ impl HsmWrapper {
             pkcs11,
             slot: *slot,
             wrap_key_alias,
-            user_pin,
         };
 
         // verify that wrapping key is present — the keytool is responsible for creating it
@@ -126,7 +124,6 @@ impl HsmWrapper {
 
     pub fn exists_by_label(&self, class: ObjectClass, label: &str) -> Result<bool, Error> {
         let session = self.pkcs11.open_ro_session(self.slot)?;
-        session.login(UserType::User, self.user_pin.as_ref())?;
         let handles = session.find_objects(&[
             Attribute::Class(class),
             Attribute::Label(label.as_bytes().to_vec()),
@@ -137,7 +134,6 @@ impl HsmWrapper {
     /// Find and destroy all objects matching class + label in a single RW session.
     pub fn destroy_objects_by_label(&self, class: ObjectClass, label: &str) -> Result<(), Error> {
         let session = self.pkcs11.open_rw_session(self.slot)?;
-        session.login(UserType::User, self.user_pin.as_ref())?;
         let handles = session.find_objects(&[
             Attribute::Class(class),
             Attribute::Label(label.as_bytes().to_vec()),
@@ -163,7 +159,6 @@ impl HsmWrapper {
             Attribute::Label(label.as_bytes().to_vec()),
         ];
         let session = self.pkcs11.open_rw_session(self.slot)?;
-        session.login(UserType::User, self.user_pin.as_ref())?;
         session.generate_key(&Mechanism::GenericSecretKeyGen, &template)?;
         Ok(())
     }
@@ -210,7 +205,6 @@ impl HsmWrapper {
             Attribute::Label(label.as_bytes().to_vec()),
         ];
         let session = self.pkcs11.open_rw_session(self.slot)?;
-        session.login(UserType::User, self.user_pin.as_ref())?;
         session.generate_key(&Mechanism::AesKeyGen, &aes_template)?;
         Ok(())
     }
@@ -311,7 +305,6 @@ impl HsmSpiPort for HsmWrapper {
         curve: &Curve,
     ) -> Result<HsmKey, Box<dyn std::error::Error>> {
         let session = self.pkcs11.open_ro_session(self.slot)?;
-        session.login(UserType::User, self.user_pin.as_ref())?;
 
         let (private_key_template, public_key_template) = self.ec_key_templates(label, curve);
         let (ec_public_key, ec_private_key) = session.generate_key_pair(
@@ -342,7 +335,6 @@ impl HsmSpiPort for HsmWrapper {
         domain_separator: &str,
     ) -> Result<DerivedSecret, Error> {
         let session = self.pkcs11.open_ro_session(self.slot)?;
-        session.login(UserType::User, self.user_pin.as_ref())?;
 
         let root_key = session
             .find_objects(&[
@@ -367,7 +359,6 @@ impl HsmSpiPort for HsmWrapper {
 
     fn sign(&self, key: &HsmKey, sign_payload: &[u8]) -> Result<Vec<u8>, Error> {
         let session = self.pkcs11.open_rw_session(self.slot)?;
-        session.login(UserType::User, self.user_pin.as_ref())?;
         let private_key =
             self.unwrap_private_key(&session, key.wrapped_private_key.as_bytes().to_vec())?;
         let signature = session.sign(&Mechanism::Ecdsa, private_key, sign_payload)?;
