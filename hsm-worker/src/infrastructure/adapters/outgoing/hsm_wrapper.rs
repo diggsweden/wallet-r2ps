@@ -8,7 +8,7 @@ use crate::domain::{Curve, EcPublicJwk, HsmKey, WrappedPrivateKey};
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use cryptoki::context::{CInitializeArgs, CInitializeFlags, Pkcs11};
-use cryptoki::error::Error;
+use cryptoki::error::{Error, RvError};
 use cryptoki::mechanism::Mechanism;
 use cryptoki::object::{Attribute, AttributeType, KeyType, ObjectClass, ObjectHandle};
 use cryptoki::session::{Session, UserType};
@@ -18,13 +18,32 @@ use der::Decode;
 use der::asn1::OctetStringRef;
 use digest::Digest;
 use p256::ecdsa::VerifyingKey;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tracing::{debug, error, info};
 
 pub struct HsmWrapper {
     pkcs11: Arc<Pkcs11>,
     slot: Slot,
     wrap_key_alias: Vec<u8>,
+    /// Long-lived session opened in `new()`. Its only job is to keep at least
+    /// one PKCS#11 session open for the token so SoftHSM does not purge the
+    /// USER login state. Per-method sessions in any thread inherit that login
+    /// for free. Locked exactly once (during construction's wrap-key smoke
+    /// test) and never again; the Mutex exists solely to give `HsmWrapper`
+    /// the `Sync` bound required by `Arc<dyn HsmSpiPort + Send + Sync>`,
+    /// since `cryptoki::session::Session` is `Send` but deliberately `!Sync`.
+    _anchor_session: Mutex<Session>,
+}
+
+/// Idempotent PKCS#11 user login. Used once during `HsmWrapper::new()` on the
+/// anchor session; treats `CKR_USER_ALREADY_LOGGED_IN` as success so a stale
+/// login left by a previous process or PKCS#11 implementation does not abort
+/// startup.
+fn ensure_logged_in(session: &Session, pin: Option<&AuthPin>) -> Result<(), Error> {
+    match session.login(UserType::User, pin) {
+        Ok(()) | Err(Error::Pkcs11(RvError::UserAlreadyLoggedIn, _)) => Ok(()),
+        Err(e) => Err(e),
+    }
 }
 
 #[derive(Debug)]
@@ -79,18 +98,22 @@ impl HsmWrapper {
         let wrap_key_alias = config.wrap_key_alias.as_bytes().to_vec();
 
         let session = pkcs11.open_rw_session(*slot)?;
-
-        session.login(UserType::User, Some(&user_pin.clone().unwrap()))?;
+        ensure_logged_in(&session, user_pin.as_ref())?;
 
         let result = HsmWrapper {
             pkcs11,
             slot: *slot,
             wrap_key_alias,
+            _anchor_session: Mutex::new(session),
         };
 
         // verify that wrapping key is present — the keytool is responsible for creating it
         if !result.wrap_key_alias.is_empty() {
-            result.aes_wrapping_key(&session)?;
+            let guard = result
+                ._anchor_session
+                .lock()
+                .expect("anchor mutex poisoned");
+            result.aes_wrapping_key(&guard)?;
         }
 
         Ok(result)
