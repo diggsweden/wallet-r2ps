@@ -61,8 +61,8 @@ impl StateInitResponseSpiPort for StateInitResponseKafkaMessageSender {
             }
         }?;
 
-        // Poll producer to handle delivery reports
-        self.producer.poll(Duration::from_millis(100));
+        // Non-blocking poll — see r2ps_response_kafka_message_sender for rationale.
+        self.producer.poll(Duration::from_millis(0));
 
         Ok(())
     }

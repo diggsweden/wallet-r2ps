@@ -46,13 +46,12 @@ impl WorkerRequestKafkaReceiver {
                 .set("partition.assignment.strategy", "cooperative-sticky")
                 .set("enable.auto.commit", "true")
                 .set("auto.offset.reset", "earliest")
-                .set("fetch.wait.max.ms", "500")
+                .set("fetch.wait.max.ms", "50")
                 .set("session.timeout.ms", "6000") // Default: 45000ms
                 .set("heartbeat.interval.ms", "2000") // Default: 3000ms
                 .set("max.poll.interval.ms", "300000")
                 .set("connections.max.idle.ms", "540000")
                 .set("metadata.max.age.ms", "5000")
-                .set("partition.assignment.strategy", "cooperative-sticky") // Default: 300000ms
                 .create()
                 .expect("Consumer creation failed");
 

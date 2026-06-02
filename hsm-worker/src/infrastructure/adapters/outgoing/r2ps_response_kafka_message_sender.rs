@@ -59,8 +59,11 @@ impl WorkerResponseSpiPort for WorkerResponseKafkaSender {
             }
         };
 
-        // Poll producer to handle delivery reports and callbacks
-        self.producer.poll(Duration::from_millis(100));
+        // Drain any ready delivery callbacks without blocking. The 100ms used
+        // here previously was the dominant per-request latency floor — librdkafka's
+        // background thread does the actual produce; this call only services the
+        // (unused) callback queue.
+        self.producer.poll(Duration::from_millis(0));
 
         response
     }
