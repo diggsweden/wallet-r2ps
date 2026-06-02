@@ -70,12 +70,14 @@ pub async fn run() {
         &config.kafka_group_id,
         &config.hsm_worker_response_topic,
         response_service.clone(),
+        config.kafka_consumer_threads_response,
     );
     state_init_response_consumer::start(
         &config.kafka_bootstrap_servers,
         &config.kafka_group_id,
         &config.state_init_response_topic,
         state_init_correlation.clone(),
+        config.kafka_consumer_threads_state_init_response,
     );
 
     let default_initial_key_curve = config.default_initial_key_curve;

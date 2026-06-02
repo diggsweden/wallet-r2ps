@@ -14,6 +14,10 @@ pub struct AppConfig {
     pub kafka_group_id: String,
     /// Kafka broker address family (v4/v6)
     pub kafka_broker_address_family: String,
+    /// Number of consumer tasks for hsm_worker_response_topic.
+    pub kafka_consumer_threads_response: usize,
+    /// Number of consumer tasks for state_init_response_topic.
+    pub kafka_consumer_threads_state_init_response: usize,
 
     /// Redis host
     pub redis_host: String,
@@ -64,6 +68,8 @@ impl AppConfig {
         Config::builder()
             .set_default("kafka_group_id", "r2ps-rest-api-group")?
             .set_default("kafka_broker_address_family", "v4")?
+            .set_default("kafka_consumer_threads_response", 1)?
+            .set_default("kafka_consumer_threads_state_init_response", 1)?
             .set_default("redis_host", "localhost")?
             .set_default("redis_port", 6379)?
             .set_default("redis_username", "default")?

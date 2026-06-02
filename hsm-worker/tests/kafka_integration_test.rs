@@ -48,6 +48,8 @@ fn make_kafka_config(bootstrap: &str) -> KafkaConfig {
         broker_address_family: "v4".to_string(),
         group_id: format!("it-{}", uuid::Uuid::new_v4()),
         group_instance_id: format!("it-{}", uuid::Uuid::new_v4()),
+        consumer_threads_request: 1,
+        consumer_threads_state_init: 1,
     }
 }
 
@@ -214,7 +216,7 @@ async fn test_worker_consumer_receives_and_calls_use_case() {
         capturing.clone() as Arc<dyn WorkerRequestUseCase + Send + Sync>,
         running.clone(),
     );
-    let handle = receiver.start_worker_thread(config);
+    let handle = receiver.start_worker_thread(config, 0);
 
     // Give consumer time to subscribe and join group
     tokio::time::sleep(Duration::from_secs(3)).await;
@@ -330,7 +332,7 @@ async fn test_state_init_consumer_receives_and_processes() {
 
     let running = Arc::new(AtomicBool::new(true));
     let receiver = StateInitRequestKafkaReceiver::new(state_init_service, running.clone());
-    let handle = receiver.start_worker_thread(config);
+    let handle = receiver.start_worker_thread(config, 0);
 
     // Give consumer time to subscribe
     tokio::time::sleep(Duration::from_secs(3)).await;
@@ -513,7 +515,7 @@ async fn test_worker_kafka_round_trip() {
         worker_service as Arc<dyn WorkerRequestUseCase + Send + Sync>,
         running.clone(),
     );
-    let handle = receiver.start_worker_thread(config);
+    let handle = receiver.start_worker_thread(config, 0);
 
     // Give consumer time to subscribe
     tokio::time::sleep(Duration::from_secs(3)).await;

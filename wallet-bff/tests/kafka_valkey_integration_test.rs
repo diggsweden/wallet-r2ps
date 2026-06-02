@@ -327,6 +327,7 @@ async fn test_response_consumer_receives_and_calls_use_case() {
         &group_id,
         &topic,
         capturing.clone() as Arc<dyn ResponseUseCase>,
+        1,
     );
 
     // Wait for the consumer to process the message
@@ -398,6 +399,7 @@ async fn test_state_init_consumer_receives_and_notifies_correlation_service() {
         &group_id,
         &topic,
         correlation.clone() as Arc<dyn StateInitCorrelationPort>,
+        1,
     );
 
     // Wait for the correlation service to deliver the response
@@ -460,6 +462,7 @@ async fn test_bff_kafka_round_trip() {
         &group_id,
         &response_topic,
         response_service.clone() as Arc<dyn ResponseUseCase>,
+        1,
     );
 
     // Background task: consume from hsm-requests, fabricate a HsmWorkerResponse, produce to response_topic

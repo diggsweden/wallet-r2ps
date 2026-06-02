@@ -36,6 +36,10 @@ pub struct AppConfig {
     pub kafka_broker_address_family: String,
     pub kafka_group_id: String,
     pub kafka_group_instance_id: String,
+    /// Number of consumer threads for the hsm-requests topic.
+    pub kafka_consumer_threads_request: usize,
+    /// Number of consumer threads for the state-init-requests topic.
+    pub kafka_consumer_threads_state_init: usize,
 }
 
 impl AppConfig {
@@ -45,6 +49,8 @@ impl AppConfig {
             .set_default("kafka_group_id", "rust-grp")?
             .set_default("kafka_group_instance_id", "consumer-1")?
             .set_default("kafka_broker_address_family", "v4")?
+            .set_default("kafka_consumer_threads_request", 1)?
+            .set_default("kafka_consumer_threads_state_init", 1)?
             .set_default("opaque_context", "RPS-Ops")?
             .set_default("opaque_server_identifier", "cloud-wallet.digg.se")?
             .set_default("hsm_key_label", "wallet-hsm-key")?
@@ -61,6 +67,8 @@ impl From<AppConfig> for KafkaConfig {
             broker_address_family: value.kafka_broker_address_family,
             group_id: value.kafka_group_id,
             group_instance_id: value.kafka_group_instance_id,
+            consumer_threads_request: value.kafka_consumer_threads_request,
+            consumer_threads_state_init: value.kafka_consumer_threads_state_init,
         }
     }
 }

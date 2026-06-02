@@ -27,19 +27,22 @@ impl StateInitRequestKafkaReceiver {
         }
     }
 
-    pub fn start_worker_thread(&self, config: Arc<KafkaConfig>) -> JoinHandle<()> {
+    pub fn start_worker_thread(
+        &self,
+        config: Arc<KafkaConfig>,
+        thread_idx: usize,
+    ) -> JoinHandle<()> {
         let state_init_service = self.state_init_service.clone();
         let running = self.running.clone();
 
         spawn(move || {
+            let instance_id =
+                format!("{}-state-init-{}", config.group_instance_id, thread_idx);
             let consumer: BaseConsumer = ClientConfig::new()
                 .set("bootstrap.servers", &config.bootstrap_servers)
                 .set("broker.address.family", &config.broker_address_family)
                 .set("group.id", &config.group_id)
-                .set(
-                    "group.instance.id",
-                    format!("{}-state-init", config.group_instance_id),
-                )
+                .set("group.instance.id", &instance_id)
                 .set("partition.assignment.strategy", "cooperative-sticky")
                 .set("enable.auto.commit", "true")
                 .set("auto.offset.reset", "earliest")

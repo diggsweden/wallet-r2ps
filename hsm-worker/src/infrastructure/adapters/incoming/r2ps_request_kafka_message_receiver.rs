@@ -30,16 +30,21 @@ impl WorkerRequestKafkaReceiver {
         }
     }
 
-    pub fn start_worker_thread(&self, config: Arc<KafkaConfig>) -> JoinHandle<()> {
+    pub fn start_worker_thread(
+        &self,
+        config: Arc<KafkaConfig>,
+        thread_idx: usize,
+    ) -> JoinHandle<()> {
         let worker_use_case = self.worker_use_case.clone();
         let running = self.running.clone();
 
         spawn(move || {
+            let instance_id = format!("{}-{}", config.group_instance_id, thread_idx);
             let consumer: BaseConsumer = ClientConfig::new()
                 .set("bootstrap.servers", &config.bootstrap_servers)
                 .set("broker.address.family", &config.broker_address_family)
                 .set("group.id", &config.group_id)
-                .set("group.instance.id", &config.group_instance_id)
+                .set("group.instance.id", &instance_id)
                 // Cooperative-sticky combines two concepts: sticky assignment
                 // (minimizing partition movement) and cooperative
                 // rebalancing (incremental, non-blocking rebalances).

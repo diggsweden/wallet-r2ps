@@ -10,6 +10,7 @@ use crate::infrastructure::{
 };
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread::JoinHandle;
 use tracing::{debug, info};
 
 pub mod application;
@@ -21,6 +22,15 @@ pub fn run() {
     let app_config = AppConfig::new().unwrap();
 
     let kafka_config: Arc<KafkaConfig> = Arc::new(app_config.clone().into());
+
+    assert!(
+        kafka_config.consumer_threads_request >= 1,
+        "kafka_consumer_threads_request must be >= 1"
+    );
+    assert!(
+        kafka_config.consumer_threads_state_init >= 1,
+        "kafka_consumer_threads_state_init must be >= 1"
+    );
 
     // Handle Ctrl+C
     let running = Arc::new(AtomicBool::new(true));
@@ -35,18 +45,29 @@ pub fn run() {
     let worker_use_case: Arc<dyn WorkerRequestUseCase + Send + Sync> = Arc::new(worker_service);
     let state_init_service = Arc::new(state_init_service);
 
-    // start request worker
-    let worker_kafka_receiver = WorkerRequestKafkaReceiver::new(worker_use_case, running.clone());
-    let join_handle = worker_kafka_receiver.start_worker_thread(kafka_config.clone());
+    let mut handles: Vec<JoinHandle<()>> = Vec::new();
 
-    // start state init request worker
-    let state_init_receiver =
-        StateInitRequestKafkaReceiver::new(state_init_service, running.clone());
-    let state_init_handle = state_init_receiver.start_worker_thread(kafka_config.clone());
+    // start request workers
+    for i in 0..kafka_config.consumer_threads_request {
+        let receiver =
+            WorkerRequestKafkaReceiver::new(worker_use_case.clone(), running.clone());
+        handles.push(receiver.start_worker_thread(kafka_config.clone(), i));
+    }
 
-    info!("HSM worker started");
+    // start state init request workers
+    for i in 0..kafka_config.consumer_threads_state_init {
+        let receiver =
+            StateInitRequestKafkaReceiver::new(state_init_service.clone(), running.clone());
+        handles.push(receiver.start_worker_thread(kafka_config.clone(), i));
+    }
 
-    // wait until both worker threads finish
-    let _ = join_handle.join();
-    let _ = state_init_handle.join();
+    info!(
+        "HSM worker started (request threads: {}, state-init threads: {})",
+        kafka_config.consumer_threads_request, kafka_config.consumer_threads_state_init
+    );
+
+    // wait until all worker threads finish
+    for h in handles {
+        let _ = h.join();
+    }
 }
