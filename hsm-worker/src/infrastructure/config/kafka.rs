@@ -8,6 +8,14 @@ pub struct KafkaConfig {
     pub broker_address_family: String,
     pub group_id: String,
     pub group_instance_id: String,
-    pub consumer_threads_request: usize,
-    pub consumer_threads_state_init: usize,
+    /// Number of worker threads draining the request dispatch channels.
+    /// Each worker owns a stable subset of partitions via partition_id % N.
+    pub request_worker_tasks: usize,
+    /// Per-worker bounded channel depth for the request dispatch path.
+    /// Caps in-flight messages per worker; provides back-pressure.
+    pub request_worker_queue_depth: usize,
+    /// Number of worker threads draining the state-init dispatch channels.
+    pub state_init_worker_tasks: usize,
+    /// Per-worker bounded channel depth for the state-init dispatch path.
+    pub state_init_worker_queue_depth: usize,
 }

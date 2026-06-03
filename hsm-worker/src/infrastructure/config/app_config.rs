@@ -36,10 +36,16 @@ pub struct AppConfig {
     pub kafka_broker_address_family: String,
     pub kafka_group_id: String,
     pub kafka_group_instance_id: String,
-    /// Number of consumer threads for the hsm-requests topic.
-    pub kafka_consumer_threads_request: usize,
-    /// Number of consumer threads for the state-init-requests topic.
-    pub kafka_consumer_threads_state_init: usize,
+    /// Number of worker threads draining the request dispatch channels.
+    /// Partitions are routed to workers via `partition_id % N`, preserving
+    /// per-partition ordering for the session FSM.
+    pub hsm_worker_tasks_request: usize,
+    /// Number of worker threads draining the state-init dispatch channels.
+    pub hsm_worker_tasks_state_init: usize,
+    /// Per-worker bounded channel depth for the request dispatch path.
+    pub hsm_worker_queue_depth_request: usize,
+    /// Per-worker bounded channel depth for the state-init dispatch path.
+    pub hsm_worker_queue_depth_state_init: usize,
 }
 
 impl AppConfig {
@@ -49,8 +55,10 @@ impl AppConfig {
             .set_default("kafka_group_id", "rust-grp")?
             .set_default("kafka_group_instance_id", "consumer-1")?
             .set_default("kafka_broker_address_family", "v4")?
-            .set_default("kafka_consumer_threads_request", 1)?
-            .set_default("kafka_consumer_threads_state_init", 1)?
+            .set_default("hsm_worker_tasks_request", 16)?
+            .set_default("hsm_worker_tasks_state_init", 4)?
+            .set_default("hsm_worker_queue_depth_request", 64)?
+            .set_default("hsm_worker_queue_depth_state_init", 32)?
             .set_default("opaque_context", "RPS-Ops")?
             .set_default("opaque_server_identifier", "cloud-wallet.digg.se")?
             .set_default("hsm_key_label", "wallet-hsm-key")?
@@ -67,8 +75,10 @@ impl From<AppConfig> for KafkaConfig {
             broker_address_family: value.kafka_broker_address_family,
             group_id: value.kafka_group_id,
             group_instance_id: value.kafka_group_instance_id,
-            consumer_threads_request: value.kafka_consumer_threads_request,
-            consumer_threads_state_init: value.kafka_consumer_threads_state_init,
+            request_worker_tasks: value.hsm_worker_tasks_request,
+            request_worker_queue_depth: value.hsm_worker_queue_depth_request,
+            state_init_worker_tasks: value.hsm_worker_tasks_state_init,
+            state_init_worker_queue_depth: value.hsm_worker_queue_depth_state_init,
         }
     }
 }

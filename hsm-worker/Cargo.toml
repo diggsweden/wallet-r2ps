@@ -32,6 +32,7 @@ testcontainers = []
 [dependencies]
 hsm-common = { path = "../hsm-common" }
 rdkafka = { version = "0.39.0", features = ["cmake-build", "curl-static"] }
+crossbeam-channel = "0.5"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tracing = "0.1"

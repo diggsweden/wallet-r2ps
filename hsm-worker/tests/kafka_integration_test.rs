@@ -48,8 +48,10 @@ fn make_kafka_config(bootstrap: &str) -> KafkaConfig {
         broker_address_family: "v4".to_string(),
         group_id: format!("it-{}", uuid::Uuid::new_v4()),
         group_instance_id: format!("it-{}", uuid::Uuid::new_v4()),
-        consumer_threads_request: 1,
-        consumer_threads_state_init: 1,
+        request_worker_tasks: 1,
+        request_worker_queue_depth: 8,
+        state_init_worker_tasks: 1,
+        state_init_worker_queue_depth: 8,
     }
 }
 
@@ -216,7 +218,7 @@ async fn test_worker_consumer_receives_and_calls_use_case() {
         capturing.clone() as Arc<dyn WorkerRequestUseCase + Send + Sync>,
         running.clone(),
     );
-    let handle = receiver.start_worker_thread(config, 0);
+    let handles = receiver.start(config, 1, 8);
 
     // Give consumer time to subscribe and join group
     tokio::time::sleep(Duration::from_secs(3)).await;
@@ -262,7 +264,9 @@ async fn test_worker_consumer_receives_and_calls_use_case() {
 
     // Shutdown
     running.store(false, Ordering::Relaxed);
-    handle.join().expect("consumer thread panicked");
+    for h in handles {
+        h.join().expect("consumer or worker thread panicked");
+    }
 }
 
 #[tokio::test]
@@ -332,7 +336,7 @@ async fn test_state_init_consumer_receives_and_processes() {
 
     let running = Arc::new(AtomicBool::new(true));
     let receiver = StateInitRequestKafkaReceiver::new(state_init_service, running.clone());
-    let handle = receiver.start_worker_thread(config, 0);
+    let handles = receiver.start(config, 1, 8);
 
     // Give consumer time to subscribe
     tokio::time::sleep(Duration::from_secs(3)).await;
@@ -396,7 +400,9 @@ async fn test_state_init_consumer_receives_and_processes() {
 
     // Shutdown
     running.store(false, Ordering::Relaxed);
-    handle.join().expect("state-init consumer thread panicked");
+    for h in handles {
+        h.join().expect("state-init consumer or worker thread panicked");
+    }
 }
 
 // ── Worker round-trip test ───────────────────────────────────────────────────
@@ -515,7 +521,7 @@ async fn test_worker_kafka_round_trip() {
         worker_service as Arc<dyn WorkerRequestUseCase + Send + Sync>,
         running.clone(),
     );
-    let handle = receiver.start_worker_thread(config, 0);
+    let handles = receiver.start(config, 1, 8);
 
     // Give consumer time to subscribe
     tokio::time::sleep(Duration::from_secs(3)).await;
@@ -654,5 +660,7 @@ async fn test_worker_kafka_round_trip() {
 
     // Shutdown
     running.store(false, Ordering::Relaxed);
-    handle.join().expect("consumer thread panicked");
+    for h in handles {
+        h.join().expect("consumer or worker thread panicked");
+    }
 }
