@@ -33,7 +33,7 @@ impl SessionStateMemoryCache {
     pub fn new() -> Self {
         let cache = Cache::builder()
             .time_to_live(Duration::from_secs(SESSION_TTL_SECS))
-            .max_capacity(10_000)
+            .max_capacity(100_000)
             .build();
         Self { cache }
     }
