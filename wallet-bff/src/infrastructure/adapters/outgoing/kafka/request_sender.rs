@@ -28,9 +28,15 @@ impl KafkaRequestSender {
             .set("bootstrap.servers", bootstrap_servers)
             .set("broker.address.family", broker_address_family)
             .set("message.timeout.ms", "5000")
-            // enable.idempotence=true implies acks=all + max.in.flight=5 with strict
-            // per-key ordering, so we drop the explicit acks setting.
-            .set("enable.idempotence", "true")
+            // acks=1 (leader-only): each BFF send is awaited synchronously and
+            // the request body is idempotent via its UUID request_id (a
+            // duplicate arrives at the worker, gets processed; the duplicate
+            // response is dropped by the BFF correlation lookup with no
+            // visible effect). The lost durability on broker-leader crash
+            // surfaces as a client-side timeout and retry. Dropping
+            // enable.idempotence avoids the full-replication ack on the
+            // critical path of every single request.
+            .set("acks", "1")
             .set("linger.ms", "5")
             .set("batch.size", "65536")
             .set("compression.type", "lz4")
@@ -81,9 +87,15 @@ impl KafkaStateInitSender {
             .set("bootstrap.servers", bootstrap_servers)
             .set("broker.address.family", broker_address_family)
             .set("message.timeout.ms", "5000")
-            // enable.idempotence=true implies acks=all + max.in.flight=5 with strict
-            // per-key ordering, so we drop the explicit acks setting.
-            .set("enable.idempotence", "true")
+            // acks=1 (leader-only): each BFF send is awaited synchronously and
+            // the request body is idempotent via its UUID request_id (a
+            // duplicate arrives at the worker, gets processed; the duplicate
+            // response is dropped by the BFF correlation lookup with no
+            // visible effect). The lost durability on broker-leader crash
+            // surfaces as a client-side timeout and retry. Dropping
+            // enable.idempotence avoids the full-replication ack on the
+            // critical path of every single request.
+            .set("acks", "1")
             .set("linger.ms", "5")
             .set("batch.size", "65536")
             .set("compression.type", "lz4")
