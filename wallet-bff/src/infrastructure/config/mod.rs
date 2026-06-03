@@ -14,10 +14,16 @@ pub struct AppConfig {
     pub kafka_group_id: String,
     /// Kafka broker address family (v4/v6)
     pub kafka_broker_address_family: String,
-    /// Number of consumer tasks for hsm_worker_response_topic.
+    /// Number of worker tasks draining the dispatch channels for
+    /// `hsm_worker_response_topic`. One consumer per pod pulls from Kafka
+    /// and dispatches by partition_id % N to the workers.
     pub kafka_consumer_threads_response: usize,
-    /// Number of consumer tasks for state_init_response_topic.
+    /// Number of worker tasks for `state_init_response_topic`.
     pub kafka_consumer_threads_state_init_response: usize,
+    /// Per-worker bounded channel depth for the response dispatch path.
+    pub kafka_response_queue_depth: usize,
+    /// Per-worker bounded channel depth for the state-init response path.
+    pub kafka_state_init_response_queue_depth: usize,
 
     /// Redis host
     pub redis_host: String,
@@ -70,6 +76,8 @@ impl AppConfig {
             .set_default("kafka_broker_address_family", "v4")?
             .set_default("kafka_consumer_threads_response", 1)?
             .set_default("kafka_consumer_threads_state_init_response", 1)?
+            .set_default("kafka_response_queue_depth", 64)?
+            .set_default("kafka_state_init_response_queue_depth", 32)?
             .set_default("redis_host", "localhost")?
             .set_default("redis_port", 6379)?
             .set_default("redis_username", "default")?

@@ -71,6 +71,7 @@ pub async fn run() {
         &config.hsm_worker_response_topic,
         response_service.clone(),
         config.kafka_consumer_threads_response,
+        config.kafka_response_queue_depth,
     );
     state_init_response_consumer::start(
         &config.kafka_bootstrap_servers,
@@ -78,6 +79,7 @@ pub async fn run() {
         &config.state_init_response_topic,
         state_init_correlation.clone(),
         config.kafka_consumer_threads_state_init_response,
+        config.kafka_state_init_response_queue_depth,
     );
 
     let default_initial_key_curve = config.default_initial_key_curve;
