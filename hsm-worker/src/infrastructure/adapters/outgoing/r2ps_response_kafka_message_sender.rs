@@ -20,6 +20,14 @@ impl WorkerResponseKafkaSender {
             .set("bootstrap.servers", &config.bootstrap_servers)
             .set("broker.address.family", &config.broker_address_family)
             .set("message.timeout.ms", "5000")
+            // acks=1 (leader-only): a response lost on broker crash is acceptable
+            // because the BFF correlation map will time out and surface failure to
+            // the caller. Idempotence is not used here — request_id is the dedupe key
+            // applied at the application layer.
+            .set("acks", "1")
+            .set("linger.ms", "5")
+            .set("batch.size", "65536")
+            .set("compression.type", "lz4")
             .create()
             .expect("Producer creation failed");
 

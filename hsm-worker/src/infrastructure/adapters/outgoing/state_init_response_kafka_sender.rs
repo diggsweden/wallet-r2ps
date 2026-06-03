@@ -22,6 +22,11 @@ impl StateInitResponseKafkaMessageSender {
             .set("bootstrap.servers", &config.bootstrap_servers)
             .set("broker.address.family", &config.broker_address_family)
             .set("message.timeout.ms", "5000")
+            // acks=1 (leader-only): see WorkerResponseKafkaSender for rationale.
+            .set("acks", "1")
+            .set("linger.ms", "5")
+            .set("batch.size", "65536")
+            .set("compression.type", "lz4")
             .create()
             .expect("State init response producer creation failed");
 

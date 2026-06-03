@@ -28,7 +28,12 @@ impl KafkaRequestSender {
             .set("bootstrap.servers", bootstrap_servers)
             .set("broker.address.family", broker_address_family)
             .set("message.timeout.ms", "5000")
-            .set("acks", "all")
+            // enable.idempotence=true implies acks=all + max.in.flight=5 with strict
+            // per-key ordering, so we drop the explicit acks setting.
+            .set("enable.idempotence", "true")
+            .set("linger.ms", "5")
+            .set("batch.size", "65536")
+            .set("compression.type", "lz4")
             .create()
             .expect("Failed to create Kafka producer");
 
@@ -76,7 +81,12 @@ impl KafkaStateInitSender {
             .set("bootstrap.servers", bootstrap_servers)
             .set("broker.address.family", broker_address_family)
             .set("message.timeout.ms", "5000")
-            .set("acks", "all")
+            // enable.idempotence=true implies acks=all + max.in.flight=5 with strict
+            // per-key ordering, so we drop the explicit acks setting.
+            .set("enable.idempotence", "true")
+            .set("linger.ms", "5")
+            .set("batch.size", "65536")
+            .set("compression.type", "lz4")
             .create()
             .expect("Failed to create Kafka state-init producer");
 
