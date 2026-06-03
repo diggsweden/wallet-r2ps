@@ -65,7 +65,7 @@ pub fn start(
                                     "[task {}] Received worker response for requestId: {} on topic: {}",
                                     idx, response.request_id, topic
                                 );
-                                response_use_case.response_ready(response);
+                                response_use_case.response_ready(response).await;
                             }
                             Err(e) => {
                                 error!(

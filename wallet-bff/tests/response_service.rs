@@ -62,7 +62,7 @@ fn worker_response(state_jws: Option<&str>) -> HsmWorkerResponse {
 async fn response_ready_delivers_to_registered_pending() {
     let (_ds, svc) = make_service();
     let rx = svc.register_pending("req-1", "device-1", 100);
-    svc.response_ready(worker_response(None));
+    svc.response_ready(worker_response(None)).await;
     let result = rx.await.expect("channel closed");
     assert_eq!(result.request_id, "req-1");
     assert_eq!(result.status, Status::Ok);
@@ -71,7 +71,7 @@ async fn response_ready_delivers_to_registered_pending() {
 #[tokio::test]
 async fn response_ready_no_pending_parks_in_cache() {
     let (_ds, svc) = make_service();
-    svc.response_ready(worker_response(None));
+    svc.response_ready(worker_response(None)).await;
     let result = svc.wait_for_response("req-1", 100).await;
     assert!(result.is_some());
     assert_eq!(result.unwrap().request_id, "req-1");
@@ -81,9 +81,7 @@ async fn response_ready_no_pending_parks_in_cache() {
 async fn response_ready_with_state_jws_saves_device_state() {
     let (ds, svc) = make_service();
     let _rx = svc.register_pending("req-1", "device-1", 100);
-    svc.response_ready(worker_response(Some("new.state.jws")));
-    // Device state is saved via tokio::spawn — give it time to run.
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    svc.response_ready(worker_response(Some("new.state.jws"))).await;
     let saves = ds.saves.lock().unwrap();
     assert_eq!(saves.len(), 1);
     assert_eq!(saves[0].0, "device-1");
@@ -95,7 +93,6 @@ async fn response_ready_with_state_jws_saves_device_state() {
 async fn response_ready_without_state_jws_skips_device_state() {
     let (ds, svc) = make_service();
     let _rx = svc.register_pending("req-1", "device-1", 100);
-    svc.response_ready(worker_response(None));
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    svc.response_ready(worker_response(None)).await;
     assert!(ds.saves.lock().unwrap().is_empty());
 }

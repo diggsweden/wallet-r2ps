@@ -73,23 +73,20 @@ impl ResponseUseCase for ResponseService {
         rx
     }
 
-    fn response_ready(&self, response: HsmWorkerResponse) {
+    async fn response_ready(&self, response: HsmWorkerResponse) {
         let entry = self.pending.lock().unwrap().remove(&response.request_id);
 
         let cached = CachedResponse::from(response);
 
         if let Some(e) = entry {
-            // Save device state asynchronously via a spawned task so we don't
-            // block the Kafka consumer thread. The state_key and ttl come from
-            // the in-memory pending entry rather than Redis.
+            // Persist device state before signaling the waiter so a follow-up
+            // request — which may land on a different bff replica — can read
+            // the updated state from Valkey. The state_key and ttl come from
+            // the in-memory pending entry rather than Valkey.
             if let Some(ref state_jws) = cached.state_jws {
-                let port = self.device_state_port.clone();
-                let key = e.state_key.clone();
-                let jws = state_jws.clone();
-                let ttl = e.ttl_seconds;
-                tokio::spawn(async move {
-                    port.save(&key, &jws, ttl).await;
-                });
+                self.device_state_port
+                    .save(&e.state_key, state_jws, e.ttl_seconds)
+                    .await;
             }
 
             info!("Response ready for requestId: {}", cached.request_id);

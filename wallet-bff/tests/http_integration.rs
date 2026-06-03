@@ -78,7 +78,7 @@ impl ResponseUseCase for MockResponseUseCase {
         rx
     }
 
-    fn response_ready(&self, _response: HsmWorkerResponse) {}
+    async fn response_ready(&self, _response: HsmWorkerResponse) {}
 
     async fn wait_for_response(
         &self,

@@ -276,11 +276,8 @@ impl ResponseUseCase for CapturingResponseUseCase {
         tokio::sync::oneshot::channel().1
     }
 
-    fn response_ready(&self, response: HsmWorkerResponse) {
-        // block_in_place so we can use the sync Mutex inside an async context
-        tokio::task::block_in_place(|| {
-            self.responses.blocking_lock().push(response);
-        });
+    async fn response_ready(&self, response: HsmWorkerResponse) {
+        self.responses.lock().await.push(response);
     }
 
     async fn wait_for_response(&self, _: &str, _: u64) -> Option<CachedResponse> {

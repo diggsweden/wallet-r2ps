@@ -19,8 +19,10 @@ pub trait ResponseUseCase: Send + Sync {
         ttl_seconds: u64,
     ) -> oneshot::Receiver<CachedResponse>;
 
-    /// Called by the Kafka consumer when a response arrives.
-    fn response_ready(&self, response: HsmWorkerResponse);
+    /// Called by the Kafka consumer when a response arrives. Persists the
+    /// updated device state to Valkey before signaling the HTTP waiter so a
+    /// follow-up request landing on another replica observes the new state.
+    async fn response_ready(&self, response: HsmWorkerResponse);
 
     /// Polling path (GET /hsm/v1/requests/{id}): returns a cached response if
     /// already completed, or waits up to `timeout_ms` for it to arrive.
