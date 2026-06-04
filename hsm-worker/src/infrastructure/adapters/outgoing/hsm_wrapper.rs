@@ -18,8 +18,24 @@ use der::Decode;
 use der::asn1::OctetStringRef;
 use digest::Digest;
 use p256::ecdsa::VerifyingKey;
+use std::cell::RefCell;
 use std::sync::{Arc, Mutex};
 use tracing::{debug, error, info};
+
+/// Per-thread cached PKCS#11 session + the resolved AES wrapping-key
+/// object handle. Opening a session and looking up the wrap key are
+/// non-trivial operations under SoftHSM token-level locking; doing them
+/// once per worker thread (instead of per `sign()` call) removes that
+/// fixed overhead from the hot path. The session lives until the thread
+/// exits.
+struct ThreadHsmState {
+    session: Session,
+    wrap_key: ObjectHandle,
+}
+
+thread_local! {
+    static HSM_STATE: RefCell<Option<ThreadHsmState>> = const { RefCell::new(None) };
+}
 
 pub struct HsmWrapper {
     pkcs11: Arc<Pkcs11>,
@@ -268,6 +284,54 @@ impl HsmWrapper {
         )
     }
 
+    /// Same as `unwrap_private_key` but takes a pre-resolved wrap-key
+    /// handle, eliminating the `find_objects` lookup. Used from the hot
+    /// `sign()` path together with the per-thread session cache.
+    fn unwrap_private_key_with_handle(
+        session: &Session,
+        wrap_key: ObjectHandle,
+        wrapped_private_key: &[u8],
+    ) -> Result<ObjectHandle, Error> {
+        session.unwrap_key(
+            &Mechanism::AesKeyWrapPad,
+            wrap_key,
+            wrapped_private_key,
+            &[
+                Attribute::Class(ObjectClass::PRIVATE_KEY),
+                Attribute::KeyType(KeyType::EC),
+                Attribute::Private(true),
+                Attribute::Token(false),
+                Attribute::Sensitive(true),
+                Attribute::Extractable(true),
+                Attribute::Sign(true),
+            ],
+        )
+    }
+
+    /// Runs `f` with this thread's persistent PKCS#11 session and the
+    /// cached wrap-key handle. On first use per thread, opens a fresh RW
+    /// session and resolves the wrap-key by label once.
+    ///
+    /// The session and handle live until the thread exits — which for a
+    /// per-partition worker thread is "until pod shutdown". Across the
+    /// lifetime of a thread this saves: one `open_rw_session` +
+    /// `find_objects(wrap_key_label)` per request handled.
+    fn with_thread_state<F, R>(&self, f: F) -> Result<R, Error>
+    where
+        F: FnOnce(&Session, ObjectHandle) -> Result<R, Error>,
+    {
+        HSM_STATE.with(|cell| {
+            let mut borrow = cell.borrow_mut();
+            if borrow.is_none() {
+                let session = self.pkcs11.open_rw_session(self.slot)?;
+                let wrap_key = self.aes_wrapping_key(&session)?;
+                *borrow = Some(ThreadHsmState { session, wrap_key });
+            }
+            let st = borrow.as_ref().unwrap();
+            f(&st.session, st.wrap_key)
+        })
+    }
+
     pub fn create_ec_public_key_jwk(
         &self,
         session: &Session,
@@ -381,11 +445,20 @@ impl HsmSpiPort for HsmWrapper {
     }
 
     fn sign(&self, key: &HsmKey, sign_payload: &[u8]) -> Result<Vec<u8>, Error> {
-        let session = self.pkcs11.open_rw_session(self.slot)?;
-        let private_key =
-            self.unwrap_private_key(&session, key.wrapped_private_key.as_bytes().to_vec())?;
-        let signature = session.sign(&Mechanism::Ecdsa, private_key, sign_payload)?;
-        Ok(signature)
+        self.with_thread_state(|session, wrap_key| {
+            let private_key = Self::unwrap_private_key_with_handle(
+                session,
+                wrap_key,
+                key.wrapped_private_key.as_bytes(),
+            )?;
+            let signature = session.sign(&Mechanism::Ecdsa, private_key, sign_payload)?;
+            // The unwrapped EC private key is a session-only object. With a
+            // per-thread persistent session it would otherwise accumulate
+            // across requests until the session — and the pod — exhausts
+            // memory. Destroy it before returning so the session stays clean.
+            let _ = session.destroy_object(private_key);
+            Ok(signature)
+        })
     }
 }
 
