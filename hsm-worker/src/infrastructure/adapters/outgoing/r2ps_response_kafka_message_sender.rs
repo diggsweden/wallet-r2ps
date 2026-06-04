@@ -7,7 +7,7 @@ use crate::domain::HsmWorkerResponse;
 use crate::infrastructure::KafkaConfig;
 use rdkafka::ClientConfig;
 use rdkafka::producer::{BaseProducer, BaseRecord};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tracing::{debug, error};
 
 pub struct WorkerResponseKafkaSender {
@@ -49,14 +49,31 @@ impl WorkerResponseSpiPort for WorkerResponseKafkaSender {
                     .key(key)
                     .payload(&output_json);
 
-                match self.producer.send(record) {
+                let t = Instant::now();
+                let send_result = self.producer.send(record);
+                let send_us = t.elapsed().as_micros();
+                match send_result {
                     Ok(_) => {
-                        // Message enqueued successfully
-                        debug!("Message sent: key='{}' request_id='{}'", key, request_id);
+                        // Message enqueued in librdkafka's internal queue. The
+                        // actual broker shipping happens asynchronously on the
+                        // librdkafka background thread; send_us only covers the
+                        // user-side enqueue.
+                        debug!(
+                            request_id = %request_id,
+                            response_topic,
+                            send_us,
+                            "response producer enqueue"
+                        );
                         Ok(())
                     }
                     Err((err, _)) => {
-                        error!("Failed to send message: {:?}", err);
+                        error!(
+                            request_id = %request_id,
+                            response_topic,
+                            send_us,
+                            "Failed to send message: {:?}",
+                            err
+                        );
                         Err(WorkerResponseError::ConnectionError)
                     }
                 }

@@ -13,7 +13,7 @@ use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::{JoinHandle, spawn};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tracing::{debug, error, warn};
 
 pub struct WorkerRequestKafkaReceiver {
@@ -63,15 +63,30 @@ impl WorkerRequestKafkaReceiver {
             handles.push(spawn(move || {
                 debug!("hsm-requests worker {} started", worker_idx);
                 while let Ok(req) = rx.recv() {
+                    // Capture request_id before move (execute() consumes the req).
+                    let request_id_for_log = req.request_id.clone();
+                    let t = Instant::now();
                     let outcome = std::panic::catch_unwind(AssertUnwindSafe(|| {
                         use_case.execute(req)
                     }));
+                    let execute_us = t.elapsed().as_micros();
                     match outcome {
                         Ok(Ok(request_id)) => {
-                            debug!("HsmWorkerRequest {} processed", request_id);
+                            debug!(
+                                worker = worker_idx,
+                                request_id = %request_id,
+                                execute_us,
+                                "HsmWorkerRequest processed"
+                            );
                         }
                         Ok(Err(err)) => {
-                            error!("execute() error: {:?}", err);
+                            error!(
+                                worker = worker_idx,
+                                request_id = %request_id_for_log,
+                                execute_us,
+                                "execute() error: {:?}",
+                                err
+                            );
                         }
                         Err(_) => {
                             error!(
