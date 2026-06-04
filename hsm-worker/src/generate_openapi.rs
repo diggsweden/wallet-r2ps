@@ -30,6 +30,7 @@ use utoipa::OpenApi;
         domain::Curve,
         // Request/response envelopes
         domain::HsmWorkerRequest,
+        domain::HsmWorkerResponse,
         domain::OuterRequest,
         domain::OuterResponse,
         domain::InnerRequest,

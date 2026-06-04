@@ -20,8 +20,8 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 # Types to document (top-level types that will get their own pages)
 TYPES_TO_DOCUMENT = [
-    "HsmWorkerRequestDto",
-    "WorkerResponseJws",
+    "HsmWorkerRequest",
+    "HsmWorkerResponse",
     "DeviceHsmState",
     "OuterRequest",
     "OuterResponse",

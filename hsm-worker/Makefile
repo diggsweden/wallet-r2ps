@@ -25,7 +25,7 @@ KEYTOOL_DOCKER  := docker compose -f ../docker-compose.yaml exec hsm-worker /usr
 	--pin $(PKCS11_USER_PIN)
 KEYTOOL         := $(if $(DOCKER),$(KEYTOOL_DOCKER),$(KEYTOOL_LOCAL))
 
-.PHONY: generate_openapi docs clean help check testcontainer, all-tests, coverage-setup coverage full-coverage \
+.PHONY: generate_openapi docs mdbook-setup clean help check testcontainer, all-tests, coverage-setup coverage full-coverage \
 	hsm-create-wrapping-key hsm-create-root-key hsm-derive-public-keys hsm-setup hsm-status hsm-remove
 
 ## Generate openapi.json from domain model
@@ -34,8 +34,12 @@ generate_openapi: openapi.json
 openapi.json: src/lib.rs src/domain/**/*.rs src/generate_openapi.rs Cargo.toml
 	cargo run --bin generate_openapi --features="openapi"> openapi.json
 
+## Install mdbook if not already present
+mdbook-setup:
+	@mdbook --version >/dev/null 2>&1 || cargo install mdbook
+
 ## Build mdbook documentation from OpenAPI schema
-docs: docs/book/book/index.html
+docs: mdbook-setup docs/book/book/index.html
 
 docs/book/book/index.html: openapi.json docs/openapi_to_markdown.py docs/book/src/introduction.md docs/book/src/api-reference/README.md
 	@mkdir -p docs/book/src/api-reference
