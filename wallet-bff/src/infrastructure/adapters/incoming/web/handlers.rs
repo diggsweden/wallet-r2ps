@@ -7,8 +7,8 @@ use axum::extract::{OriginalUri, Path, State, rejection::JsonRejection};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::IntoResponse;
 use std::sync::Arc;
-use std::time::Duration;
-use tracing::info;
+use std::time::{Duration, Instant};
+use tracing::{debug, info};
 use uuid::Uuid;
 
 use super::problem_response;
@@ -123,12 +123,24 @@ pub async fn service(
     OriginalUri(uri): OriginalUri,
     body: Result<Json<BffRequest>, JsonRejection>,
 ) -> impl IntoResponse {
+    // ── Phase timing: spans the whole handler so the final debug! line
+    // surfaces where time is spent in each stage of the BFF critical path.
+    // Stages, in order:
+    //   load_us    : device_state_port.load (Redis GET)
+    //   register_us: response_use_case.register_pending (HashMap insert)
+    //   send_us    : request_sender_port.send (Kafka produce + ack)
+    //   wait_us    : await on the response oneshot (Kafka response arrival)
+    //   build_us   : build_async_response (HTTP serialization)
+    //   total_us   : full handler
+    let t_handler_start = Instant::now();
+
     let Json(req) = match body {
         Ok(j) => j,
         Err(e) => return json_rejection_response(e, uri.path()),
     };
     let instance = uri.path().to_string();
 
+    let t = Instant::now();
     let state_jws = match state.device_state_port.load(&req.client_id).await {
         Some(s) => s,
         None => {
@@ -144,17 +156,20 @@ pub async fn service(
             );
         }
     };
+    let load_us = t.elapsed().as_micros();
 
     let request_id = Uuid::new_v4();
     let request_id_str = request_id.to_string();
 
     // Register the pending entry before sending to Kafka so the response can
     // never arrive before we are ready to receive it.
+    let t = Instant::now();
     let rx = state.response_use_case.register_pending(
         &request_id_str,
         &req.client_id,
         DEFAULT_TTL_SECONDS,
     );
+    let register_us = t.elapsed().as_micros();
 
     let worker_req = HsmWorkerRequest {
         request_id: request_id_str.clone(),
@@ -164,6 +179,7 @@ pub async fn service(
         response_topic: String::new(),
     };
 
+    let t = Instant::now();
     if let Err(e) = state
         .request_sender_port
         .send(&worker_req, &req.client_id)
@@ -177,20 +193,34 @@ pub async fn service(
             &instance,
         );
     }
+    let send_us = t.elapsed().as_micros();
 
     if state.serve_sync {
-        info!(
-            "Waiting for synchronous response for requestId: {}",
-            request_id_str
-        );
+        let t = Instant::now();
         let cached = tokio::time::timeout(Duration::from_millis(state.sync_timeout_ms), async {
             rx.await.ok()
         })
         .await
         .ok()
         .flatten();
+        let wait_us = t.elapsed().as_micros();
+
+        let t = Instant::now();
         let polling_url = state.polling_url(&request_id_str);
-        return build_async_response(request_id, cached, polling_url, &instance);
+        let resp = build_async_response(request_id, cached, polling_url, &instance);
+        let build_us = t.elapsed().as_micros();
+
+        debug!(
+            request_id = %request_id_str,
+            load_us,
+            register_us,
+            send_us,
+            wait_us,
+            build_us,
+            total_us = t_handler_start.elapsed().as_micros(),
+            "service handler timing"
+        );
+        return resp;
     }
 
     let location = state.polling_url(&request_id_str);
@@ -205,6 +235,14 @@ pub async fn service(
     if let Ok(v) = location.parse() {
         headers.insert(header::LOCATION, v);
     }
+    debug!(
+        request_id = %request_id_str,
+        load_us,
+        register_us,
+        send_us,
+        total_us = t_handler_start.elapsed().as_micros(),
+        "service handler timing (async, no sync wait)"
+    );
     (StatusCode::ACCEPTED, headers, Json(body)).into_response()
 }
 
