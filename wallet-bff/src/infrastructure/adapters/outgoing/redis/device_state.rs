@@ -3,17 +3,17 @@
 // SPDX-License-Identifier: EUPL-1.2
 
 use redis::AsyncCommands;
-use redis::aio::ConnectionManager;
 use tracing::error;
 
 use crate::application::port::outgoing::DeviceStatePort;
+use crate::infrastructure::adapters::outgoing::redis::conn::SharedConn;
 
 pub struct DeviceStateRedisAdapter {
-    conn: ConnectionManager,
+    conn: SharedConn,
 }
 
 impl DeviceStateRedisAdapter {
-    pub fn new(conn: ConnectionManager) -> Self {
+    pub fn new(conn: SharedConn) -> Self {
         Self { conn }
     }
 }
@@ -21,14 +21,14 @@ impl DeviceStateRedisAdapter {
 #[async_trait::async_trait]
 impl DeviceStatePort for DeviceStateRedisAdapter {
     async fn save(&self, key: &str, state: &str, ttl_seconds: u64) {
-        let mut conn = self.conn.clone();
+        let mut conn = self.conn.read().await.clone();
         if let Err(e) = conn.set_ex::<_, _, ()>(key, state, ttl_seconds).await {
             error!("Failed to save device state for key {}: {}", key, e);
         }
     }
 
     async fn load(&self, key: &str) -> Option<String> {
-        let mut conn = self.conn.clone();
+        let mut conn = self.conn.read().await.clone();
         match conn.get::<_, Option<String>>(key).await {
             Ok(v) => v,
             Err(e) => {

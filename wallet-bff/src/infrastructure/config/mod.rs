@@ -25,16 +25,27 @@ pub struct AppConfig {
     /// Per-worker bounded channel depth for the state-init response path.
     pub kafka_state_init_response_queue_depth: usize,
 
-    /// Redis host
+    /// Redis host (direct-connect mode). Ignored when
+    /// `redis_sentinel_hosts` is non-empty.
     pub redis_host: String,
-    /// Redis port
+    /// Redis port (direct-connect mode).
     pub redis_port: u16,
-    /// Redis username
+    /// Redis username (applies in both modes).
     pub redis_username: String,
-    /// Redis password
+    /// Redis password (applies in both modes).
     pub redis_password: String,
-    /// Redis database index
+    /// Redis database index (applies in both modes).
     pub redis_database: u8,
+    /// Comma-separated `host:port` list of Sentinel nodes. When set,
+    /// the BFF connects via `redis::sentinel::SentinelClient` and
+    /// discovers the current master through Sentinel. Empty disables
+    /// Sentinel mode and falls back to the direct-connect path.
+    pub redis_sentinel_hosts: String,
+    /// Sentinel `service_name` for the Valkey master (Sentinel monitor name).
+    pub redis_sentinel_master: String,
+    /// How often the master-watcher polls Sentinel for topology changes
+    /// (seconds). Drives failover recovery latency.
+    pub redis_sentinel_refresh_secs: u64,
 
     /// HTTP server bind host
     pub server_host: String,
@@ -83,6 +94,9 @@ impl AppConfig {
             .set_default("redis_username", "default")?
             .set_default("redis_password", "secret")?
             .set_default("redis_database", 0)?
+            .set_default("redis_sentinel_hosts", "")?
+            .set_default("redis_sentinel_master", "mymaster")?
+            .set_default("redis_sentinel_refresh_secs", 5)?
             .set_default("server_host", "0.0.0.0")?
             .set_default("server_port", 8088)?
             .set_default("serve_sync", true)?

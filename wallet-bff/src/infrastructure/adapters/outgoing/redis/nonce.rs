@@ -2,19 +2,19 @@
 //
 // SPDX-License-Identifier: EUPL-1.2
 
-use redis::aio::ConnectionManager;
 use tracing::error;
 
 use crate::application::port::outgoing::NoncePort;
+use crate::infrastructure::adapters::outgoing::redis::conn::SharedConn;
 
 const KEY_PREFIX: &str = "nonce:";
 
 pub struct NonceRedisAdapter {
-    conn: ConnectionManager,
+    conn: SharedConn,
 }
 
 impl NonceRedisAdapter {
-    pub fn new(conn: ConnectionManager) -> Self {
+    pub fn new(conn: SharedConn) -> Self {
         Self { conn }
     }
 }
@@ -27,7 +27,7 @@ impl NoncePort for NonceRedisAdapter {
         nonce: &str,
         ttl_seconds: u64,
     ) -> Result<bool, String> {
-        let mut conn = self.conn.clone();
+        let mut conn = self.conn.read().await.clone();
         let key = format!("{}{}:{}", KEY_PREFIX, client_id, nonce);
 
         // SET key 1 NX EX ttl — atomic: only sets if key does not exist.

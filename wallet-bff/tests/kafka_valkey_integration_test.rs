@@ -13,7 +13,8 @@ use testcontainers::ContainerAsync;
 use testcontainers::runners::AsyncRunner;
 use testcontainers_modules::kafka::apache::{self, Kafka};
 use testcontainers_modules::valkey::Valkey;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, RwLock};
+use wallet_bff::infrastructure::adapters::outgoing::redis::conn::SharedConn;
 
 use wallet_bff::application::port::incoming::ResponseUseCase;
 use wallet_bff::application::port::outgoing::{
@@ -53,11 +54,12 @@ async fn start_valkey() -> (ContainerAsync<Valkey>, String) {
     (container, url)
 }
 
-async fn valkey_connection_manager(url: &str) -> ConnectionManager {
+async fn valkey_connection_manager(url: &str) -> SharedConn {
     let client = redis::Client::open(url).expect("Failed to create Valkey client");
-    ConnectionManager::new(client)
+    let mgr = ConnectionManager::new(client)
         .await
-        .expect("Failed to create ConnectionManager")
+        .expect("Failed to create ConnectionManager");
+    Arc::new(RwLock::new(mgr))
 }
 
 // ── Valkey adapter tests ─────────────────────────────────────────────────────

@@ -2,5 +2,6 @@
 //
 // SPDX-License-Identifier: EUPL-1.2
 
+pub mod conn;
 pub mod device_state;
 pub mod nonce;

@@ -2,7 +2,6 @@
 //
 // SPDX-License-Identifier: EUPL-1.2
 
-use redis::Client;
 use std::sync::Arc;
 use std::time::Duration;
 use tracing::info;
@@ -18,7 +17,7 @@ use crate::infrastructure::adapters::outgoing::kafka::request_sender::{
     KafkaRequestSender, KafkaStateInitSender,
 };
 use crate::infrastructure::adapters::outgoing::redis::{
-    device_state::DeviceStateRedisAdapter, nonce::NonceRedisAdapter,
+    conn as redis_conn, device_state::DeviceStateRedisAdapter, nonce::NonceRedisAdapter,
 };
 use crate::infrastructure::config::AppConfig;
 
@@ -33,14 +32,13 @@ pub async fn run() {
         config.state_init_response_topic,
     );
 
-    // Redis — device state only
-    let redis_client = Client::open(config.redis_url()).expect("Failed to create Redis client");
-    let conn_mgr = redis::aio::ConnectionManager::new(redis_client)
-        .await
-        .expect("Failed to connect to Redis");
+    // Redis/Valkey — direct or via Sentinel, selected by config (see
+    // `redis::conn::build`). Both adapters share the same SharedConn so
+    // the Sentinel master-watcher swap is observed everywhere at once.
+    let shared_conn = redis_conn::build(&config).await;
 
-    let device_state_port = Arc::new(DeviceStateRedisAdapter::new(conn_mgr.clone()));
-    let nonce_port = Arc::new(NonceRedisAdapter::new(conn_mgr));
+    let device_state_port = Arc::new(DeviceStateRedisAdapter::new(shared_conn.clone()));
+    let nonce_port = Arc::new(NonceRedisAdapter::new(shared_conn));
 
     // Kafka producers (inject per-instance response topics)
     let request_sender_port = Arc::new(KafkaRequestSender::new(
