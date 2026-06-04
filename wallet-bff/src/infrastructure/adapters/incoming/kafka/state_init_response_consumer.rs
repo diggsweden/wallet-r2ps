@@ -42,6 +42,8 @@ pub fn start(
         .set("max.poll.interval.ms", "300000")
         .set("connections.max.idle.ms", "540000")
         .set("metadata.max.age.ms", "5000")
+        // See request_sender.rs for rationale.
+        .set("socket.nagle.disable", "true")
         .create()
         .expect("Failed to create state-init response consumer");
 

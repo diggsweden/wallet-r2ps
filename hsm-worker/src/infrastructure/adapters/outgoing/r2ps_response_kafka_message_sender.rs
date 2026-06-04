@@ -38,6 +38,8 @@ impl WorkerResponseKafkaSender {
             .set("linger.ms", "5")
             .set("batch.size", "65536")
             .set("compression.type", "lz4")
+            // See request_sender.rs in wallet-bff for rationale.
+            .set("socket.nagle.disable", "true")
             .create()
             .expect("Producer creation failed");
 

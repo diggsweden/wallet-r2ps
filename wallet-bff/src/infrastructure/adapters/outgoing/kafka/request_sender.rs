@@ -50,6 +50,12 @@ impl KafkaRequestSender {
             .set("linger.ms", "5")
             .set("batch.size", "65536")
             .set("compression.type", "lz4")
+            // Disable Nagle: with ~1500 req/s spread across hundreds of
+            // partitions, each TCP packet is tiny and infrequent.
+            // Nagle's algorithm would coalesce them at the cost of up to
+            // 40ms idle delay per send, which showed up directly as
+            // broker-side kafka_lag.
+            .set("socket.nagle.disable", "true")
             .create()
             .expect("Failed to create Kafka producer");
 
@@ -115,6 +121,12 @@ impl KafkaStateInitSender {
             .set("linger.ms", "5")
             .set("batch.size", "65536")
             .set("compression.type", "lz4")
+            // Disable Nagle: with ~1500 req/s spread across hundreds of
+            // partitions, each TCP packet is tiny and infrequent.
+            // Nagle's algorithm would coalesce them at the cost of up to
+            // 40ms idle delay per send, which showed up directly as
+            // broker-side kafka_lag.
+            .set("socket.nagle.disable", "true")
             .create()
             .expect("Failed to create Kafka state-init producer");
 

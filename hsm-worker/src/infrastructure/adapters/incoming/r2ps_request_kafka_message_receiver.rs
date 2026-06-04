@@ -112,6 +112,8 @@ impl WorkerRequestKafkaReceiver {
                 .set("max.poll.interval.ms", "300000")
                 .set("connections.max.idle.ms", "540000")
                 .set("metadata.max.age.ms", "5000")
+                // See request_sender.rs in wallet-bff for rationale.
+                .set("socket.nagle.disable", "true")
                 .create()
                 .expect("Consumer creation failed");
 
