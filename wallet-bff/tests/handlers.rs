@@ -73,10 +73,13 @@ async fn build_async_response_ok_returns_200_complete() {
 }
 
 #[rstest]
-#[case(Some(r#"{"title":"Worker error","status":500}"#.to_string()))]
-#[case(None)]
+#[case(Some(r#"{"title":"Worker error","status":500}"#.to_string()), "Worker returned a non-OK status")]
+#[case(None, "Worker returned a non-OK status")]
 #[tokio::test]
-async fn build_async_response_error_returns_500(#[case] error_message: Option<String>) {
+async fn build_async_response_error_returns_500(
+    #[case] error_message: Option<String>,
+    #[case] expected_detail: &str,
+) {
     let id = Uuid::new_v4();
     let cached = CachedResponse {
         request_id: id.to_string(),
@@ -96,22 +99,22 @@ async fn build_async_response_error_returns_500(#[case] error_message: Option<St
             .unwrap(),
         PROBLEM_CONTENT_TYPE
     );
+    let body: serde_json::Value =
+        serde_json::from_slice(&to_bytes(resp.into_body(), usize::MAX).await.unwrap()).unwrap();
+    assert_eq!(body["detail"], expected_detail);
 }
 
 #[tokio::test]
-async fn build_async_response_forwards_worker_problem_json_exactly() {
+async fn build_async_response_enriches_worker_problem_detail_on_error() {
     let id = Uuid::new_v4();
-    // A realistic RFC 9457 problem detail as produced by the worker service
-    let worker_error = format!(
-        r#"{{"title":"Error processing request","detail":"UnknownDevice","request_id":"{}"}}"#,
-        id
-    );
+    let worker_error =
+        r#"{"title":"Error processing request","detail":"UnknownDevice","request_id":"ignored"}"#;
     let cached = CachedResponse {
         request_id: id.to_string(),
         status: Status::Error,
         outer_response_jws: None,
         state_jws: None,
-        error_message: Some(worker_error.clone()),
+        error_message: Some(worker_error.to_string()),
     };
     let resp = build_async_response(id, Some(cached), "http://poll".into(), "/test");
 
@@ -121,5 +124,10 @@ async fn build_async_response_forwards_worker_problem_json_exactly() {
         PROBLEM_CONTENT_TYPE
     );
     let bytes = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
-    assert_eq!(bytes, worker_error);
+    let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(body["status"], 500);
+    assert_eq!(body["title"], "Internal Server Error");
+    assert_eq!(body["detail"], "UnknownDevice");
+    assert_eq!(body["instance"], "/test");
+    assert_eq!(body["request_id"], id.to_string());
 }

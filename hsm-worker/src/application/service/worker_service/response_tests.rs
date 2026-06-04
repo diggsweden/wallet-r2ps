@@ -108,6 +108,39 @@ mod response_encoding {
     }
 }
 
+/// Tests that verify the JSON shape of to_problem_details_json, since wallet-bff
+/// parses the `detail` and `request_id` fields from this output.
+#[cfg(test)]
+mod problem_detail_format {
+    use super::*;
+    use crate::application::service::worker_service::error::ProblemDetail;
+
+    #[test]
+    fn an_upstream_error_is_serialized_with_detail_and_request_id() {
+        let json_str = UpstreamError::UnknownDevice.to_problem_details_json("req-123");
+        let json: serde_json::Value = serde_json::from_str(&json_str).expect("must be valid JSON");
+        assert_eq!(json["detail"], "UnknownDevice");
+        assert_eq!(json["request_id"], "req-123");
+    }
+
+    #[test]
+    fn an_outer_error_is_serialized_with_detail_and_request_id() {
+        let json_str = OuterError::InnerJweMissing.to_problem_details_json("req-456");
+        let json: serde_json::Value = serde_json::from_str(&json_str).expect("must be valid JSON");
+        assert_eq!(json["detail"], "InnerJweMissing");
+        assert_eq!(json["request_id"], "req-456");
+    }
+
+    #[test]
+    fn a_worker_error_wrapping_an_upstream_error_is_serialized_with_detail_and_request_id() {
+        let error = WorkerError::Upstream(UpstreamError::InvalidStateJws);
+        let json_str = error.to_problem_details_json("req-789");
+        let json: serde_json::Value = serde_json::from_str(&json_str).expect("must be valid JSON");
+        assert_eq!(json["detail"], "InvalidStateJws");
+        assert_eq!(json["request_id"], "req-789");
+    }
+}
+
 /// Error handling tests - exercise the building of the different error responses.
 #[cfg(test)]
 mod error_handling {

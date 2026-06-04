@@ -17,7 +17,7 @@ use utoipa_swagger_ui::SwaggerUi;
 
 use crate::domain::ProblemDetail;
 
-use handlers::{AppState, PROBLEM_CONTENT_TYPE};
+use handlers::{AppState, problem_content_type_header};
 use replay_protection::ReplayProtectionState;
 
 /// RFC 9457 Problem Details response with Content-Type: application/problem+json.
@@ -27,17 +27,39 @@ pub(super) fn problem_response(
     detail: Option<&str>,
     instance: &str,
 ) -> Response {
+    build_problem_response(status, title, detail, instance, None)
+}
+
+/// Like [`problem_response`] but includes a `requestId` field for traceability.
+pub(super) fn tracked_problem_response(
+    status: StatusCode,
+    title: &str,
+    detail: Option<&str>,
+    instance: &str,
+    request_id: &str,
+) -> Response {
+    build_problem_response(status, title, detail, instance, Some(request_id))
+}
+
+fn build_problem_response(
+    status: StatusCode,
+    title: &str,
+    detail: Option<&str>,
+    instance: &str,
+    request_id: Option<&str>,
+) -> Response {
     let body = ProblemDetail {
         problem_type: None,
         title: title.to_string(),
         status: status.as_u16(),
         detail: detail.map(str::to_string),
         instance: Some(instance.to_string()),
+        request_id: request_id.map(str::to_string),
     };
     let mut response = (status, Json(body)).into_response();
     response
         .headers_mut()
-        .insert(header::CONTENT_TYPE, PROBLEM_CONTENT_TYPE.parse().unwrap());
+        .insert(header::CONTENT_TYPE, problem_content_type_header().clone());
     response
 }
 
@@ -56,7 +78,6 @@ pub(super) fn problem_response(
         crate::domain::NewStateResponseDto,
         crate::domain::AsyncResponseDto,
         crate::domain::AsyncResponseStatus,
-        crate::domain::AsyncResponseError,
         crate::domain::EcPublicJwk,
         crate::domain::ProblemDetail,
     ))

@@ -41,6 +41,8 @@ impl From<HsmWorkerResponse> for CachedResponse {
 #[serde(rename_all = "camelCase")]
 pub struct BffRequest {
     pub client_id: String,
+    /// Compact JWS (ES256). The decoded payload must contain a `nonce` UUID field
+    /// for replay protection — duplicate nonces are rejected with 409.
     pub outer_request_jws: String,
 }
 
@@ -50,8 +52,12 @@ pub struct BffRequest {
 pub struct NewStateRequestDto {
     pub public_key: EcPublicJwk,
     pub client_id: Option<String>,
+    /// When `true`, overwrites any existing device state for the supplied `clientId`.
+    /// When `false` (default), a fresh `clientId` is always generated.
     #[serde(default)]
     pub overwrite: bool,
+    /// Session TTL as an ISO 8601 duration string, e.g. `PT10M` for 10 minutes.
+    /// Defaults to 10 minutes when omitted.
     pub ttl: Option<String>,
     #[serde(default)]
     pub initial_key_curve: Option<Curve>,
@@ -82,26 +88,14 @@ pub struct AsyncResponseDto {
     pub result: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub result_url: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub error: Option<AsyncResponseError>,
 }
 
 /// Status of an async operation.
 #[derive(Debug, Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "lowercase")]
-#[allow(dead_code)]
 pub enum AsyncResponseStatus {
     Complete,
     Pending,
-    Error,
-}
-
-/// Error detail embedded in AsyncResponseDto.
-#[derive(Debug, Serialize, utoipa::ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct AsyncResponseError {
-    pub message: String,
-    pub http_status: u16,
 }
 
 pub const DEFAULT_TTL_SECONDS: u64 = 600; // 10 minutes, matches r2ps-rest-api default
@@ -118,4 +112,6 @@ pub struct ProblemDetail {
     pub detail: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub instance: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<String>,
 }
