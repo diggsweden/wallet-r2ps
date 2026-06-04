@@ -6,9 +6,19 @@ use crate::application::{WorkerResponseError, WorkerResponseSpiPort};
 use crate::domain::HsmWorkerResponse;
 use crate::infrastructure::KafkaConfig;
 use rdkafka::ClientConfig;
+use rdkafka::message::{Header, OwnedHeaders};
 use rdkafka::producer::{BaseProducer, BaseRecord};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tracing::{debug, error};
+
+fn now_epoch_us_bytes() -> Vec<u8> {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_micros())
+        .unwrap_or(0)
+        .to_string()
+        .into_bytes()
+}
 
 pub struct WorkerResponseKafkaSender {
     producer: BaseProducer,
@@ -45,9 +55,15 @@ impl WorkerResponseSpiPort for WorkerResponseKafkaSender {
             Ok(output_json) => {
                 let key = &worker_response.request_id;
                 let request_id = &worker_response.request_id;
+                let t_buf = now_epoch_us_bytes();
+                let headers = OwnedHeaders::new().insert(Header {
+                    key: "t_produced_us",
+                    value: Some(t_buf.as_slice()),
+                });
                 let record = BaseRecord::to(response_topic)
                     .key(key)
-                    .payload(&output_json);
+                    .payload(&output_json)
+                    .headers(headers);
 
                 let t = Instant::now();
                 let send_result = self.producer.send(record);

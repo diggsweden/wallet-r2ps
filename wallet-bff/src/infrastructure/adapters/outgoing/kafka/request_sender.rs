@@ -3,9 +3,19 @@
 // SPDX-License-Identifier: EUPL-1.2
 
 use rdkafka::ClientConfig;
+use rdkafka::message::{Header, OwnedHeaders};
 use rdkafka::producer::{FutureProducer, FutureRecord};
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tracing::error;
+
+fn now_epoch_us_bytes() -> Vec<u8> {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_micros())
+        .unwrap_or(0)
+        .to_string()
+        .into_bytes()
+}
 
 use crate::application::port::outgoing::{RequestSenderPort, StateInitSenderPort};
 use crate::domain::{HsmWorkerRequest, StateInitRequest};
@@ -56,11 +66,17 @@ impl RequestSenderPort for KafkaRequestSender {
         let mut req = request.clone();
         req.response_topic = self.response_topic.clone();
         let payload = serde_json::to_string(&req).map_err(|e| e.to_string())?;
+        let t_buf = now_epoch_us_bytes();
+        let headers = OwnedHeaders::new().insert(Header {
+            key: "t_produced_us",
+            value: Some(t_buf.as_slice()),
+        });
         self.producer
             .send(
                 FutureRecord::to(HSM_REQUESTS_TOPIC)
                     .key(device_id)
-                    .payload(&payload),
+                    .payload(&payload)
+                    .headers(headers),
                 Duration::from_secs(5),
             )
             .await
@@ -115,11 +131,17 @@ impl StateInitSenderPort for KafkaStateInitSender {
         let mut req = request.clone();
         req.response_topic = self.response_topic.clone();
         let payload = serde_json::to_string(&req).map_err(|e| e.to_string())?;
+        let t_buf = now_epoch_us_bytes();
+        let headers = OwnedHeaders::new().insert(Header {
+            key: "t_produced_us",
+            value: Some(t_buf.as_slice()),
+        });
         self.producer
             .send(
                 FutureRecord::to(STATE_INIT_REQUESTS_TOPIC)
                     .key(device_id)
-                    .payload(&payload),
+                    .payload(&payload)
+                    .headers(headers),
                 Duration::from_secs(5),
             )
             .await

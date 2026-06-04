@@ -7,6 +7,7 @@ use crate::domain::HsmWorkerRequest;
 use crate::infrastructure::KafkaConfig;
 use crossbeam_channel::{Sender, bounded};
 use rdkafka::consumer::{BaseConsumer, Consumer};
+use rdkafka::message::Headers;
 use rdkafka::{ClientConfig, Message};
 use serde_json::from_slice;
 use std::collections::HashMap;
@@ -14,8 +15,40 @@ use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::{JoinHandle, spawn};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tracing::{debug, error, warn};
+
+fn read_t_produced_us<M: Message>(msg: &M) -> Option<u128> {
+    let headers = msg.headers()?;
+    for i in 0..headers.count() {
+        let h = headers.get(i);
+        if h.key == "t_produced_us"
+            && let Some(v) = h.value
+            && let Ok(s) = std::str::from_utf8(v)
+            && let Ok(n) = s.parse::<u128>()
+        {
+            return Some(n);
+        }
+    }
+    None
+}
+
+fn now_epoch_us() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_micros())
+        .unwrap_or(0)
+}
+
+/// Message + timing metadata threaded through the per-partition channel
+/// so the partition worker can log how long the request spent in each
+/// preceding stage: in Kafka (from BFF produce to worker consume) and in
+/// our in-process channel.
+struct Item {
+    req: HsmWorkerRequest,
+    t_produced_us: Option<u128>,
+    t_received: Instant,
+}
 
 pub struct WorkerRequestKafkaReceiver {
     worker_use_case: Arc<dyn WorkerRequestUseCase + Send + Sync>,
@@ -91,12 +124,14 @@ impl WorkerRequestKafkaReceiver {
                 queue_depth
             );
 
-            let mut partition_senders: HashMap<i32, Sender<HsmWorkerRequest>> = HashMap::new();
+            let mut partition_senders: HashMap<i32, Sender<Item>> = HashMap::new();
             let mut worker_handles: Vec<JoinHandle<()>> = Vec::new();
 
             while running.load(Ordering::Relaxed) {
                 match consumer.poll(Duration::from_millis(100)) {
                     Some(Ok(msg)) => {
+                        let t_received = Instant::now();
+                        let t_produced_us = read_t_produced_us(&msg);
                         let payload = match msg.payload() {
                             Some(bytes) => bytes,
                             None => {
@@ -124,15 +159,27 @@ impl WorkerRequestKafkaReceiver {
                         // cooperative-sticky rebalance moves a partition
                         // here, this fires once for that new partition.
                         let sender = partition_senders.entry(partition).or_insert_with(|| {
-                            let (tx, rx) = bounded::<HsmWorkerRequest>(queue_depth);
+                            let (tx, rx) = bounded::<Item>(queue_depth);
                             let uc = use_case.clone();
                             let handle = spawn(move || {
                                 debug!("hsm-requests partition {} worker started", partition);
-                                while let Ok(req) = rx.recv() {
-                                    let request_id_for_log = req.request_id.clone();
+                                while let Ok(item) = rx.recv() {
+                                    let request_id_for_log = item.req.request_id.clone();
+                                    // Time the message spent transiting Kafka
+                                    // (from BFF .send to our consumer.poll).
+                                    let kafka_lag_us = item
+                                        .t_produced_us
+                                        .map(|tp| {
+                                            now_epoch_us().saturating_sub(tp) as i64
+                                        })
+                                        .unwrap_or(-1);
+                                    // Time the message sat in our in-process
+                                    // per-partition channel before this worker
+                                    // dequeued it.
+                                    let channel_us = item.t_received.elapsed().as_micros();
                                     let t = Instant::now();
                                     let outcome = std::panic::catch_unwind(AssertUnwindSafe(
-                                        || uc.execute(req),
+                                        || uc.execute(item.req),
                                     ));
                                     let execute_us = t.elapsed().as_micros();
                                     match outcome {
@@ -140,6 +187,8 @@ impl WorkerRequestKafkaReceiver {
                                             debug!(
                                                 partition,
                                                 request_id = %request_id,
+                                                kafka_lag_us,
+                                                channel_us,
                                                 execute_us,
                                                 "HsmWorkerRequest processed"
                                             );
@@ -148,6 +197,8 @@ impl WorkerRequestKafkaReceiver {
                                             error!(
                                                 partition,
                                                 request_id = %request_id_for_log,
+                                                kafka_lag_us,
+                                                channel_us,
                                                 execute_us,
                                                 "execute() error: {:?}",
                                                 err
@@ -173,7 +224,12 @@ impl WorkerRequestKafkaReceiver {
                         // Bounded send: blocks only when THIS partition's
                         // worker is saturated. Other partitions continue to
                         // dispatch in parallel.
-                        if let Err(e) = sender.send(hsm_worker_request) {
+                        let item = Item {
+                            req: hsm_worker_request,
+                            t_produced_us,
+                            t_received,
+                        };
+                        if let Err(e) = sender.send(item) {
                             error!(
                                 "dispatch to partition {} worker failed (channel closed): {}",
                                 partition, e

@@ -5,12 +5,35 @@
 use rdkafka::ClientConfig;
 use rdkafka::Message;
 use rdkafka::consumer::{Consumer, StreamConsumer};
+use rdkafka::message::Headers;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tracing::{debug, error, info};
 
 use crate::application::port::incoming::ResponseUseCase;
 use crate::domain::HsmWorkerResponse;
+
+fn read_t_produced_us<M: Message>(msg: &M) -> Option<u128> {
+    let headers = msg.headers()?;
+    for i in 0..headers.count() {
+        let h = headers.get(i);
+        if h.key == "t_produced_us"
+            && let Some(v) = h.value
+            && let Ok(s) = std::str::from_utf8(v)
+            && let Ok(n) = s.parse::<u128>()
+        {
+            return Some(n);
+        }
+    }
+    None
+}
+
+fn now_epoch_us() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_micros())
+        .unwrap_or(0)
+}
 
 /// Spawns 1 Kafka StreamConsumer task that pulls from `topic` and
 /// `tokio::spawn`s an independent task per message to invoke
@@ -68,6 +91,10 @@ pub fn start(
         loop {
             match consumer.recv().await {
                 Ok(msg) => {
+                    let t_produced_us = read_t_produced_us(&msg);
+                    let response_kafka_lag_us = t_produced_us
+                        .map(|tp| now_epoch_us().saturating_sub(tp) as i64)
+                        .unwrap_or(-1);
                     let Some(payload) = msg.payload() else {
                         continue;
                     };
@@ -91,6 +118,7 @@ pub fn start(
                         debug!(
                             topic = %topic_for_task,
                             request_id = %request_id,
+                            response_kafka_lag_us,
                             response_ready_us = t.elapsed().as_micros(),
                             "response_ready completed"
                         );
