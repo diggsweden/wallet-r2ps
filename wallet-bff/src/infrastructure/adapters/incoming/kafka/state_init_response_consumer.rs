@@ -7,29 +7,26 @@ use rdkafka::Message;
 use rdkafka::consumer::{Consumer, StreamConsumer};
 use std::sync::Arc;
 use std::time::Instant;
-use tokio::sync::mpsc;
 use tracing::{debug, error, info};
 
 use crate::application::port::outgoing::StateInitCorrelationPort;
 use crate::domain::StateInitResponse;
 
-/// Mirrors `r2ps_response_consumer::start` but for state-init responses:
-/// 1 consumer pulling from `topic` + N worker tasks fed by bounded
-/// channels, partition-mod routed.
+/// Mirrors `r2ps_response_consumer::start` — 1 consumer pulling from
+/// `topic` + spawn-per-message dispatch into `response_received`.
+/// `worker_tasks` and `queue_depth` are unused under the spawn-per-
+/// message model and kept only for API/env compatibility.
 pub fn start(
     bootstrap_servers: &str,
     group_id: &str,
     topic: &str,
     correlation_port: Arc<dyn StateInitCorrelationPort>,
-    worker_tasks: usize,
-    queue_depth: usize,
+    _worker_tasks: usize,
+    _queue_depth: usize,
 ) {
-    assert!(worker_tasks >= 1, "worker_tasks must be >= 1");
-    assert!(queue_depth >= 1, "queue_depth must be >= 1");
-
     info!(
-        "Starting 1 consumer + {} worker task(s) (queue_depth={}) on topic: {}",
-        worker_tasks, queue_depth, topic
+        "Starting 1 consumer (spawn-per-message dispatch) on topic: {}",
+        topic
     );
 
     let consumer: StreamConsumer = ClientConfig::new()
@@ -52,28 +49,6 @@ pub fn start(
         .subscribe(&[topic])
         .expect("Failed to subscribe to state-init response topic");
 
-    let mut senders: Vec<mpsc::Sender<StateInitResponse>> = Vec::with_capacity(worker_tasks);
-    for worker_idx in 0..worker_tasks {
-        let (tx, mut rx) = mpsc::channel::<StateInitResponse>(queue_depth);
-        senders.push(tx);
-        let port = correlation_port.clone();
-        let topic_for_log = topic.to_string();
-        tokio::spawn(async move {
-            while let Some(response) = rx.recv().await {
-                let request_id = response.request_id.clone();
-                let t = Instant::now();
-                port.response_received(response).await;
-                debug!(
-                    worker = worker_idx,
-                    topic = %topic_for_log,
-                    request_id = %request_id,
-                    response_received_us = t.elapsed().as_micros(),
-                    "state-init response_received completed"
-                );
-            }
-        });
-    }
-
     let topic_owned = topic.to_string();
     tokio::spawn(async move {
         loop {
@@ -93,14 +68,19 @@ pub fn start(
                             continue;
                         }
                     };
-                    let worker_idx =
-                        (msg.partition().unsigned_abs() as usize) % senders.len();
-                    if senders[worker_idx].send(response).await.is_err() {
-                        error!(
-                            "dispatch to worker {} failed (channel closed) on topic {}",
-                            worker_idx, topic_owned
+                    let port = correlation_port.clone();
+                    let topic_for_task = topic_owned.clone();
+                    tokio::spawn(async move {
+                        let request_id = response.request_id.clone();
+                        let t = Instant::now();
+                        port.response_received(response).await;
+                        debug!(
+                            topic = %topic_for_task,
+                            request_id = %request_id,
+                            response_received_us = t.elapsed().as_micros(),
+                            "state-init response_received completed"
                         );
-                    }
+                    });
                 }
                 Err(e) => {
                     error!("Kafka consumer error on state-init response topic: {}", e);
