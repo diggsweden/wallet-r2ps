@@ -2,8 +2,7 @@
 //
 // SPDX-License-Identifier: EUPL-1.2
 
-use std::collections::HashMap;
-use std::sync::Mutex;
+use dashmap::DashMap;
 use std::time::{Duration, Instant};
 use tokio::sync::oneshot;
 use tracing::{info, warn};
@@ -26,8 +25,12 @@ struct CachedEntry {
 
 pub struct ResponseService {
     device_state_port: Arc<dyn DeviceStatePort>,
-    pending: Mutex<HashMap<String, PendingEntry>>,
-    cache: Mutex<HashMap<String, CachedEntry>>,
+    // Sharded concurrent map — avoids a single `Mutex<HashMap>` lock on every
+    // register_pending / response_ready under burst load (the BFF takes one
+    // insert + one remove per HTTP request, and at 1k+ rps with dozens of
+    // concurrent worker tasks the global mutex serialises them).
+    pending: DashMap<String, PendingEntry>,
+    cache: DashMap<String, CachedEntry>,
     response_ttl: Duration,
 }
 
@@ -35,8 +38,8 @@ impl ResponseService {
     pub fn new(device_state_port: Arc<dyn DeviceStatePort>, response_ttl: Duration) -> Self {
         Self {
             device_state_port,
-            pending: Mutex::new(HashMap::new()),
-            cache: Mutex::new(HashMap::new()),
+            pending: DashMap::new(),
+            cache: DashMap::new(),
             response_ttl,
         }
     }
@@ -46,10 +49,7 @@ impl ResponseService {
             expires_at: Instant::now() + self.response_ttl,
             response,
         };
-        self.cache
-            .lock()
-            .unwrap()
-            .insert(entry.response.request_id.clone(), entry);
+        self.cache.insert(entry.response.request_id.clone(), entry);
     }
 }
 
@@ -62,7 +62,7 @@ impl ResponseUseCase for ResponseService {
         ttl_seconds: u64,
     ) -> oneshot::Receiver<CachedResponse> {
         let (tx, rx) = oneshot::channel();
-        self.pending.lock().unwrap().insert(
+        self.pending.insert(
             request_id.to_string(),
             PendingEntry {
                 state_key: state_key.to_string(),
@@ -74,7 +74,7 @@ impl ResponseUseCase for ResponseService {
     }
 
     async fn response_ready(&self, response: HsmWorkerResponse) {
-        let entry = self.pending.lock().unwrap().remove(&response.request_id);
+        let entry = self.pending.remove(&response.request_id).map(|(_, v)| v);
 
         let cached = CachedResponse::from(response);
 
@@ -115,14 +115,13 @@ impl ResponseUseCase for ResponseService {
         // will miss the response.
         let deadline = tokio::time::Instant::now() + Duration::from_millis(timeout_ms);
         loop {
-            {
-                let mut map = self.cache.lock().unwrap();
-                if let Some(entry) = map.get(request_id) {
-                    if entry.expires_at > Instant::now() {
-                        return Some(entry.response.clone());
-                    }
-                    map.remove(request_id);
+            if let Some(entry) = self.cache.get(request_id) {
+                if entry.expires_at > Instant::now() {
+                    return Some(entry.response.clone());
                 }
+                // Expired — drop the reference before removing.
+                drop(entry);
+                self.cache.remove(request_id);
             }
             if tokio::time::Instant::now() >= deadline {
                 return None;

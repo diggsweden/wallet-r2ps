@@ -29,6 +29,7 @@ config = "0.15.19"
 uuid = { version = "1.18.1", features = ["v4", "serde"] }
 iso8601-duration = { version = "0.2.0", features = ["serde"] }
 async-trait = "0.1"
+dashmap = "6"
 utoipa = { version = "5", features = ["uuid"] }
 utoipa-swagger-ui = { version = "9", features = ["axum"] }
 

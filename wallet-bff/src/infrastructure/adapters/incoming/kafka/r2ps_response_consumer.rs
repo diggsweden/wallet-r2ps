@@ -6,8 +6,9 @@ use rdkafka::ClientConfig;
 use rdkafka::Message;
 use rdkafka::consumer::{Consumer, StreamConsumer};
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::sync::mpsc;
-use tracing::{error, info};
+use tracing::{debug, error, info};
 
 use crate::application::port::incoming::ResponseUseCase;
 use crate::domain::HsmWorkerResponse;
@@ -64,11 +65,16 @@ pub fn start(
         let topic_for_log = topic.to_string();
         tokio::spawn(async move {
             while let Some(response) = rx.recv().await {
-                info!(
-                    "[worker {}] response for requestId {} on topic {}",
-                    worker_idx, response.request_id, topic_for_log
-                );
+                let request_id = response.request_id.clone();
+                let t = Instant::now();
                 use_case.response_ready(response).await;
+                debug!(
+                    worker = worker_idx,
+                    topic = %topic_for_log,
+                    request_id = %request_id,
+                    response_ready_us = t.elapsed().as_micros(),
+                    "response_ready completed"
+                );
             }
         });
     }

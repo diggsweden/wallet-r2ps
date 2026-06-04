@@ -2,8 +2,8 @@
 //
 // SPDX-License-Identifier: EUPL-1.2
 
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use dashmap::DashMap;
+use std::sync::Arc;
 use tokio::sync::oneshot;
 use tracing::warn;
 
@@ -20,14 +20,16 @@ struct StateInitPending {
 /// performed by a different set of HSMs (and hsm-worker instances) than regular
 /// operations, so the two response flows must remain independent.
 pub struct StateInitCorrelationService {
-    pending: Mutex<HashMap<String, StateInitPending>>,
+    // Sharded concurrent map — see ResponseService for the rationale (avoid
+    // global-mutex serialisation across concurrent worker tasks).
+    pending: DashMap<String, StateInitPending>,
     device_state_port: Arc<dyn DeviceStatePort>,
 }
 
 impl StateInitCorrelationService {
     pub fn new(device_state_port: Arc<dyn DeviceStatePort>) -> Self {
         Self {
-            pending: Mutex::new(HashMap::new()),
+            pending: DashMap::new(),
             device_state_port,
         }
     }
@@ -42,7 +44,7 @@ impl StateInitCorrelationPort for StateInitCorrelationService {
         ttl_seconds: u64,
     ) -> oneshot::Receiver<StateInitResponse> {
         let (tx, rx) = oneshot::channel();
-        self.pending.lock().unwrap().insert(
+        self.pending.insert(
             request_id.to_string(),
             StateInitPending {
                 state_key: state_key.to_string(),
@@ -54,7 +56,7 @@ impl StateInitCorrelationPort for StateInitCorrelationService {
     }
 
     async fn response_received(&self, response: StateInitResponse) {
-        let entry = self.pending.lock().unwrap().remove(&response.request_id);
+        let entry = self.pending.remove(&response.request_id).map(|(_, v)| v);
 
         let Some(e) = entry else {
             warn!(

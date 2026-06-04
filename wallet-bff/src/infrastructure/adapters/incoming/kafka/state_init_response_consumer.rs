@@ -6,8 +6,9 @@ use rdkafka::ClientConfig;
 use rdkafka::Message;
 use rdkafka::consumer::{Consumer, StreamConsumer};
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::sync::mpsc;
-use tracing::{error, info};
+use tracing::{debug, error, info};
 
 use crate::application::port::outgoing::StateInitCorrelationPort;
 use crate::domain::StateInitResponse;
@@ -59,11 +60,16 @@ pub fn start(
         let topic_for_log = topic.to_string();
         tokio::spawn(async move {
             while let Some(response) = rx.recv().await {
-                info!(
-                    "[worker {}] state-init response for requestId {} on topic {}",
-                    worker_idx, response.request_id, topic_for_log
-                );
+                let request_id = response.request_id.clone();
+                let t = Instant::now();
                 port.response_received(response).await;
+                debug!(
+                    worker = worker_idx,
+                    topic = %topic_for_log,
+                    request_id = %request_id,
+                    response_received_us = t.elapsed().as_micros(),
+                    "state-init response_received completed"
+                );
             }
         });
     }
