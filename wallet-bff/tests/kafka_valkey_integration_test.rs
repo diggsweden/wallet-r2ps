@@ -175,7 +175,7 @@ async fn test_nonce_adapter_expired_nonce_can_be_reused() {
 async fn test_request_sender_produces_to_kafka() {
     let (_container, bootstrap) = start_kafka().await;
 
-    let sender = KafkaRequestSender::new(&bootstrap, "v4", "test-responses".to_string());
+    let sender = KafkaRequestSender::new(&bootstrap, "v4", 0, "test-responses".to_string());
     let request = HsmWorkerRequest {
         request_id: "req-100".to_string(),
         state_jws: "test-state-jws".to_string(),
@@ -217,7 +217,7 @@ async fn test_state_init_sender_produces_to_kafka() {
     let (_container, bootstrap) = start_kafka().await;
 
     let sender =
-        KafkaStateInitSender::new(&bootstrap, "v4", "test-state-init-responses".to_string());
+        KafkaStateInitSender::new(&bootstrap, "v4", 0, "test-state-init-responses".to_string());
     let request = StateInitRequest {
         request_id: "req-200".to_string(),
         public_key: test_ec_jwk(),
@@ -443,7 +443,7 @@ async fn test_bff_kafka_round_trip() {
     // Register the pending entry before sending the request
     let rx = response_service.register_pending(request_id, "device-rt", 300);
 
-    let request_sender = KafkaRequestSender::new(&bootstrap, "v4", response_topic.clone());
+    let request_sender = KafkaRequestSender::new(&bootstrap, "v4", 0, response_topic.clone());
     let request = HsmWorkerRequest {
         request_id: request_id.to_string(),
         state_jws: "old-state".to_string(),

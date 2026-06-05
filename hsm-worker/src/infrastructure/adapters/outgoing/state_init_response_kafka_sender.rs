@@ -26,10 +26,10 @@ impl StateInitResponseKafkaMessageSender {
             .set("message.timeout.ms", "5000")
             // acks=1 (leader-only): see WorkerResponseKafkaSender for rationale.
             .set("acks", "1")
-            // linger.ms=0: see WorkerResponseKafkaSender for rationale.
-            .set("linger.ms", "0")
+            // See WorkerResponseKafkaSender for rationale.
+            .set("linger.ms", config.producer_linger_ms.to_string())
             .set("batch.size", "65536")
-            .set("compression.type", "lz4")
+            .set("compression.type", "none")
             // See request_sender.rs in wallet-bff for rationale.
             .set("socket.nagle.disable", "true")
             .create()

@@ -24,6 +24,11 @@ pub struct AppConfig {
     pub kafka_response_queue_depth: usize,
     /// Per-worker bounded channel depth for the state-init response path.
     pub kafka_state_init_response_queue_depth: usize,
+    /// Producer `linger.ms` for both BFF producers (request + state-init).
+    /// Larger values let librdkafka batch more messages per produce
+    /// request, reducing broker per-batch overhead at the cost of an
+    /// added latency floor. Set 0 for burst-style send-immediately.
+    pub kafka_producer_linger_ms: u64,
 
     /// Redis host (direct-connect mode). Ignored when
     /// `redis_sentinel_hosts` is non-empty.
@@ -89,6 +94,7 @@ impl AppConfig {
             .set_default("kafka_consumer_threads_state_init_response", 1)?
             .set_default("kafka_response_queue_depth", 64)?
             .set_default("kafka_state_init_response_queue_depth", 32)?
+            .set_default("kafka_producer_linger_ms", 20)?
             .set_default("redis_host", "localhost")?
             .set_default("redis_port", 6379)?
             .set_default("redis_username", "default")?

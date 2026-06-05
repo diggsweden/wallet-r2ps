@@ -46,6 +46,8 @@ pub struct AppConfig {
     pub hsm_worker_queue_depth_request: usize,
     /// Per-worker bounded channel depth for the state-init dispatch path.
     pub hsm_worker_queue_depth_state_init: usize,
+    /// Producer `linger.ms` for response producers (env: KAFKA_PRODUCER_LINGER_MS).
+    pub kafka_producer_linger_ms: u64,
 }
 
 impl AppConfig {
@@ -59,6 +61,7 @@ impl AppConfig {
             .set_default("hsm_worker_tasks_state_init", 4)?
             .set_default("hsm_worker_queue_depth_request", 64)?
             .set_default("hsm_worker_queue_depth_state_init", 32)?
+            .set_default("kafka_producer_linger_ms", 20)?
             .set_default("opaque_context", "RPS-Ops")?
             .set_default("opaque_server_identifier", "cloud-wallet.digg.se")?
             .set_default("hsm_key_label", "wallet-hsm-key")?
@@ -79,6 +82,7 @@ impl From<AppConfig> for KafkaConfig {
             request_worker_queue_depth: value.hsm_worker_queue_depth_request,
             state_init_worker_tasks: value.hsm_worker_tasks_state_init,
             state_init_worker_queue_depth: value.hsm_worker_queue_depth_state_init,
+            producer_linger_ms: value.kafka_producer_linger_ms,
         }
     }
 }

@@ -18,4 +18,8 @@ pub struct KafkaConfig {
     pub state_init_worker_tasks: usize,
     /// Per-worker bounded channel depth for the state-init dispatch path.
     pub state_init_worker_queue_depth: usize,
+    /// Producer `linger.ms` for the response producers. Same env var
+    /// (KAFKA_PRODUCER_LINGER_MS) as the BFF side so they can be tuned
+    /// together. See response producer modules for the trade-off.
+    pub producer_linger_ms: u64,
 }

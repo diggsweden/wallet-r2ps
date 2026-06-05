@@ -44,11 +44,13 @@ pub async fn run() {
     let request_sender_port = Arc::new(KafkaRequestSender::new(
         &config.kafka_bootstrap_servers,
         &config.kafka_broker_address_family,
+        config.kafka_producer_linger_ms,
         config.hsm_worker_response_topic.clone(),
     ));
     let state_init_sender_port = Arc::new(KafkaStateInitSender::new(
         &config.kafka_bootstrap_servers,
         &config.kafka_broker_address_family,
+        config.kafka_producer_linger_ms,
         config.state_init_response_topic.clone(),
     ));
 

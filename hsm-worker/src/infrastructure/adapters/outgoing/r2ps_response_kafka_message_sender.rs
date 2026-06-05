@@ -39,13 +39,13 @@ impl WorkerResponseKafkaSender {
             // the caller. Idempotence is not used here — request_id is the dedupe key
             // applied at the application layer.
             .set("acks", "1")
-            // linger.ms=0: hsm-worker response traffic fans out across two BFF
-            // response topics and many partitions; per-partition rate is low
-            // enough that any non-zero linger.ms becomes a per-response latency
-            // floor with negligible batching gain. batch.size still bounds bursts.
-            .set("linger.ms", "0")
+            // linger.ms env-tunable via KAFKA_PRODUCER_LINGER_MS — see
+            // KafkaConfig. compression.type=none because per-message
+            // lz4 framing+decompression was a measurable broker CPU
+            // sink at sparse partition fan-out.
+            .set("linger.ms", config.producer_linger_ms.to_string())
             .set("batch.size", "65536")
-            .set("compression.type", "lz4")
+            .set("compression.type", "none")
             // See request_sender.rs in wallet-bff for rationale.
             .set("socket.nagle.disable", "true")
             .create()

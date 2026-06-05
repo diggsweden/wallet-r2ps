@@ -52,6 +52,7 @@ fn make_kafka_config(bootstrap: &str) -> KafkaConfig {
         request_worker_queue_depth: 8,
         state_init_worker_tasks: 1,
         state_init_worker_queue_depth: 8,
+        producer_linger_ms: 0,
     }
 }
 

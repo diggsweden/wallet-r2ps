@@ -101,6 +101,7 @@ impl ProducerContext for ProducerStatsContext {
 fn build_producer(
     bootstrap_servers: &str,
     broker_address_family: &str,
+    linger_ms: u64,
     name: &'static str,
 ) -> FutureProducer<ProducerStatsContext> {
     ClientConfig::new()
@@ -113,14 +114,16 @@ fn build_producer(
         // handler with no broker-durability requirement. Idempotence is off
         // so the produce request itself stays off the full-replication path.
         .set("acks", "1")
-        // linger.ms=0: at ~150 req/s per partition (1500 rps / 10 partitions)
-        // few batches fill before any linger timer fires, so any non-zero
-        // linger.ms becomes a per-send latency floor on the request→worker
-        // hop. Pairs with socket.nagle.disable for the same "tiny infrequent
-        // per-partition traffic" pattern. batch.size still bounds bursts.
-        .set("linger.ms", "0")
+        // linger.ms is tuned together with the hsm-requests partition
+        // count. Sparse partition fan-out (400) leaves linger windows
+        // mostly empty regardless of value — so it's wired to an env
+        // var (KAFKA_PRODUCER_LINGER_MS) for in-cluster experiments
+        // without rebuilds. compression.type=none because per-message
+        // lz4 framing+decompression dominated broker CPU at sparse
+        // batches (broker_ack_us p99 was 279 ms).
+        .set("linger.ms", linger_ms.to_string())
         .set("batch.size", "65536")
-        .set("compression.type", "lz4")
+        .set("compression.type", "none")
         // Disable Nagle: with ~1500 req/s spread across many partitions,
         // each TCP packet is tiny and infrequent. Nagle's algorithm would
         // coalesce them at the cost of up to 40ms idle delay per send,
@@ -151,10 +154,16 @@ impl KafkaRequestSender {
     pub fn new(
         bootstrap_servers: &str,
         broker_address_family: &str,
+        linger_ms: u64,
         response_topic: String,
     ) -> Self {
         Self {
-            producer: build_producer(bootstrap_servers, broker_address_family, "hsm-requests"),
+            producer: build_producer(
+                bootstrap_servers,
+                broker_address_family,
+                linger_ms,
+                "hsm-requests",
+            ),
             response_topic,
         }
     }
@@ -225,12 +234,14 @@ impl KafkaStateInitSender {
     pub fn new(
         bootstrap_servers: &str,
         broker_address_family: &str,
+        linger_ms: u64,
         response_topic: String,
     ) -> Self {
         Self {
             producer: build_producer(
                 bootstrap_servers,
                 broker_address_family,
+                linger_ms,
                 "state-init-requests",
             ),
             response_topic,
