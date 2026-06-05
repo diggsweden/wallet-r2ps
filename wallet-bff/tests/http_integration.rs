@@ -43,8 +43,8 @@ struct MockRequestSenderPort {
 
 #[async_trait::async_trait]
 impl RequestSenderPort for MockRequestSenderPort {
-    async fn send(&self, request: &HsmWorkerRequest, _device_id: &str) -> Result<(), String> {
-        self.sent.lock().unwrap().push(request.clone());
+    async fn send(&self, request: HsmWorkerRequest, _device_id: &str) -> Result<(), String> {
+        self.sent.lock().unwrap().push(request);
         Ok(())
     }
 }
@@ -53,7 +53,7 @@ struct MockStateInitSenderPort;
 
 #[async_trait::async_trait]
 impl StateInitSenderPort for MockStateInitSenderPort {
-    async fn send(&self, _request: &StateInitRequest, _device_id: &str) -> Result<(), String> {
+    async fn send(&self, _request: StateInitRequest, _device_id: &str) -> Result<(), String> {
         Ok(())
     }
 }

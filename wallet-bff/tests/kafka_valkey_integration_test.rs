@@ -185,7 +185,7 @@ async fn test_request_sender_produces_to_kafka() {
 
     use wallet_bff::application::port::outgoing::RequestSenderPort;
     sender
-        .send(&request, "device-1")
+        .send(request, "device-1")
         .await
         .expect("send failed");
 
@@ -227,7 +227,7 @@ async fn test_state_init_sender_produces_to_kafka() {
 
     use wallet_bff::application::port::outgoing::StateInitSenderPort;
     sender
-        .send(&request, "device-2")
+        .send(request, "device-2")
         .await
         .expect("send failed");
 
@@ -327,6 +327,7 @@ async fn test_response_consumer_receives_and_calls_use_case() {
         &topic,
         capturing.clone() as Arc<dyn ResponseUseCase>,
         1,
+        1,
     );
 
     // Wait for the consumer to process the message
@@ -399,6 +400,7 @@ async fn test_state_init_consumer_receives_and_notifies_correlation_service() {
         &topic,
         correlation.clone() as Arc<dyn StateInitCorrelationPort>,
         1,
+        1,
     );
 
     // Wait for the correlation service to deliver the response
@@ -450,7 +452,7 @@ async fn test_bff_kafka_round_trip() {
     };
     use wallet_bff::application::port::outgoing::RequestSenderPort;
     request_sender
-        .send(&request, "device-rt")
+        .send(request, "device-rt")
         .await
         .expect("send failed");
 
@@ -461,6 +463,7 @@ async fn test_bff_kafka_round_trip() {
         &group_id,
         &response_topic,
         response_service.clone() as Arc<dyn ResponseUseCase>,
+        1,
         1,
     );
 

@@ -182,7 +182,7 @@ pub async fn service(
     let t = Instant::now();
     if let Err(e) = state
         .request_sender_port
-        .send(&worker_req, &req.client_id)
+        .send(worker_req, &req.client_id)
         .await
     {
         tracing::error!("Failed to send worker request: {}", e);
@@ -372,7 +372,7 @@ pub async fn create_state(
 
     if let Err(e) = state
         .state_init_sender_port
-        .send(&init_request, &client_id)
+        .send(init_request, &client_id)
         .await
     {
         tracing::error!("Failed to send state-init request: {}", e);

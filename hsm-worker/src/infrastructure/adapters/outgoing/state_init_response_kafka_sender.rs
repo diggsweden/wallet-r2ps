@@ -8,23 +8,26 @@ use crate::application::port::outgoing::state_init_response_spi_port::{
 use crate::domain::StateInitResponse;
 use crate::infrastructure::KafkaConfig;
 use rdkafka::ClientConfig;
-use rdkafka::producer::{BaseProducer, BaseRecord};
-use std::time::Duration;
+use rdkafka::producer::{BaseRecord, ThreadedProducer};
 use tracing::{debug, error};
 
 pub struct StateInitResponseKafkaMessageSender {
-    producer: BaseProducer,
+    producer: ThreadedProducer<rdkafka::producer::DefaultProducerContext>,
 }
 
 impl StateInitResponseKafkaMessageSender {
     pub fn new(config: &KafkaConfig) -> Self {
-        let producer: BaseProducer = ClientConfig::new()
+        // ThreadedProducer drains delivery callbacks on its own thread,
+        // removing the per-send poll(0) the BaseProducer required. See
+        // WorkerResponseKafkaSender for further rationale.
+        let producer: ThreadedProducer<_> = ClientConfig::new()
             .set("bootstrap.servers", &config.bootstrap_servers)
             .set("broker.address.family", &config.broker_address_family)
             .set("message.timeout.ms", "5000")
             // acks=1 (leader-only): see WorkerResponseKafkaSender for rationale.
             .set("acks", "1")
-            .set("linger.ms", "5")
+            // linger.ms=0: see WorkerResponseKafkaSender for rationale.
+            .set("linger.ms", "0")
             .set("batch.size", "65536")
             .set("compression.type", "lz4")
             // See request_sender.rs in wallet-bff for rationale.
@@ -42,7 +45,7 @@ impl StateInitResponseSpiPort for StateInitResponseKafkaMessageSender {
         response: StateInitResponse,
         response_topic: &str,
     ) -> Result<(), StateInitResponseError> {
-        let output_json = serde_json::to_string(&response).map_err(|e| {
+        let output_json = serde_json::to_vec(&response).map_err(|e| {
             error!("Failed to serialize state init response: {:?}", e);
             StateInitResponseError::SerializationError
         })?;
@@ -66,11 +69,6 @@ impl StateInitResponseSpiPort for StateInitResponseKafkaMessageSender {
                 error!("Failed to send state init response: {:?}", err);
                 Err(StateInitResponseError::ConnectionError)
             }
-        }?;
-
-        // Non-blocking poll — see r2ps_response_kafka_message_sender for rationale.
-        self.producer.poll(Duration::from_millis(0));
-
-        Ok(())
+        }
     }
 }

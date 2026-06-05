@@ -16,13 +16,13 @@ pub trait DeviceStatePort: Send + Sync {
 /// SPI port: send worker requests to the hsm-worker request topic.
 #[async_trait::async_trait]
 pub trait RequestSenderPort: Send + Sync {
-    async fn send(&self, request: &HsmWorkerRequest, device_id: &str) -> Result<(), String>;
+    async fn send(&self, request: HsmWorkerRequest, device_id: &str) -> Result<(), String>;
 }
 
 /// SPI port: send state-init requests to the hsm-worker state-init topic.
 #[async_trait::async_trait]
 pub trait StateInitSenderPort: Send + Sync {
-    async fn send(&self, request: &StateInitRequest, device_id: &str) -> Result<(), String>;
+    async fn send(&self, request: StateInitRequest, device_id: &str) -> Result<(), String>;
 }
 
 /// SPI port: replay-attack nonce store.

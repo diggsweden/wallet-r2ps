@@ -7,8 +7,8 @@ use crate::domain::HsmWorkerResponse;
 use crate::infrastructure::KafkaConfig;
 use rdkafka::ClientConfig;
 use rdkafka::message::{Header, OwnedHeaders};
-use rdkafka::producer::{BaseProducer, BaseRecord};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use rdkafka::producer::{BaseRecord, ThreadedProducer};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tracing::{debug, error};
 
 fn now_epoch_us_bytes() -> Vec<u8> {
@@ -21,12 +21,16 @@ fn now_epoch_us_bytes() -> Vec<u8> {
 }
 
 pub struct WorkerResponseKafkaSender {
-    producer: BaseProducer,
+    producer: ThreadedProducer<rdkafka::producer::DefaultProducerContext>,
 }
 
 impl WorkerResponseKafkaSender {
     pub fn new(config: &KafkaConfig) -> WorkerResponseKafkaSender {
-        let producer: BaseProducer = ClientConfig::new()
+        // ThreadedProducer spawns a dedicated polling thread that drains
+        // delivery-report callbacks for us, replacing the per-send poll(0)
+        // we previously called from every worker-partition thread. Same
+        // .send() API as BaseProducer.
+        let producer: ThreadedProducer<_> = ClientConfig::new()
             .set("bootstrap.servers", &config.bootstrap_servers)
             .set("broker.address.family", &config.broker_address_family)
             .set("message.timeout.ms", "5000")
@@ -35,7 +39,11 @@ impl WorkerResponseKafkaSender {
             // the caller. Idempotence is not used here — request_id is the dedupe key
             // applied at the application layer.
             .set("acks", "1")
-            .set("linger.ms", "5")
+            // linger.ms=0: hsm-worker response traffic fans out across two BFF
+            // response topics and many partitions; per-partition rate is low
+            // enough that any non-zero linger.ms becomes a per-response latency
+            // floor with negligible batching gain. batch.size still bounds bursts.
+            .set("linger.ms", "0")
             .set("batch.size", "65536")
             .set("compression.type", "lz4")
             // See request_sender.rs in wallet-bff for rationale.
@@ -53,7 +61,7 @@ impl WorkerResponseSpiPort for WorkerResponseKafkaSender {
         worker_response: HsmWorkerResponse,
         response_topic: &str,
     ) -> Result<(), WorkerResponseError> {
-        let response = match serde_json::to_string(&worker_response) {
+        match serde_json::to_vec(&worker_response) {
             Ok(output_json) => {
                 let key = &worker_response.request_id;
                 let request_id = &worker_response.request_id;
@@ -100,14 +108,6 @@ impl WorkerResponseSpiPort for WorkerResponseKafkaSender {
                 error!("Failed to serialize output message: {:?}", e);
                 Err(WorkerResponseError::ConnectionError)
             }
-        };
-
-        // Drain any ready delivery callbacks without blocking. The 100ms used
-        // here previously was the dominant per-request latency floor — librdkafka's
-        // background thread does the actual produce; this call only services the
-        // (unused) callback queue.
-        self.producer.poll(Duration::from_millis(0));
-
-        response
+        }
     }
 }
