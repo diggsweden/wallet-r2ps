@@ -13,6 +13,9 @@ pub struct Stats {
     errors: AtomicU64,
     auth_cycles: AtomicU64,
     auth_errors: AtomicU64,
+    /// Producer ticks dropped because in-flight cap was reached
+    /// (open-loop mode only). Non-zero = SUT can't keep up with target_rps.
+    saturated: AtomicU64,
     start_time: Instant,
 }
 
@@ -21,6 +24,7 @@ pub struct StatsSnapshot {
     pub total_errors: u64,
     pub total_auth_cycles: u64,
     pub total_auth_errors: u64,
+    pub total_saturated: u64,
     pub avg_latency_ms: u64,
     pub p50_latency_ms: u64,
     pub p95_latency_ms: u64,
@@ -37,8 +41,13 @@ impl Stats {
             errors: AtomicU64::new(0),
             auth_cycles: AtomicU64::new(0),
             auth_errors: AtomicU64::new(0),
+            saturated: AtomicU64::new(0),
             start_time: Instant::now(),
         }
+    }
+
+    pub fn record_saturated(&self) {
+        self.saturated.fetch_add(1, Ordering::Relaxed);
     }
 
     pub fn record_latency(&self, ms: u64) {
@@ -80,6 +89,7 @@ impl Stats {
             total_errors: self.errors.load(Ordering::Relaxed),
             total_auth_cycles: self.auth_cycles.load(Ordering::Relaxed),
             total_auth_errors: self.auth_errors.load(Ordering::Relaxed),
+            total_saturated: self.saturated.load(Ordering::Relaxed),
             avg_latency_ms: avg,
             p50_latency_ms: p50,
             p95_latency_ms: p95,
@@ -94,12 +104,13 @@ impl Stats {
     pub fn print_summary(&self) {
         let s = self.snapshot();
         println!(
-            "[{}s] reqs={} err={} auth={} auth_err={} rps={:.2} avg={}ms p50={}ms p95={}ms p99={}ms max={}ms",
+            "[{}s] reqs={} err={} auth={} auth_err={} sat={} rps={:.2} avg={}ms p50={}ms p95={}ms p99={}ms max={}ms",
             s.elapsed_seconds,
             s.total_requests,
             s.total_errors,
             s.total_auth_cycles,
             s.total_auth_errors,
+            s.total_saturated,
             s.requests_per_second,
             s.avg_latency_ms,
             s.p50_latency_ms,
@@ -119,6 +130,7 @@ impl Stats {
         println!("Total errors:  {}", s.total_errors);
         println!("Auth cycles:   {}", s.total_auth_cycles);
         println!("Auth errors:   {}", s.total_auth_errors);
+        println!("Saturated:     {}", s.total_saturated);
         println!("Throughput:    {:.2} req/s", s.requests_per_second);
         println!("Avg latency:   {}ms", s.avg_latency_ms);
         println!("p50 latency:   {}ms", s.p50_latency_ms);

@@ -73,13 +73,31 @@ pub struct LoadTestArgs {
     #[arg(long)]
     pub test_data: String,
 
-    /// Number of concurrent worker tasks
+    /// Number of concurrent worker tasks (closed-loop mode).
+    /// Each task runs cycles sequentially: at most `threads` cycles in flight.
+    /// Ignored when --target-rps > 0 (open-loop mode is used instead).
     #[arg(short = 't', long, default_value = "4")]
     pub threads: usize,
 
-    /// Mean time between requests per worker in milliseconds (0 = burst mode)
+    /// Mean time between requests per worker in milliseconds (0 = burst mode).
+    /// Closed-loop mode only.
     #[arg(long, default_value = "100")]
     pub mean_delay_ms: u64,
+
+    /// Target auth cycles per second (open-loop mode).
+    /// When > 0, replaces closed-loop --threads pacing with a single
+    /// rate-limited producer that fire-and-forget spawns each cycle as
+    /// an independent tokio task. A single loadtest pod with a couple
+    /// of CPU cores can sustain thousands of in-flight cycles this way.
+    #[arg(long, default_value = "0")]
+    pub target_rps: u64,
+
+    /// Maximum in-flight cycles in open-loop mode. The producer reports
+    /// saturation (and drops the tick) when this many cycles are
+    /// already in progress, which surfaces the system-under-test's
+    /// throughput ceiling cleanly. Ignored in closed-loop mode.
+    #[arg(long, default_value = "10000")]
+    pub max_concurrent: usize,
 
     /// Test duration in seconds (0 = unlimited, Ctrl+C to stop)
     #[arg(short, long, default_value = "60")]

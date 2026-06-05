@@ -2,18 +2,25 @@
 //
 // SPDX-License-Identifier: EUPL-1.2
 
-//! Load test command with Poisson arrival rate traffic shaping.
+//! Load test command with two pacing modes.
 //!
-//! Each worker loop:
+//! Closed-loop (--threads, default): N tokio tasks each loop on
+//! sequential cycles. Inter-arrival within each task is Poisson via
+//! --mean-delay-ms. Concurrency = N (not throughput-driven).
+//!
+//! Open-loop (--target-rps > 0): one rate-paced producer fires cycles
+//! at `target_rps` cycles/sec, spawning each as an independent tokio
+//! task. A bounded `Semaphore` caps in-flight to `--max-concurrent`;
+//! when the cap is hit the producer records a saturation tick and
+//! drops the request, which surfaces the SUT's actual throughput
+//! ceiling instead of self-throttling like closed-loop does. A single
+//! loadtest pod with a couple of CPU cores can drive thousands of rps
+//! this way because each cycle just awaits I/O.
+//!
+//! Each cycle:
 //!   1. Pick a random client from test data
 //!   2. OPAQUE login (start + finish) -> get session key
 //!   3. Perform N HSM sign operations
-//!   4. Repeat with a new random client
-//!
-//! Traffic shaping:
-//!   - Each worker independently targets `mean_delay_ms` between requests
-//!   - Inter-arrival times are exponentially distributed (producing Poisson arrivals)
-//!   - If mean_delay_ms=0, workers send as fast as possible (burst mode)
 
 use anyhow::Result;
 use rand::RngExt;
@@ -21,6 +28,7 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use tokio::sync::Semaphore;
 
 use crate::cli::LoadTestArgs;
 use crate::client::access_mechanism::{
@@ -29,6 +37,9 @@ use crate::client::access_mechanism::{
 use crate::client::rest_client::RestClient;
 use crate::model::test_data::TestDataEnvelope;
 use crate::stats::Stats;
+
+/// Pre-built client pool shared across spawned cycles.
+type ClientPool = Vec<(AccessMechanismClient, String, String, String)>;
 
 pub async fn run(args: LoadTestArgs) -> Result<()> {
     let envelope = TestDataEnvelope::read_from(Path::new(&args.test_data))?;
@@ -39,25 +50,31 @@ pub async fn run(args: LoadTestArgs) -> Result<()> {
 
     let server_pubkey = load_server_public_key_pem(&args.server_pubkey_pem)?;
 
-    println!(
-        "Load test: {} workers, {} signs/cycle",
-        args.threads, args.signs_per_cycle
-    );
+    if args.target_rps > 0 {
+        println!(
+            "Load test (open-loop): target {} cycles/s, max_concurrent={}, {} signs/cycle",
+            args.target_rps, args.max_concurrent, args.signs_per_cycle
+        );
+    } else {
+        println!(
+            "Load test (closed-loop): {} workers, {} signs/cycle",
+            args.threads, args.signs_per_cycle
+        );
+        if args.mean_delay_ms > 0 {
+            println!(
+                "Mean delay: {}ms between requests per worker",
+                args.mean_delay_ms
+            );
+        } else {
+            println!("Mode: burst (no delay)");
+        }
+    }
     println!(
         "Test data: {} clients from {}",
         envelope.clients.len(),
         args.test_data
     );
     println!("BFF: {}", args.bff_url);
-
-    if args.mean_delay_ms > 0 {
-        println!(
-            "Mean delay: {}ms between requests per worker",
-            args.mean_delay_ms
-        );
-    } else {
-        println!("Mode: burst (no delay)");
-    }
 
     if args.duration_secs > 0 {
         println!("Duration: {}s", args.duration_secs);
@@ -101,7 +118,24 @@ pub async fn run(args: LoadTestArgs) -> Result<()> {
         }
     });
 
-    // Launch worker tasks
+    if args.target_rps > 0 {
+        open_loop(envelope, server_pubkey, args.clone(), stats.clone(), running).await;
+    } else {
+        closed_loop(envelope, server_pubkey, args.clone(), stats.clone(), running).await;
+    }
+
+    stats.print_report();
+    Ok(())
+}
+
+/// Closed-loop: N workers each looping sequentially. Concurrency = N.
+async fn closed_loop(
+    envelope: Arc<TestDataEnvelope>,
+    server_pubkey: Arc<josekit::jwk::Jwk>,
+    args: LoadTestArgs,
+    stats: Arc<Stats>,
+    running: Arc<AtomicBool>,
+) {
     let mut handles = Vec::with_capacity(args.threads);
     for worker_id in 0..args.threads {
         let running = Arc::clone(&running);
@@ -123,14 +157,120 @@ pub async fn run(args: LoadTestArgs) -> Result<()> {
         });
         handles.push(handle);
     }
-
-    // Wait for all workers
     for handle in handles {
         let _ = handle.await;
     }
+}
 
-    stats.print_report();
-    Ok(())
+/// Open-loop: one rate-paced producer fire-and-forgets each cycle as
+/// its own task. Concurrency = whatever the SUT and the semaphore
+/// cap allow. The producer never blocks on cycle completion, so target
+/// throughput is decoupled from per-request latency.
+async fn open_loop(
+    envelope: Arc<TestDataEnvelope>,
+    server_pubkey: Arc<josekit::jwk::Jwk>,
+    args: LoadTestArgs,
+    stats: Arc<Stats>,
+    running: Arc<AtomicBool>,
+) {
+    // Build the client pool once. Share the same RestClient (and so the
+    // same reqwest connection pool) across every spawned cycle.
+    let rest = match RestClient::new(&args.bff_url) {
+        Ok(r) => Arc::new(r),
+        Err(e) => {
+            eprintln!("Failed to create REST client: {:#}", e);
+            return;
+        }
+    };
+    let clients = match build_client_pool(&envelope, &server_pubkey, &rest) {
+        Ok(c) => Arc::new(c),
+        Err(e) => {
+            eprintln!("Failed to build client pool: {:#}", e);
+            return;
+        }
+    };
+    if clients.is_empty() {
+        eprintln!("No clients in test data");
+        return;
+    }
+
+    let semaphore = Arc::new(Semaphore::new(args.max_concurrent));
+    let inter_arrival = Duration::from_secs_f64(1.0 / args.target_rps as f64);
+    let mut next = Instant::now();
+
+    while running.load(Ordering::Relaxed) {
+        // Wait until the next scheduled tick. If we're already late
+        // (SUT is slow and the producer can't get permits fast enough),
+        // fire immediately — pacing self-corrects on the next tick.
+        let now = Instant::now();
+        if next > now {
+            tokio::time::sleep(next - now).await;
+        }
+        next += inter_arrival;
+
+        // try_acquire_owned() never awaits — preserves producer pacing
+        // even when in-flight is saturated. Blocking here would couple
+        // the open loop back to closed-loop semantics.
+        let permit = match Arc::clone(&semaphore).try_acquire_owned() {
+            Ok(p) => p,
+            Err(_) => {
+                stats.record_saturated();
+                continue;
+            }
+        };
+
+        let idx = rand::rng().random_range(0..clients.len());
+        let clients = Arc::clone(&clients);
+        let args = args.clone();
+        let stats = Arc::clone(&stats);
+        let running = Arc::clone(&running);
+
+        tokio::spawn(async move {
+            // `_permit` drops on task exit, freeing the slot.
+            let _permit = permit;
+            let (am, pin, client_id, hsm_kid) = &clients[idx];
+            if let Err(e) =
+                run_one_cycle(am, pin, client_id, hsm_kid, &args, &stats, &running).await
+            {
+                stats.record_auth_error();
+                eprintln!(
+                    "cycle error for client {}...: {:#}",
+                    &client_id[..12.min(client_id.len())],
+                    e
+                );
+            }
+        });
+    }
+
+    // Drain: wait for in-flight cycles to finish (best-effort).
+    let _ = semaphore
+        .acquire_many(args.max_concurrent as u32)
+        .await;
+}
+
+fn build_client_pool(
+    envelope: &TestDataEnvelope,
+    server_pubkey: &josekit::jwk::Jwk,
+    rest: &Arc<RestClient>,
+) -> Result<ClientPool> {
+    envelope
+        .clients
+        .iter()
+        .map(|c| {
+            let device_jwk =
+                build_device_jwk(&c.device_key.x, &c.device_key.y, &c.device_key.d, &c.kid)?;
+            let am = AccessMechanismClient::new(
+                Arc::clone(rest),
+                server_pubkey.clone(),
+                device_jwk,
+                c.kid.clone(),
+                c.pin_stretch_d.clone(),
+                envelope.opaque_context.clone(),
+                envelope.opaque_server_identifier.clone(),
+            );
+            Ok((am, c.pin.clone(), c.client_id.clone(), c.hsm_kid.clone()))
+        })
+        .collect()
 }
 
 async fn worker_loop(
