@@ -6,16 +6,77 @@ use crate::application::WorkerRequestUseCase;
 use crate::domain::HsmWorkerRequest;
 use crate::infrastructure::KafkaConfig;
 use crossbeam_channel::bounded;
-use rdkafka::consumer::{BaseConsumer, Consumer};
+use rdkafka::consumer::{BaseConsumer, Consumer, ConsumerContext};
 use rdkafka::message::Headers;
-use rdkafka::{ClientConfig, Message};
+use rdkafka::{ClientConfig, ClientContext, Message, Statistics};
 use serde_json::from_slice;
 use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::{JoinHandle, spawn};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use tracing::{debug, error, warn};
+use tracing::{debug, error, info, warn};
+
+/// Context that exposes librdkafka's built-in statistics callback. Emits
+/// one structured info log per stats interval per (consumer, broker) and
+/// another summarising per-partition fetch state with non-trivial lag.
+/// Lets us see fetch RTT, fetch session counts, per-partition
+/// consumer_lag, and how full librdkafka's internal queues are — fields
+/// our kafka_lag_us/channel_us bookends can't reach.
+#[derive(Default)]
+struct ConsumerStatsContext;
+
+impl ClientContext for ConsumerStatsContext {
+    fn stats(&self, stats: Statistics) {
+        info!(
+            consumer = "hsm-requests",
+            rx_total = stats.rx,
+            rxmsgs = stats.rxmsgs,
+            rxmsg_bytes = stats.rxmsg_bytes,
+            replyq = stats.replyq,
+            msg_cnt = stats.msg_cnt,
+            "rdkafka_consumer_stats"
+        );
+        for (name, b) in &stats.brokers {
+            let rtt_avg = b.rtt.as_ref().map(|w| w.avg).unwrap_or(0);
+            let rtt_p99 = b.rtt.as_ref().map(|w| w.p99).unwrap_or(0);
+            info!(
+                consumer = "hsm-requests",
+                broker = %name,
+                state = %b.state,
+                rx_total = b.rx,
+                rxbytes = b.rxbytes,
+                rxerrs = b.rxerrs,
+                rxcorriderrs = b.rxcorriderrs,
+                rtt_avg_us = rtt_avg,
+                rtt_p99_us = rtt_p99,
+                outbuf_cnt = b.outbuf_cnt,
+                "rdkafka_consumer_broker"
+            );
+        }
+        // Per-partition fetch state — only when actually lagging, to keep
+        // the log volume manageable across 16+ partitions per pod.
+        for (topic_name, topic) in &stats.topics {
+            for (pid, p) in &topic.partitions {
+                if p.consumer_lag > 0 || p.fetch_state != "active" {
+                    info!(
+                        consumer = "hsm-requests",
+                        topic = %topic_name,
+                        partition = pid,
+                        fetch_state = %p.fetch_state,
+                        consumer_lag = p.consumer_lag,
+                        next_offset = p.next_offset,
+                        hi_offset = p.hi_offset,
+                        rx_msgs = p.rxmsgs,
+                        "rdkafka_consumer_partition"
+                    );
+                }
+            }
+        }
+    }
+}
+
+impl ConsumerContext for ConsumerStatsContext {}
 
 fn read_t_produced_us<M: Message>(msg: &M) -> Option<u128> {
     let headers = msg.headers()?;
@@ -188,7 +249,7 @@ impl WorkerRequestKafkaReceiver {
         drop(rx);
 
         let consumer_handle = spawn(move || {
-            let consumer: BaseConsumer = ClientConfig::new()
+            let consumer: BaseConsumer<ConsumerStatsContext> = ClientConfig::new()
                 .set("bootstrap.servers", &config.bootstrap_servers)
                 .set("broker.address.family", &config.broker_address_family)
                 .set("group.id", &config.group_id)
@@ -215,7 +276,9 @@ impl WorkerRequestKafkaReceiver {
                 .set("metadata.max.age.ms", "5000")
                 // See request_sender.rs in wallet-bff for rationale.
                 .set("socket.nagle.disable", "true")
-                .create()
+                // Stats are emitted every 2s via ConsumerStatsContext::stats.
+                .set("statistics.interval.ms", "2000")
+                .create_with_context(ConsumerStatsContext)
                 .expect("Consumer creation failed");
 
             consumer
