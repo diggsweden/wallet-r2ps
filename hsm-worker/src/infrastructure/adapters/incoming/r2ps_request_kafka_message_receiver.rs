@@ -43,8 +43,16 @@ fn now_epoch_us() -> u128 {
 /// so the worker can log how long the request spent in each preceding
 /// stage: in Kafka (from BFF produce to worker consume) and in our
 /// in-process channel.
+///
+/// The payload is carried as raw bytes — JSON deserialization is
+/// deferred to the worker threads so it runs in parallel across
+/// `num_workers` instead of serializing the single consumer poll thread.
+/// Each request payload is a multi-KB JWS-bearing JSON document; doing
+/// `from_slice` on the consumer thread previously capped its drain rate
+/// at ~2k/sec/pod and produced librdkafka internal-queue buildup during
+/// fetch bursts that surfaced as `kafka_lag_us` tail.
 struct Item {
-    req: HsmWorkerRequest,
+    payload: Vec<u8>,
     t_produced_us: Option<u128>,
     t_received: Instant,
     partition: i32,
@@ -107,7 +115,6 @@ impl WorkerRequestKafkaReceiver {
             handles.push(spawn(move || {
                 debug!("hsm-requests worker {} started", worker_id);
                 while let Ok(item) = rx.recv() {
-                    let request_id_for_log = item.req.request_id.clone();
                     let partition = item.partition;
                     // Time the message spent transiting Kafka (from BFF
                     // .send to our consumer.poll).
@@ -118,9 +125,28 @@ impl WorkerRequestKafkaReceiver {
                     // Time the message sat in the shared in-process
                     // channel before this worker dequeued it.
                     let channel_us = item.t_received.elapsed().as_micros();
+
+                    // Deserialize on the worker — see Item docs for rationale.
+                    let t_deser = Instant::now();
+                    let hsm_worker_request: HsmWorkerRequest = match from_slice(&item.payload) {
+                        Ok(req) => req,
+                        Err(e) => {
+                            error!(
+                                partition,
+                                worker_id,
+                                "Failed to deserialize JSON: {:?}", e
+                            );
+                            error!("Payload: {:?}", String::from_utf8_lossy(&item.payload));
+                            continue;
+                        }
+                    };
+                    let deser_us = t_deser.elapsed().as_micros();
+
+                    let request_id_for_log = hsm_worker_request.request_id.clone();
                     let t = Instant::now();
-                    let outcome =
-                        std::panic::catch_unwind(AssertUnwindSafe(|| uc.execute(item.req)));
+                    let outcome = std::panic::catch_unwind(AssertUnwindSafe(|| {
+                        uc.execute(hsm_worker_request)
+                    }));
                     let execute_us = t.elapsed().as_micros();
                     match outcome {
                         Ok(Ok(request_id)) => {
@@ -130,6 +156,7 @@ impl WorkerRequestKafkaReceiver {
                                 request_id = %request_id,
                                 kafka_lag_us,
                                 channel_us,
+                                deser_us,
                                 execute_us,
                                 "HsmWorkerRequest processed"
                             );
@@ -141,6 +168,7 @@ impl WorkerRequestKafkaReceiver {
                                 request_id = %request_id_for_log,
                                 kafka_lag_us,
                                 channel_us,
+                                deser_us,
                                 execute_us,
                                 "execute() error: {:?}",
                                 err
@@ -204,17 +232,12 @@ impl WorkerRequestKafkaReceiver {
                             }
                         };
 
-                        let hsm_worker_request: HsmWorkerRequest = match from_slice(payload) {
-                            Ok(req) => req,
-                            Err(e) => {
-                                error!("Failed to deserialize JSON: {:?}", e);
-                                error!("Payload: {:?}", String::from_utf8_lossy(payload));
-                                continue;
-                            }
-                        };
-
+                        // Copy out the payload (BorrowedMessage's buffer
+                        // is reused on next poll) and dispatch as raw bytes.
+                        // JSON parsing happens in the worker thread — see
+                        // Item docs.
                         let item = Item {
-                            req: hsm_worker_request,
+                            payload: payload.to_vec(),
                             t_produced_us,
                             t_received,
                             partition: msg.partition(),

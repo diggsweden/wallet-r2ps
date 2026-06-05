@@ -50,7 +50,9 @@ impl StateInitRequestKafkaReceiver {
         // members within the same group.
         let instance_id = format!("{}-state-init", config.group_instance_id);
 
-        let (tx, rx) = bounded::<StateInitRequest>(queue_depth);
+        // Raw bytes through the channel; workers parse. See
+        // `r2ps_request_kafka_message_receiver::Item` for rationale.
+        let (tx, rx) = bounded::<Vec<u8>>(queue_depth);
 
         let mut handles: Vec<JoinHandle<()>> = Vec::with_capacity(1 + num_workers);
 
@@ -59,7 +61,15 @@ impl StateInitRequestKafkaReceiver {
             let svc = service.clone();
             handles.push(spawn(move || {
                 debug!("state-init worker {} started", worker_id);
-                while let Ok(req) = rx.recv() {
+                while let Ok(payload) = rx.recv() {
+                    let req: StateInitRequest = match from_slice(&payload) {
+                        Ok(req) => req,
+                        Err(e) => {
+                            error!(worker_id, "Failed to deserialize state init request: {:?}", e);
+                            error!("Payload: {:?}", String::from_utf8_lossy(&payload));
+                            continue;
+                        }
+                    };
                     let outcome =
                         std::panic::catch_unwind(AssertUnwindSafe(|| svc.initialize(req)));
                     match outcome {
@@ -123,16 +133,7 @@ impl StateInitRequestKafkaReceiver {
                             }
                         };
 
-                        let req: StateInitRequest = match from_slice(payload) {
-                            Ok(req) => req,
-                            Err(e) => {
-                                error!("Failed to deserialize state init request: {:?}", e);
-                                error!("Payload: {:?}", String::from_utf8_lossy(payload));
-                                continue;
-                            }
-                        };
-
-                        if let Err(e) = tx.send(req) {
+                        if let Err(e) = tx.send(payload.to_vec()) {
                             error!("state-init dispatch failed (channel closed): {}", e);
                         }
                     }
