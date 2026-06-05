@@ -14,7 +14,7 @@ use crate::infrastructure::adapters::incoming::kafka::{
 use crate::infrastructure::adapters::incoming::web::replay_protection::ReplayProtectionState;
 use crate::infrastructure::adapters::incoming::web::{self, handlers::AppState};
 use crate::infrastructure::adapters::outgoing::kafka::request_sender::{
-    KafkaRequestSender, KafkaStateInitSender,
+    KafkaRequestSender, KafkaStateInitSender, spawn_in_flight_reporter,
 };
 use crate::infrastructure::adapters::outgoing::redis::{
     conn as redis_conn, device_state::DeviceStateRedisAdapter, nonce::NonceRedisAdapter,
@@ -41,6 +41,8 @@ pub async fn run() {
     let nonce_port = Arc::new(NonceRedisAdapter::new(shared_conn));
 
     // Kafka producers (inject per-instance response topics)
+    spawn_in_flight_reporter();
+
     let request_sender_port = Arc::new(KafkaRequestSender::new(
         &config.kafka_bootstrap_servers,
         &config.kafka_broker_address_family,

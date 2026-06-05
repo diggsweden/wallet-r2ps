@@ -124,6 +124,18 @@ fn build_producer(
         .set("linger.ms", linger_ms.to_string())
         .set("batch.size", "65536")
         .set("compression.type", "none")
+        // Explicit produce-side pipelining knobs, set to rule out any
+        // silent default that would limit broker-side concurrency.
+        // Default with `enable.idempotence=false` is 1,000,000 (we
+        // observe waitresp_cnt=0 at 97% of stats snapshots — could be
+        // genuine, could be sampling artifact). Setting 100 explicitly
+        // ensures librdkafka has no excuse to serialise.
+        // socket.{send,receive}.buffer.bytes=0 uses the OS default,
+        // which on many Linux kernels is 87380/4096. Setting 1 MiB
+        // sidesteps TCP-window-based in-flight throttling.
+        .set("max.in.flight.requests.per.connection", "100")
+        .set("socket.send.buffer.bytes", "1048576")
+        .set("socket.receive.buffer.bytes", "1048576")
         // Disable Nagle: with ~1500 req/s spread across many partitions,
         // each TCP packet is tiny and infrequent. Nagle's algorithm would
         // coalesce them at the cost of up to 40ms idle delay per send,
@@ -144,6 +156,55 @@ fn build_producer(
 const ACK_SAMPLE_EVERY: u64 = 100;
 static REQUEST_SEND_COUNTER: AtomicU64 = AtomicU64::new(0);
 static STATE_INIT_SEND_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// User-side concurrency counters — incremented just before
+/// `producer.send_result()` and decremented just after. The peak
+/// value tracked separately and reset each report interval to expose
+/// burst concurrency. If peak stays at 1 we have user-level
+/// serialisation despite the async handler model; ≥dozens means many
+/// handlers are pounding the producer in parallel and the bottleneck
+/// is downstream of `send_result()`.
+static IN_FLIGHT_NOW: AtomicU64 = AtomicU64::new(0);
+static IN_FLIGHT_PEAK: AtomicU64 = AtomicU64::new(0);
+
+/// Spawn once at startup; logs the peak in-flight observed since the
+/// last call, then resets the peak. Intended to be invoked from
+/// bootstrap so the task lives for the BFF's lifetime.
+pub fn spawn_in_flight_reporter() {
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(std::time::Duration::from_secs(2));
+        loop {
+            tick.tick().await;
+            let peak = IN_FLIGHT_PEAK.swap(0, Ordering::Relaxed);
+            let now = IN_FLIGHT_NOW.load(Ordering::Relaxed);
+            info!(
+                in_flight_peak_2s = peak,
+                in_flight_now = now,
+                "kafka_producer_user_inflight"
+            );
+        }
+    });
+}
+
+#[inline]
+fn enter_send() -> u64 {
+    let cur = IN_FLIGHT_NOW.fetch_add(1, Ordering::Relaxed) + 1;
+    // Lock-free max via compare_exchange loop.
+    let mut prev = IN_FLIGHT_PEAK.load(Ordering::Relaxed);
+    while cur > prev {
+        match IN_FLIGHT_PEAK.compare_exchange_weak(prev, cur, Ordering::Relaxed, Ordering::Relaxed)
+        {
+            Ok(_) => break,
+            Err(p) => prev = p,
+        }
+    }
+    cur
+}
+
+#[inline]
+fn exit_send() {
+    IN_FLIGHT_NOW.fetch_sub(1, Ordering::Relaxed);
+}
 
 pub struct KafkaRequestSender {
     producer: FutureProducer<ProducerStatsContext>,
@@ -196,7 +257,10 @@ impl RequestSenderPort for KafkaRequestSender {
         // single request, serializing throughput against broker latency.
         // QueueFull (only error returned synchronously) still surfaces
         // immediately and triggers a 500 via the caller.
-        match self.producer.send_result(record) {
+        enter_send();
+        let result = self.producer.send_result(record);
+        exit_send();
+        match result {
             Ok(delivery_future) => {
                 // Sampled: every Nth send, await broker ack on a background
                 // task and log the elapsed time. Splits "in producer queue"
@@ -266,7 +330,10 @@ impl StateInitSenderPort for KafkaStateInitSender {
 
         let t_send = Instant::now();
         // See KafkaRequestSender::send for rationale on send_result.
-        match self.producer.send_result(record) {
+        enter_send();
+        let result = self.producer.send_result(record);
+        exit_send();
+        match result {
             Ok(delivery_future) => {
                 let n = STATE_INIT_SEND_COUNTER.fetch_add(1, Ordering::Relaxed);
                 if n % ACK_SAMPLE_EVERY == 0 {
