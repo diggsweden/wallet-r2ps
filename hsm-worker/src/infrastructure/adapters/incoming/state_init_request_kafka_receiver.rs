@@ -5,11 +5,10 @@
 use crate::application::service::state_init_service::StateInitService;
 use crate::domain::StateInitRequest;
 use crate::infrastructure::KafkaConfig;
-use crossbeam_channel::{Sender, bounded};
+use crossbeam_channel::bounded;
 use rdkafka::consumer::{BaseConsumer, Consumer};
 use rdkafka::{ClientConfig, Message};
 use serde_json::from_slice;
-use std::collections::HashMap;
 use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -30,16 +29,18 @@ impl StateInitRequestKafkaReceiver {
         }
     }
 
-    /// Same per-partition lazy-spawn layout as
-    /// `WorkerRequestKafkaReceiver::start`: 1 consumer task, one worker
-    /// thread per Kafka partition, partition-dedicated bounded channels.
-    /// No cross-partition head-of-line blocking.
+    /// Shared-pool dispatch: 1 consumer thread + `num_workers` worker
+    /// threads draining one bounded channel. State-init requests are
+    /// independent (each creates a new device), so no per-partition
+    /// ordering is required. See `WorkerRequestKafkaReceiver::start`
+    /// for the full rationale of the shared-pool model.
     pub fn start(
         &self,
         config: Arc<KafkaConfig>,
-        _num_workers: usize,
+        num_workers: usize,
         queue_depth: usize,
     ) -> Vec<JoinHandle<()>> {
+        assert!(num_workers >= 1, "num_workers must be >= 1");
         assert!(queue_depth >= 1, "queue_depth must be >= 1");
 
         let service = self.state_init_service.clone();
@@ -48,6 +49,39 @@ impl StateInitRequestKafkaReceiver {
         // request consumer's so Kafka tracks them as separate static
         // members within the same group.
         let instance_id = format!("{}-state-init", config.group_instance_id);
+
+        let (tx, rx) = bounded::<StateInitRequest>(queue_depth);
+
+        let mut handles: Vec<JoinHandle<()>> = Vec::with_capacity(1 + num_workers);
+
+        for worker_id in 0..num_workers {
+            let rx = rx.clone();
+            let svc = service.clone();
+            handles.push(spawn(move || {
+                debug!("state-init worker {} started", worker_id);
+                while let Ok(req) = rx.recv() {
+                    let outcome =
+                        std::panic::catch_unwind(AssertUnwindSafe(|| svc.initialize(req)));
+                    match outcome {
+                        Ok(Ok(request_id)) => {
+                            debug!(
+                                worker_id,
+                                request_id = %request_id,
+                                "StateInitRequest processed"
+                            );
+                        }
+                        Ok(Err(err)) => {
+                            error!(worker_id, "initialize() error: {:?}", err);
+                        }
+                        Err(_) => {
+                            error!("panic in state-init worker {} — continuing", worker_id);
+                        }
+                    }
+                }
+                debug!("state-init worker {} channel closed; exiting", worker_id);
+            }));
+        }
+        drop(rx);
 
         let consumer_handle = spawn(move || {
             let consumer: BaseConsumer = ClientConfig::new()
@@ -74,12 +108,9 @@ impl StateInitRequestKafkaReceiver {
                 .expect("Failed to subscribe to state-init-requests");
 
             debug!(
-                "state-init consumer started (per-partition lazy spawn, queue_depth={})",
-                queue_depth
+                "state-init consumer started (shared pool, num_workers={}, queue_depth={})",
+                num_workers, queue_depth
             );
-
-            let mut partition_senders: HashMap<i32, Sender<StateInitRequest>> = HashMap::new();
-            let mut worker_handles: Vec<JoinHandle<()>> = Vec::new();
 
             while running.load(Ordering::Relaxed) {
                 match consumer.poll(Duration::from_millis(100)) {
@@ -96,62 +127,13 @@ impl StateInitRequestKafkaReceiver {
                             Ok(req) => req,
                             Err(e) => {
                                 error!("Failed to deserialize state init request: {:?}", e);
-                                error!(
-                                    "Payload: {:?}",
-                                    String::from_utf8_lossy(payload)
-                                );
+                                error!("Payload: {:?}", String::from_utf8_lossy(payload));
                                 continue;
                             }
                         };
 
-                        let partition = msg.partition();
-
-                        let sender = partition_senders.entry(partition).or_insert_with(|| {
-                            let (tx, rx) = bounded::<StateInitRequest>(queue_depth);
-                            let svc = service.clone();
-                            let handle = spawn(move || {
-                                debug!("state-init partition {} worker started", partition);
-                                while let Ok(req) = rx.recv() {
-                                    let outcome = std::panic::catch_unwind(AssertUnwindSafe(
-                                        || svc.initialize(req),
-                                    ));
-                                    match outcome {
-                                        Ok(Ok(request_id)) => {
-                                            debug!(
-                                                partition,
-                                                request_id = %request_id,
-                                                "StateInitRequest processed"
-                                            );
-                                        }
-                                        Ok(Err(err)) => {
-                                            error!(
-                                                partition,
-                                                "initialize() error: {:?}",
-                                                err
-                                            );
-                                        }
-                                        Err(_) => {
-                                            error!(
-                                                "panic in state-init partition {} worker — continuing",
-                                                partition
-                                            );
-                                        }
-                                    }
-                                }
-                                debug!(
-                                    "state-init partition {} worker channel closed; exiting",
-                                    partition
-                                );
-                            });
-                            worker_handles.push(handle);
-                            tx
-                        });
-
-                        if let Err(e) = sender.send(req) {
-                            error!(
-                                "state-init dispatch to partition {} worker failed (channel closed): {}",
-                                partition, e
-                            );
+                        if let Err(e) = tx.send(req) {
+                            error!("state-init dispatch failed (channel closed): {}", e);
                         }
                     }
                     Some(Err(e)) => {
@@ -164,13 +146,11 @@ impl StateInitRequestKafkaReceiver {
             debug!("state-init consumer unsubscribing");
             consumer.unsubscribe();
             drop(consumer);
-            drop(partition_senders);
-            for h in worker_handles {
-                let _ = h.join();
-            }
-            debug!("state-init consumer shutdown complete");
+            drop(tx);
+            debug!("state-init consumer shutdown signalled");
         });
 
-        vec![consumer_handle]
+        handles.push(consumer_handle);
+        handles
     }
 }

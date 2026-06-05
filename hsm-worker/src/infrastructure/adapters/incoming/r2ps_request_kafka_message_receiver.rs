@@ -5,12 +5,11 @@
 use crate::application::WorkerRequestUseCase;
 use crate::domain::HsmWorkerRequest;
 use crate::infrastructure::KafkaConfig;
-use crossbeam_channel::{Sender, bounded};
+use crossbeam_channel::bounded;
 use rdkafka::consumer::{BaseConsumer, Consumer};
 use rdkafka::message::Headers;
 use rdkafka::{ClientConfig, Message};
 use serde_json::from_slice;
-use std::collections::HashMap;
 use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -40,14 +39,15 @@ fn now_epoch_us() -> u128 {
         .unwrap_or(0)
 }
 
-/// Message + timing metadata threaded through the per-partition channel
-/// so the partition worker can log how long the request spent in each
-/// preceding stage: in Kafka (from BFF produce to worker consume) and in
-/// our in-process channel.
+/// Message + timing metadata threaded through the shared dispatch channel
+/// so the worker can log how long the request spent in each preceding
+/// stage: in Kafka (from BFF produce to worker consume) and in our
+/// in-process channel.
 struct Item {
     req: HsmWorkerRequest,
     t_produced_us: Option<u128>,
     t_received: Instant,
+    partition: i32,
 }
 
 pub struct WorkerRequestKafkaReceiver {
@@ -66,33 +66,98 @@ impl WorkerRequestKafkaReceiver {
         }
     }
 
-    /// Spawns 1 consumer task polling `hsm-requests` and lazily spawns one
-    /// worker thread per Kafka partition the first time a message for that
-    /// partition arrives. Each partition has its own bounded channel of
-    /// `queue_depth` slots — there is NO shared dispatch queue, so a slow
-    /// worker on partition A cannot stall dispatch to partition B (no
-    /// head-of-line blocking across partitions).
+    /// Spawns one consumer thread polling `hsm-requests` and `num_workers`
+    /// dispatch threads draining a single shared bounded channel.
     ///
-    /// Per-partition ordering is preserved automatically: Kafka delivers a
-    /// partition's messages in order, the consumer dispatches them to that
-    /// partition's dedicated channel in order, and the partition's single
-    /// worker drains them in order.
+    /// Cross-partition order is intentionally NOT preserved: the protocol
+    /// gates each state-mutating request on its own response, so a client
+    /// never has more than one in-flight request that could observe a
+    /// reorder. Removing per-partition serialization lets a slow HSM
+    /// execute occupy one of `num_workers` slots without blocking
+    /// dispatch of unrelated messages. This eliminates the
+    /// consumer-poll-loop HoL that the previous per-partition bounded
+    /// model produced: a single partition filling its 256-deep channel
+    /// would block `sender.send()` on the consumer's only thread, and
+    /// every other partition's messages would queue up in librdkafka's
+    /// internal buffer until the slow partition drained.
     ///
-    /// `num_workers` is accepted for API/env compatibility but is unused
-    /// under the per-partition model; the worker count equals the number
-    /// of partitions assigned to this pod (typically ~16 of 100 for the
-    /// hsm-requests topic across 6 hsm-worker pods).
+    /// Backpressure: when in-flight reaches `queue_depth`, the consumer
+    /// poll loop blocks on `tx.send()` — Kafka brokers buffer, consumer-
+    /// group lag rises. That's the correct backpressure signal upstream.
     pub fn start(
         &self,
         config: Arc<KafkaConfig>,
-        _num_workers: usize,
+        num_workers: usize,
         queue_depth: usize,
     ) -> Vec<JoinHandle<()>> {
+        assert!(num_workers >= 1, "num_workers must be >= 1");
         assert!(queue_depth >= 1, "queue_depth must be >= 1");
 
         let use_case = self.worker_use_case.clone();
         let running = self.running.clone();
         let instance_id = config.group_instance_id.clone();
+
+        let (tx, rx) = bounded::<Item>(queue_depth);
+
+        let mut handles: Vec<JoinHandle<()>> = Vec::with_capacity(1 + num_workers);
+
+        for worker_id in 0..num_workers {
+            let rx = rx.clone();
+            let uc = use_case.clone();
+            handles.push(spawn(move || {
+                debug!("hsm-requests worker {} started", worker_id);
+                while let Ok(item) = rx.recv() {
+                    let request_id_for_log = item.req.request_id.clone();
+                    let partition = item.partition;
+                    // Time the message spent transiting Kafka (from BFF
+                    // .send to our consumer.poll).
+                    let kafka_lag_us = item
+                        .t_produced_us
+                        .map(|tp| now_epoch_us().saturating_sub(tp) as i64)
+                        .unwrap_or(-1);
+                    // Time the message sat in the shared in-process
+                    // channel before this worker dequeued it.
+                    let channel_us = item.t_received.elapsed().as_micros();
+                    let t = Instant::now();
+                    let outcome =
+                        std::panic::catch_unwind(AssertUnwindSafe(|| uc.execute(item.req)));
+                    let execute_us = t.elapsed().as_micros();
+                    match outcome {
+                        Ok(Ok(request_id)) => {
+                            debug!(
+                                partition,
+                                worker_id,
+                                request_id = %request_id,
+                                kafka_lag_us,
+                                channel_us,
+                                execute_us,
+                                "HsmWorkerRequest processed"
+                            );
+                        }
+                        Ok(Err(err)) => {
+                            error!(
+                                partition,
+                                worker_id,
+                                request_id = %request_id_for_log,
+                                kafka_lag_us,
+                                channel_us,
+                                execute_us,
+                                "execute() error: {:?}",
+                                err
+                            );
+                        }
+                        Err(_) => {
+                            error!("panic in hsm-requests worker {} — continuing", worker_id);
+                        }
+                    }
+                }
+                debug!("hsm-requests worker {} channel closed; exiting", worker_id);
+            }));
+        }
+        // Drop the original rx; cloned receivers held by the workers keep
+        // the channel alive. The channel closes once the consumer thread
+        // drops `tx` (its only sender), signalling all workers to exit.
+        drop(rx);
 
         let consumer_handle = spawn(move || {
             let consumer: BaseConsumer = ClientConfig::new()
@@ -122,12 +187,9 @@ impl WorkerRequestKafkaReceiver {
                 .expect("Failed to subscribe to hsm-requests");
 
             debug!(
-                "hsm-requests consumer started (per-partition lazy spawn, queue_depth={})",
-                queue_depth
+                "hsm-requests consumer started (shared pool, num_workers={}, queue_depth={})",
+                num_workers, queue_depth
             );
-
-            let mut partition_senders: HashMap<i32, Sender<Item>> = HashMap::new();
-            let mut worker_handles: Vec<JoinHandle<()>> = Vec::new();
 
             while running.load(Ordering::Relaxed) {
                 match consumer.poll(Duration::from_millis(100)) {
@@ -146,96 +208,24 @@ impl WorkerRequestKafkaReceiver {
                             Ok(req) => req,
                             Err(e) => {
                                 error!("Failed to deserialize JSON: {:?}", e);
-                                error!(
-                                    "Payload: {:?}",
-                                    String::from_utf8_lossy(payload)
-                                );
+                                error!("Payload: {:?}", String::from_utf8_lossy(payload));
                                 continue;
                             }
                         };
 
-                        let partition = msg.partition();
-
-                        // Lazily create the per-partition channel + worker
-                        // thread on first sight of this partition. After a
-                        // cooperative-sticky rebalance moves a partition
-                        // here, this fires once for that new partition.
-                        let sender = partition_senders.entry(partition).or_insert_with(|| {
-                            let (tx, rx) = bounded::<Item>(queue_depth);
-                            let uc = use_case.clone();
-                            let handle = spawn(move || {
-                                debug!("hsm-requests partition {} worker started", partition);
-                                while let Ok(item) = rx.recv() {
-                                    let request_id_for_log = item.req.request_id.clone();
-                                    // Time the message spent transiting Kafka
-                                    // (from BFF .send to our consumer.poll).
-                                    let kafka_lag_us = item
-                                        .t_produced_us
-                                        .map(|tp| {
-                                            now_epoch_us().saturating_sub(tp) as i64
-                                        })
-                                        .unwrap_or(-1);
-                                    // Time the message sat in our in-process
-                                    // per-partition channel before this worker
-                                    // dequeued it.
-                                    let channel_us = item.t_received.elapsed().as_micros();
-                                    let t = Instant::now();
-                                    let outcome = std::panic::catch_unwind(AssertUnwindSafe(
-                                        || uc.execute(item.req),
-                                    ));
-                                    let execute_us = t.elapsed().as_micros();
-                                    match outcome {
-                                        Ok(Ok(request_id)) => {
-                                            debug!(
-                                                partition,
-                                                request_id = %request_id,
-                                                kafka_lag_us,
-                                                channel_us,
-                                                execute_us,
-                                                "HsmWorkerRequest processed"
-                                            );
-                                        }
-                                        Ok(Err(err)) => {
-                                            error!(
-                                                partition,
-                                                request_id = %request_id_for_log,
-                                                kafka_lag_us,
-                                                channel_us,
-                                                execute_us,
-                                                "execute() error: {:?}",
-                                                err
-                                            );
-                                        }
-                                        Err(_) => {
-                                            error!(
-                                                "panic in partition {} worker — continuing",
-                                                partition
-                                            );
-                                        }
-                                    }
-                                }
-                                debug!(
-                                    "hsm-requests partition {} worker channel closed; exiting",
-                                    partition
-                                );
-                            });
-                            worker_handles.push(handle);
-                            tx
-                        });
-
-                        // Bounded send: blocks only when THIS partition's
-                        // worker is saturated. Other partitions continue to
-                        // dispatch in parallel.
                         let item = Item {
                             req: hsm_worker_request,
                             t_produced_us,
                             t_received,
+                            partition: msg.partition(),
                         };
-                        if let Err(e) = sender.send(item) {
-                            error!(
-                                "dispatch to partition {} worker failed (channel closed): {}",
-                                partition, e
-                            );
+                        // Bounded send: blocks the poll loop only when the
+                        // global pool is saturated (i.e. `queue_depth`
+                        // requests are already in-flight). That blocking
+                        // IS the upstream backpressure — broker buffers,
+                        // consumer-group lag rises.
+                        if let Err(e) = tx.send(item) {
+                            error!("dispatch failed (channel closed): {}", e);
                         }
                     }
                     Some(Err(e)) => {
@@ -250,14 +240,13 @@ impl WorkerRequestKafkaReceiver {
             debug!("hsm-requests consumer unsubscribing");
             consumer.unsubscribe();
             drop(consumer);
-            // Dropping the senders signals the per-partition workers to exit.
-            drop(partition_senders);
-            for h in worker_handles {
-                let _ = h.join();
-            }
-            debug!("hsm-requests consumer shutdown complete");
+            // Drop the only Sender — closes the channel, workers exit
+            // after draining whatever remains.
+            drop(tx);
+            debug!("hsm-requests consumer shutdown signalled");
         });
 
-        vec![consumer_handle]
+        handles.push(consumer_handle);
+        handles
     }
 }
