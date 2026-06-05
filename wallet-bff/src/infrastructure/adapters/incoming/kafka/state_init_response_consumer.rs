@@ -37,7 +37,8 @@ pub fn start(
         .set("session.timeout.ms", "6000")
         .set("heartbeat.interval.ms", "2000")
         .set("partition.assignment.strategy", "cooperative-sticky")
-        .set("fetch.wait.max.ms", "10")
+        // See hsm-worker r2ps_request_kafka_message_receiver for rationale.
+        .set("fetch.wait.max.ms", "5")
         .set("max.partition.fetch.bytes", "2097152")
         .set("max.poll.interval.ms", "300000")
         .set("connections.max.idle.ms", "540000")

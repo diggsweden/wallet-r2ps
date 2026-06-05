@@ -102,7 +102,8 @@ impl StateInitRequestKafkaReceiver {
                 .set("partition.assignment.strategy", "cooperative-sticky")
                 .set("enable.auto.commit", "true")
                 .set("auto.offset.reset", "earliest")
-                .set("fetch.wait.max.ms", "50")
+                // See r2ps_request_kafka_message_receiver for rationale.
+                .set("fetch.wait.max.ms", "5")
                 .set("session.timeout.ms", "6000")
                 .set("heartbeat.interval.ms", "2000")
                 .set("max.poll.interval.ms", "300000")

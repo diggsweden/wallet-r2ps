@@ -199,7 +199,15 @@ impl WorkerRequestKafkaReceiver {
                 .set("partition.assignment.strategy", "cooperative-sticky")
                 .set("enable.auto.commit", "true")
                 .set("auto.offset.reset", "earliest")
-                .set("fetch.wait.max.ms", "50")
+                // fetch.wait.max.ms governs how long a fetch sits in the
+                // broker DelayedFetch purgatory waiting for new data when
+                // fetch.min.bytes (=1, the default) isn't already met.
+                // Broker sampling during burst showed purgatory size
+                // averaging ~4500 with bursts to >20k, contributing the
+                // 11ms p50 kafka_lag floor and the long p99 tail. 5ms
+                // trades broker CPU (fetch rate goes up ~10x) for sub-ms
+                // dispatch — brokers were at ~55%/core, plenty of room.
+                .set("fetch.wait.max.ms", "5")
                 .set("session.timeout.ms", "6000") // Default: 45000ms
                 .set("heartbeat.interval.ms", "2000") // Default: 3000ms
                 .set("max.poll.interval.ms", "300000")
