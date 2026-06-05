@@ -6,10 +6,10 @@ use rdkafka::ClientConfig;
 use rdkafka::ClientContext;
 use rdkafka::Statistics;
 use rdkafka::message::{Header, OwnedHeaders};
-use rdkafka::producer::{FutureProducer, FutureRecord, ProducerContext};
+use rdkafka::producer::{BaseRecord, ProducerContext, ThreadedProducer};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 fn now_epoch_us_bytes() -> Vec<u8> {
     SystemTime::now()
@@ -86,16 +86,112 @@ impl ClientContext for ProducerStatsContext {
     }
 }
 
+/// Broker-ack histogram, populated 100% on librdkafka's poll thread by
+/// `ProducerStatsContext::delivery`. Avoids the tokio scheduling delay
+/// the old `tokio::spawn(DeliveryFuture)` sampling added to the
+/// measurement. Reset every 2s by `spawn_broker_ack_reporter`.
+static ACK_COUNT: AtomicU64 = AtomicU64::new(0);
+static ACK_ERRS: AtomicU64 = AtomicU64::new(0);
+static ACK_SUM_US: AtomicU64 = AtomicU64::new(0);
+static ACK_MAX_US: AtomicU64 = AtomicU64::new(0);
+// Bucket boundaries in µs: <1ms, <5ms, <10ms, <50ms, <100ms, <500ms, ≥500ms
+static ACK_BUCKET_LT_1MS: AtomicU64 = AtomicU64::new(0);
+static ACK_BUCKET_LT_5MS: AtomicU64 = AtomicU64::new(0);
+static ACK_BUCKET_LT_10MS: AtomicU64 = AtomicU64::new(0);
+static ACK_BUCKET_LT_50MS: AtomicU64 = AtomicU64::new(0);
+static ACK_BUCKET_LT_100MS: AtomicU64 = AtomicU64::new(0);
+static ACK_BUCKET_LT_500MS: AtomicU64 = AtomicU64::new(0);
+static ACK_BUCKET_GE_500MS: AtomicU64 = AtomicU64::new(0);
+
 impl ProducerContext for ProducerStatsContext {
-    type DeliveryOpaque = ();
+    type DeliveryOpaque = Box<Instant>;
     fn delivery(
         &self,
-        _delivery_result: &rdkafka::message::DeliveryResult<'_>,
-        _delivery_opaque: (),
+        delivery_result: &rdkafka::message::DeliveryResult<'_>,
+        sent_at: Box<Instant>,
     ) {
-        // We don't use the delivery callback here — broker-ack timing is
-        // sampled directly on the DeliveryFuture in the send path.
+        // Runs on librdkafka's BG poll thread immediately after the
+        // broker ack — no tokio scheduling delay in the measurement.
+        let us = sent_at.elapsed().as_micros() as u64;
+        match delivery_result {
+            Ok(_) => {
+                ACK_COUNT.fetch_add(1, Ordering::Relaxed);
+                ACK_SUM_US.fetch_add(us, Ordering::Relaxed);
+                // lock-free max
+                let mut prev = ACK_MAX_US.load(Ordering::Relaxed);
+                while us > prev {
+                    match ACK_MAX_US.compare_exchange_weak(
+                        prev,
+                        us,
+                        Ordering::Relaxed,
+                        Ordering::Relaxed,
+                    ) {
+                        Ok(_) => break,
+                        Err(p) => prev = p,
+                    }
+                }
+                let b = if us < 1_000 {
+                    &ACK_BUCKET_LT_1MS
+                } else if us < 5_000 {
+                    &ACK_BUCKET_LT_5MS
+                } else if us < 10_000 {
+                    &ACK_BUCKET_LT_10MS
+                } else if us < 50_000 {
+                    &ACK_BUCKET_LT_50MS
+                } else if us < 100_000 {
+                    &ACK_BUCKET_LT_100MS
+                } else if us < 500_000 {
+                    &ACK_BUCKET_LT_500MS
+                } else {
+                    &ACK_BUCKET_GE_500MS
+                };
+                b.fetch_add(1, Ordering::Relaxed);
+            }
+            Err((e, _)) => {
+                ACK_ERRS.fetch_add(1, Ordering::Relaxed);
+                warn!(error = %e, "kafka_producer_delivery_error");
+            }
+        }
     }
+}
+
+/// Spawns a reporter that emits one log line every 2s with the
+/// histogram and resets the counters. Bucket boundaries chosen to
+/// straddle the expected range (<5ms broker-ack on a healthy cluster,
+/// ≥100ms when saturated).
+pub fn spawn_broker_ack_reporter() {
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(std::time::Duration::from_secs(2));
+        loop {
+            tick.tick().await;
+            let count = ACK_COUNT.swap(0, Ordering::Relaxed);
+            let errs = ACK_ERRS.swap(0, Ordering::Relaxed);
+            let sum = ACK_SUM_US.swap(0, Ordering::Relaxed);
+            let max = ACK_MAX_US.swap(0, Ordering::Relaxed);
+            let b1 = ACK_BUCKET_LT_1MS.swap(0, Ordering::Relaxed);
+            let b5 = ACK_BUCKET_LT_5MS.swap(0, Ordering::Relaxed);
+            let b10 = ACK_BUCKET_LT_10MS.swap(0, Ordering::Relaxed);
+            let b50 = ACK_BUCKET_LT_50MS.swap(0, Ordering::Relaxed);
+            let b100 = ACK_BUCKET_LT_100MS.swap(0, Ordering::Relaxed);
+            let b500 = ACK_BUCKET_LT_500MS.swap(0, Ordering::Relaxed);
+            let bge500 = ACK_BUCKET_GE_500MS.swap(0, Ordering::Relaxed);
+            let avg = if count > 0 { sum / count } else { 0 };
+            info!(
+                count_2s = count,
+                errors_2s = errs,
+                avg_us = avg,
+                max_us = max,
+                lt_1ms = b1,
+                lt_5ms = b5,
+                lt_10ms = b10,
+                lt_50ms = b50,
+                lt_100ms = b100,
+                lt_500ms = b500,
+                ge_500ms = bge500,
+                "kafka_producer_broker_ack_histogram"
+            );
+        }
+    });
 }
 
 fn build_producer(
@@ -103,7 +199,7 @@ fn build_producer(
     broker_address_family: &str,
     linger_ms: u64,
     name: &'static str,
-) -> FutureProducer<ProducerStatsContext> {
+) -> ThreadedProducer<ProducerStatsContext> {
     ClientConfig::new()
         .set("bootstrap.servers", bootstrap_servers)
         .set("broker.address.family", broker_address_family)
@@ -150,12 +246,9 @@ fn build_producer(
         .expect("Failed to create Kafka producer")
 }
 
-/// Sample every Nth send's broker-ack latency. With 1500 rps this gives
-/// ~15 samples/sec/pod which is plenty to build a distribution without
-/// flooding the log or paying for a per-send tokio::spawn.
-const ACK_SAMPLE_EVERY: u64 = 100;
-static REQUEST_SEND_COUNTER: AtomicU64 = AtomicU64::new(0);
-static STATE_INIT_SEND_COUNTER: AtomicU64 = AtomicU64::new(0);
+// Per-send broker-ack sampling counters are no longer needed —
+// `ProducerStatsContext::delivery` is invoked 100% by librdkafka's BG
+// thread for every ack, recording directly into the histogram below.
 
 /// User-side concurrency counters — incremented just before
 /// `producer.send_result()` and decremented just after. The peak
@@ -207,7 +300,7 @@ fn exit_send() {
 }
 
 pub struct KafkaRequestSender {
-    producer: FutureProducer<ProducerStatsContext>,
+    producer: ThreadedProducer<ProducerStatsContext>,
     response_topic: String,
 }
 
@@ -243,44 +336,19 @@ impl RequestSenderPort for KafkaRequestSender {
             key: "t_produced_us",
             value: Some(t_buf.as_slice()),
         });
-        let record = FutureRecord::to(HSM_REQUESTS_TOPIC)
+        // `with_opaque(Box::new(Instant::now()))` carries the send
+        // timestamp through to `ProducerStatsContext::delivery`, where
+        // we measure broker-ack RTT 100% with no tokio scheduling delay.
+        let record = BaseRecord::with_opaque_to(HSM_REQUESTS_TOPIC, Box::new(Instant::now()))
             .key(device_id)
             .payload(&payload)
             .headers(headers);
 
-        let t_send = Instant::now();
-        // send_result enqueues into librdkafka's internal buffer and returns
-        // immediately. We deliberately drop the DeliveryFuture: the BFF's own
-        // response-correlation oneshot is the authoritative success signal,
-        // and awaiting broker leader ack here would put the broker RTT
-        // (+ linger window) on the HTTP handler's critical path for every
-        // single request, serializing throughput against broker latency.
-        // QueueFull (only error returned synchronously) still surfaces
-        // immediately and triggers a 500 via the caller.
         enter_send();
-        let result = self.producer.send_result(record);
+        let result = self.producer.send(record);
         exit_send();
         match result {
-            Ok(delivery_future) => {
-                // Sampled: every Nth send, await broker ack on a background
-                // task and log the elapsed time. Splits "in producer queue"
-                // from "broker accepted" — the gap our current send_us /
-                // kafka_lag_us bookends don't cover.
-                let n = REQUEST_SEND_COUNTER.fetch_add(1, Ordering::Relaxed);
-                if n % ACK_SAMPLE_EVERY == 0 {
-                    tokio::spawn(async move {
-                        if delivery_future.await.is_ok() {
-                            info!(
-                                topic = HSM_REQUESTS_TOPIC,
-                                broker_ack_us = t_send.elapsed().as_micros() as u64,
-                                "kafka_broker_ack_sample"
-                            );
-                        }
-                    });
-                }
-                // Non-sampled path: drop the DeliveryFuture (fire-and-forget).
-                Ok(())
-            }
+            Ok(()) => Ok(()),
             Err((e, _)) => {
                 error!("Failed to enqueue to {}: {}", HSM_REQUESTS_TOPIC, e);
                 Err(e.to_string())
@@ -290,7 +358,7 @@ impl RequestSenderPort for KafkaRequestSender {
 }
 
 pub struct KafkaStateInitSender {
-    producer: FutureProducer<ProducerStatsContext>,
+    producer: ThreadedProducer<ProducerStatsContext>,
     response_topic: String,
 }
 
@@ -323,32 +391,17 @@ impl StateInitSenderPort for KafkaStateInitSender {
             key: "t_produced_us",
             value: Some(t_buf.as_slice()),
         });
-        let record = FutureRecord::to(STATE_INIT_REQUESTS_TOPIC)
-            .key(device_id)
-            .payload(&payload)
-            .headers(headers);
+        let record =
+            BaseRecord::with_opaque_to(STATE_INIT_REQUESTS_TOPIC, Box::new(Instant::now()))
+                .key(device_id)
+                .payload(&payload)
+                .headers(headers);
 
-        let t_send = Instant::now();
-        // See KafkaRequestSender::send for rationale on send_result.
         enter_send();
-        let result = self.producer.send_result(record);
+        let result = self.producer.send(record);
         exit_send();
         match result {
-            Ok(delivery_future) => {
-                let n = STATE_INIT_SEND_COUNTER.fetch_add(1, Ordering::Relaxed);
-                if n % ACK_SAMPLE_EVERY == 0 {
-                    tokio::spawn(async move {
-                        if delivery_future.await.is_ok() {
-                            info!(
-                                topic = STATE_INIT_REQUESTS_TOPIC,
-                                broker_ack_us = t_send.elapsed().as_micros() as u64,
-                                "kafka_broker_ack_sample"
-                            );
-                        }
-                    });
-                }
-                Ok(())
-            }
+            Ok(()) => Ok(()),
             Err((e, _)) => {
                 error!("Failed to enqueue to {}: {}", STATE_INIT_REQUESTS_TOPIC, e);
                 Err(e.to_string())
