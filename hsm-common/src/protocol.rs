@@ -463,6 +463,6 @@ pub struct SignRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(ToSchema))]
 pub struct SignatureResponse {
-    #[cfg_attr(feature = "openapi", schema(value_type = String, format = "byte"))]
+    #[cfg_attr(feature = "openapi", schema(value_type = String, format = "base64url"))]
     pub signature: SignatureVector,
 }

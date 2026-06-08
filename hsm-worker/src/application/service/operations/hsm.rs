@@ -51,9 +51,9 @@ impl ServiceOperation for HsmSignOperation {
             .sign(&hsm_key, &sign_request.message)
             .map_err(|_| ServiceRequestError::Unknown)?;
 
-        p256::ecdsa::Signature::from_slice(&raw_sig_bytes)
+        let signature = p256::ecdsa::Signature::from_slice(&raw_sig_bytes)
+            .map(|_| SignatureVector::new(raw_sig_bytes))
             .map_err(|_| ServiceRequestError::Unknown)?;
-        let signature = SignatureVector::new(raw_sig_bytes);
 
         debug!("HSM ECDSA P1363 signature: {:?}", signature);
 
