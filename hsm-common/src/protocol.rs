@@ -15,7 +15,7 @@ use crate::types::{TypedJwe, TypedJws};
 // ─── Internal byte-vector macro (not exported) ───────────────────────────────
 
 macro_rules! define_byte_vector_base {
-    ($(#[$attr:meta])* $name:ident) => {
+    ($(#[$attr:meta])* $name:ident, $engine:expr) => {
         $(#[$attr])*
         #[derive(Clone)]
         pub struct $name(Vec<u8>);
@@ -36,16 +36,16 @@ macro_rules! define_byte_vector_base {
 
         impl serde::Serialize for $name {
             fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-                use base64::{Engine as _, engine::general_purpose::STANDARD};
-                s.serialize_str(&STANDARD.encode(&self.0))
+                use base64::Engine as _;
+                s.serialize_str(&$engine.encode(&self.0))
             }
         }
 
         impl<'de> serde::Deserialize<'de> for $name {
             fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-                use base64::{Engine as _, engine::general_purpose::STANDARD};
+                use base64::Engine as _;
                 let s = String::deserialize(d)?;
-                STANDARD.decode(&s).map($name).map_err(serde::de::Error::custom)
+                $engine.decode(&s).map($name).map_err(serde::de::Error::custom)
             }
         }
     };
@@ -53,7 +53,10 @@ macro_rules! define_byte_vector_base {
 
 macro_rules! define_byte_vector {
     ($(#[$attr:meta])* $name:ident) => {
-        define_byte_vector_base!($(#[$attr])* $name);
+        define_byte_vector_base!(
+            $(#[$attr])* $name,
+            base64::engine::general_purpose::STANDARD
+        );
 
         impl std::fmt::Debug for $name {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -67,7 +70,16 @@ macro_rules! define_byte_vector {
 
 define_byte_vector!(PakePayloadVector);
 define_byte_vector!(MessageVector);
-define_byte_vector!(SignatureVector);
+
+define_byte_vector_base!(
+    SignatureVector,
+    base64::engine::general_purpose::URL_SAFE_NO_PAD
+);
+impl std::fmt::Debug for SignatureVector {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "SignatureVector({})", hex::encode(&self.0))
+    }
+}
 
 // ─── Common ───────────────────────────────────────────────────────────────────
 
@@ -451,6 +463,6 @@ pub struct SignRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(ToSchema))]
 pub struct SignatureResponse {
-    #[cfg_attr(feature = "openapi", schema(value_type = String, format = "byte"))]
+    #[cfg_attr(feature = "openapi", schema(value_type = String, format = "base64url"))]
     pub signature: SignatureVector,
 }

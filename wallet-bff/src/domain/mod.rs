@@ -44,6 +44,8 @@ pub struct BffRequest {
     /// Compact JWS (ES256). The decoded payload must contain a `nonce` UUID field
     /// for replay protection — duplicate nonces are rejected with 409.
     pub outer_request_jws: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state_jws: Option<String>,
 }
 
 /// Inbound request body for POST /new_state.
@@ -75,6 +77,8 @@ pub struct NewStateResponseDto {
     pub server_jws_public_key: Option<EcPublicJwk>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub opaque_server_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub state_jws: Option<String>,
 }
 
 /// Generic async response envelope matching the Java AsyncResponseDto.
@@ -88,6 +92,8 @@ pub struct AsyncResponseDto {
     pub result: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub result_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub state_jws: Option<String>,
 }
 
 /// Status of an async operation.

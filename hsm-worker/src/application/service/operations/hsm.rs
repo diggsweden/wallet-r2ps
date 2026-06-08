@@ -52,10 +52,10 @@ impl ServiceOperation for HsmSignOperation {
             .map_err(|_| ServiceRequestError::Unknown)?;
 
         let signature = p256::ecdsa::Signature::from_slice(&raw_sig_bytes)
+            .map(|_| SignatureVector::new(raw_sig_bytes))
             .map_err(|_| ServiceRequestError::Unknown)?;
-        let signature = SignatureVector::new(signature.to_der().as_bytes().to_vec());
 
-        debug!("HSM ECDSA ASN.1 signature: {:?}", signature);
+        debug!("HSM ECDSA P1363 signature: {:?}", signature);
 
         Ok(OperationResult {
             state: None,

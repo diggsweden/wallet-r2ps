@@ -105,7 +105,25 @@ async fn build_async_response_error_returns_500(
 }
 
 #[tokio::test]
-async fn build_async_response_enriches_worker_problem_detail_on_error() {
+async fn build_async_response_ok_includes_state_jws() {
+    let id = Uuid::new_v4();
+    let cached = CachedResponse {
+        request_id: id.to_string(),
+        status: Status::Ok,
+        outer_response_jws: Some(TypedJws::<OuterResponse>::new("jws.token.here".to_string())),
+        state_jws: Some("device-state-token".to_string()),
+        error_message: None,
+    };
+    let resp = build_async_response(id, Some(cached), "http://poll/1".to_string(), "/test");
+
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body: serde_json::Value =
+        serde_json::from_slice(&to_bytes(resp.into_body(), usize::MAX).await.unwrap()).unwrap();
+    assert_eq!(body["stateJws"], "device-state-token");
+}
+
+#[tokio::test]
+async fn build_async_response_forwards_worker_problem_json_exactly() {
     let id = Uuid::new_v4();
     let worker_error =
         r#"{"title":"Error processing request","detail":"UnknownDevice","request_id":"ignored"}"#;
