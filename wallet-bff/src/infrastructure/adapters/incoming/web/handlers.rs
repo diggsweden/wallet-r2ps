@@ -320,6 +320,7 @@ pub async fn create_state(
             client_id,
             dev_authorization_code: None,
             server_jws_public_key: None,
+            server_jwe_public_key: None,
             opaque_server_id: None,
             state_jws: Some(existing_state),
         };
@@ -384,6 +385,7 @@ pub async fn create_state(
                 client_id,
                 dev_authorization_code: Some(resp.dev_authorization_code),
                 server_jws_public_key: resp.server_jws_public_key,
+                server_jwe_public_key: resp.server_jwe_public_key,
                 opaque_server_id: resp.opaque_server_id,
                 state_jws: Some(resp.state_jws),
             };

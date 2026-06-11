@@ -50,6 +50,16 @@ fn create_valid_jwk() -> EcPublicJwk {
     }
 }
 
+fn create_valid_jwe_jwk() -> EcPublicJwk {
+    EcPublicJwk {
+        kty: "EC".to_string(),
+        crv: "P-256".to_string(),
+        x: "some_jwe_x_coord".to_string(),
+        y: "some_jwe_y_coord".to_string(),
+        kid: "test-jwe-kid-456".to_string(),
+    }
+}
+
 fn make_mock_jose() -> MockJosePort {
     let mut mock_jose = MockJosePort::new();
     mock_jose
@@ -61,6 +71,12 @@ fn make_mock_jose() -> MockJosePort {
     mock_jose
         .expect_jws_kid()
         .return_const("mock-kid".to_string());
+    mock_jose
+        .expect_jwe_public_key()
+        .return_const(create_valid_jwe_jwk());
+    mock_jose
+        .expect_jwe_kid()
+        .return_const("test-jwe-kid-456".to_string());
     mock_jose
 }
 
@@ -126,6 +142,13 @@ fn test_valid_initialization_pipeline() {
     assert_eq!(response.state_jws.as_str(), "mocked.jws.signature");
     assert_eq!(response.initial_hsm_key.kid, "initial-hsm-kid");
     assert_eq!(response.initial_hsm_key.crv, "P-256");
+    assert_eq!(response.server_jws_kid, "mock-kid");
+    assert_eq!(response.server_jwe_kid, "test-jwe-kid-456");
+    assert_eq!(response.server_jwe_public_key.kid, "test-jwe-kid-456");
+    assert_ne!(
+        response.server_jws_public_key.kid,
+        response.server_jwe_public_key.kid
+    );
 }
 
 #[test]

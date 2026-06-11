@@ -28,6 +28,7 @@ pub fn build_services(
 
     struct ModeConfig {
         jose_secret: SecretKey,
+        jwe_secret: SecretKey,
         opaque_secret: SecretKey,
         opaque_server_id: String,
         opaque_domain_separator: String,
@@ -35,10 +36,13 @@ pub fn build_services(
     }
 
     let mode = match &app_config.hsm_root_key_label {
-        // Key derivation mode: HSM key derivation is used to derive the JWS and OPAQUE secrets.
+        // Key derivation mode: HSM key derivation is used to derive the JWS, JWE and OPAQUE secrets.
         Some(root_label) => {
             let jws_sep = app_config.jws_domain_separator.as_deref().expect(
                 "JWS_DOMAIN_SEPARATOR required in HSM mode (e.g. \"rk-202501_jws-202501\")",
+            );
+            let jwe_sep = app_config.jwe_domain_separator.as_deref().expect(
+                "JWE_DOMAIN_SEPARATOR required in HSM mode (e.g. \"rk-202501_jwe-202501\")",
             );
             let opaque_sep = app_config.opaque_domain_separator.as_deref().expect(
                 "OPAQUE_DOMAIN_SEPARATOR required in HSM mode (e.g. \"rk-202501_opaque-202501\")",
@@ -47,19 +51,30 @@ pub fn build_services(
                 jws_sep, opaque_sep,
                 "JWS_DOMAIN_SEPARATOR and OPAQUE_DOMAIN_SEPARATOR must differ"
             );
+            assert_ne!(
+                jws_sep, jwe_sep,
+                "JWS_DOMAIN_SEPARATOR and JWE_DOMAIN_SEPARATOR must differ"
+            );
+            assert_ne!(
+                jwe_sep, opaque_sep,
+                "JWE_DOMAIN_SEPARATOR and OPAQUE_DOMAIN_SEPARATOR must differ"
+            );
             info!("Using HSM key derivation (root key: {})", root_label);
             let jose_secret = derive_key_from_hsm(hsm.as_ref(), root_label, jws_sep);
+            let jwe_secret = derive_key_from_hsm(hsm.as_ref(), root_label, jwe_sep);
             let opaque_secret = derive_key_from_hsm(hsm.as_ref(), root_label, opaque_sep);
             let opaque_server_id = jose_utils::ec_kid_from_secret(&opaque_secret);
             ModeConfig {
                 jose_secret,
+                jwe_secret,
                 opaque_secret,
                 opaque_server_id,
                 opaque_domain_separator: opaque_sep.to_owned(),
                 legacy_key_mode: false,
             }
         }
-        // Legacy mode: server_private_key is used to derive the JWS and OPAQUE secrets.
+        // Legacy mode: server_private_key is used to derive the JWS and OPAQUE secrets;
+        // server_encryption_key provides the distinct JWE decryption key.
         None => {
             info!("Using legacy PEM key config");
             let pem = load_pem_from_base64(
@@ -71,11 +86,20 @@ pub fn build_services(
             .expect("Failed to load SERVER_PRIVATE_KEY");
             let secret = SecretKey::from_pkcs8_pem(&pem::encode(&pem))
                 .expect("Failed to parse server private key as P-256 PKCS8");
+            let enc_pem = load_pem_from_base64(
+                app_config.server_encryption_key.as_deref().expect(
+                    "SERVER_ENCRYPTION_KEY required (JWE decryption key, distinct from SERVER_PRIVATE_KEY)",
+                ),
+            )
+            .expect("Failed to load SERVER_ENCRYPTION_KEY");
+            let jwe_secret = SecretKey::from_pkcs8_pem(&pem::encode(&enc_pem))
+                .expect("Failed to parse server encryption key as P-256 PKCS8");
             // Legacy mode: same key for JWS and OPAQUE — preserves backwards compat
             // with existing client registrations.
             let id = app_config.opaque_server_identifier.clone();
             ModeConfig {
                 jose_secret: secret.clone(),
+                jwe_secret,
                 opaque_secret: secret,
                 opaque_server_id: id.clone(),
                 opaque_domain_separator: id,
@@ -84,8 +108,10 @@ pub fn build_services(
         }
     };
 
-    let jose =
-        Arc::new(JoseAdapter::new(mode.jose_secret).expect("Failed to initialize JoseAdapter"));
+    let jose = Arc::new(
+        JoseAdapter::new(mode.jose_secret, mode.jwe_secret)
+            .expect("Failed to initialize JoseAdapter (signing and encryption keys must differ)"),
+    );
 
     let pake = Arc::new(
         OpaquePakeAdapter::build(

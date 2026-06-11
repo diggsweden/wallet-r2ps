@@ -73,8 +73,12 @@ pub struct NewStateResponseDto {
     pub client_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dev_authorization_code: Option<String>,
+    /// Server JWS public key; clients use this to verify the servers' signature.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub server_jws_public_key: Option<EcPublicJwk>,
+    /// Server JWE public key; clients encrypt pre-auth inner JWEs to this key (ECDH-ES).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub server_jwe_public_key: Option<EcPublicJwk>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub opaque_server_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

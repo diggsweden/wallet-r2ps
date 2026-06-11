@@ -162,6 +162,14 @@ async fn test_state_init_response_sender_produces_to_kafka() {
             kid: "test-server-kid".to_string(),
         },
         server_jws_kid: "test-server-kid".to_string(),
+        server_jwe_public_key: EcPublicJwk {
+            kty: "EC".to_string(),
+            crv: "P-256".to_string(),
+            x: "test-jwe-x".to_string(),
+            y: "test-jwe-y".to_string(),
+            kid: "test-server-jwe-kid".to_string(),
+        },
+        server_jwe_kid: "test-server-jwe-kid".to_string(),
         opaque_server_id: "test-server-id".to_string(),
         initial_hsm_key: EcPublicJwk {
             kty: "EC".to_string(),
@@ -277,7 +285,8 @@ async fn test_state_init_consumer_receives_and_processes() {
     use p256::SecretKey;
 
     let secret = SecretKey::random(&mut OsRng);
-    let jose = Arc::new(JoseAdapter::new(secret).unwrap());
+    let enc_secret = SecretKey::random(&mut OsRng);
+    let jose = Arc::new(JoseAdapter::new(secret, enc_secret).unwrap());
 
     // Mock HSM that returns a dummy key for state init tests
     use hsm_worker::application::port::outgoing::hsm_spi_port::HsmSpiPort as StateInitHsmSpiPort;
@@ -429,15 +438,17 @@ async fn test_worker_kafka_round_trip() {
     use p256::elliptic_curve::sec1::ToEncodedPoint;
     use p256::pkcs8::{EncodePrivateKey, EncodePublicKey};
 
-    // Generate server key pair
+    // Generate server key pairs (signing + encryption); clients encrypt inner JWEs
+    // toward the encryption key.
     use hsm_worker::application::port::outgoing::jose_port::JosePort;
     let server_secret = SecretKey::random(&mut OsRng);
-    let pub_pem_str = server_secret
+    let server_enc_secret = SecretKey::random(&mut OsRng);
+    let pub_pem_str = server_enc_secret
         .public_key()
         .to_public_key_pem(Default::default())
         .unwrap()
         .to_string();
-    let jose = Arc::new(JoseAdapter::new(server_secret).unwrap());
+    let jose = Arc::new(JoseAdapter::new(server_secret, server_enc_secret).unwrap());
 
     // No-op PAKE and HSM (not needed for list-keys on a fresh device)
     struct NoOpPake;

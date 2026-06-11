@@ -26,7 +26,8 @@ pub struct GenerateArgs {
     #[arg(long)]
     pub bff_url: String,
 
-    /// Path to server EC public key PEM file
+    /// Path to the server JWE (encryption) EC public key PEM file —
+    /// the key clients encrypt inner request JWEs to
     #[arg(long)]
     pub server_pubkey_pem: String,
 
@@ -65,7 +66,8 @@ pub struct LoadTestArgs {
     #[arg(long)]
     pub bff_url: String,
 
-    /// Path to server EC public key PEM file
+    /// Path to the server JWE (encryption) EC public key PEM file —
+    /// the key clients encrypt inner request JWEs to
     #[arg(long)]
     pub server_pubkey_pem: String,
 

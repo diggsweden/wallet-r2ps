@@ -24,23 +24,35 @@ pub struct JoseAdapter {
     signer: EcdsaJwsSigner,
     verifier: EcdsaJwsVerifier,
     decrypter: EcdhEsJweDecrypter,
-    public_key: EcPublicJwk,
-    kid: String,
+    jws_public_key: EcPublicJwk,
+    jws_kid: String,
+    jwe_public_key: EcPublicJwk,
+    jwe_kid: String,
 }
 
 impl JoseAdapter {
-    pub fn new(secret_key: SecretKey) -> Result<Self, JoseError> {
-        let private_pem = secret_key.to_pkcs8_pem(Default::default()).map_err(|e| {
-            error!("Failed to encode private key as PKCS8 PEM: {:?}", e);
+    /// `signing_key` backs JWS signing/verification (ES256); `encryption_key` backs
+    /// JWE ECDH-ES decryption. The keys must be distinct: reusing one EC key for both
+    /// ECDSA and ECDH violates key separation, so equal keys are rejected.
+    pub fn new(signing_key: SecretKey, encryption_key: SecretKey) -> Result<Self, JoseError> {
+        let jws_public_key = jose_utils::ec_public_key_from_secret(&signing_key);
+        let jwe_public_key = jose_utils::ec_public_key_from_secret(&encryption_key);
+        if jws_public_key.kid == jwe_public_key.kid {
+            error!("JWS signing key and JWE encryption key must be distinct keys");
+            return Err(JoseError::InvalidKey);
+        }
+
+        let signing_pem = signing_key.to_pkcs8_pem(Default::default()).map_err(|e| {
+            error!("Failed to encode signing key as PKCS8 PEM: {:?}", e);
             JoseError::InvalidKey
         })?;
 
-        let signer = ES256.signer_from_pem(private_pem.as_bytes()).map_err(|e| {
+        let signer = ES256.signer_from_pem(signing_pem.as_bytes()).map_err(|e| {
             error!("Failed to create JWS signer: {:?}", e);
             JoseError::InvalidKey
         })?;
 
-        let public_pem = secret_key
+        let public_pem = signing_key
             .public_key()
             .to_public_key_pem(Default::default())
             .map_err(|e| {
@@ -55,22 +67,31 @@ impl JoseAdapter {
                 JoseError::InvalidKey
             })?;
 
+        let encryption_pem = encryption_key
+            .to_pkcs8_pem(Default::default())
+            .map_err(|e| {
+                error!("Failed to encode encryption key as PKCS8 PEM: {:?}", e);
+                JoseError::InvalidKey
+            })?;
+
         let decrypter = ECDH_ES
-            .decrypter_from_pem(private_pem.as_bytes())
+            .decrypter_from_pem(encryption_pem.as_bytes())
             .map_err(|e| {
                 error!("Failed to create JWE decrypter: {:?}", e);
                 JoseError::InvalidKey
             })?;
 
-        let public_key = jose_utils::ec_public_key_from_secret(&secret_key);
-        let kid = public_key.kid.clone();
+        let jws_kid = jws_public_key.kid.clone();
+        let jwe_kid = jwe_public_key.kid.clone();
 
         Ok(Self {
             signer,
             verifier,
             decrypter,
-            public_key,
-            kid,
+            jws_public_key,
+            jws_kid,
+            jwe_public_key,
+            jwe_kid,
         })
     }
 }
@@ -87,7 +108,7 @@ impl JosePort for JoseAdapter {
             JoseError::SignError
         })?;
         let mut header = josekit::jws::JwsHeader::new();
-        header.set_key_id(&self.kid);
+        header.set_key_id(&self.jws_kid);
         jwt::encode_with_signer(&payload, &header, &self.signer).map_err(|e| {
             error!("Failed to encode JWS: {:?}", e);
             JoseError::SignError
@@ -168,10 +189,18 @@ impl JosePort for JoseAdapter {
     }
 
     fn jws_public_key(&self) -> &EcPublicJwk {
-        &self.public_key
+        &self.jws_public_key
     }
 
     fn jws_kid(&self) -> &str {
-        &self.kid
+        &self.jws_kid
+    }
+
+    fn jwe_public_key(&self) -> &EcPublicJwk {
+        &self.jwe_public_key
+    }
+
+    fn jwe_kid(&self) -> &str {
+        &self.jwe_kid
     }
 }

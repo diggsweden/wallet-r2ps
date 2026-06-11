@@ -11,12 +11,15 @@ use serde::Deserialize;
 pub struct AppConfig {
     // Legacy: direct PEM key config (used when hsm_root_key_label is absent)
     pub server_private_key: Option<String>,
+    /// PEM EC P-256 key for JWE ECDH-ES decryption; must differ from server_private_key.
+    pub server_encryption_key: Option<String>,
     pub opaque_server_setup: Option<String>,
     pub opaque_server_identifier: String,
 
     // HSM key derivation (used when present, supersedes PEM config)
     pub hsm_root_key_label: Option<String>,
     pub jws_domain_separator: Option<String>,
+    pub jwe_domain_separator: Option<String>,
     pub opaque_domain_separator: Option<String>,
 
     pub opaque_context: String,
