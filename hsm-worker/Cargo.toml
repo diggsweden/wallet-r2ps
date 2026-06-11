@@ -60,7 +60,7 @@ elliptic-curve = { version = "0.13", features = ["sec1", "jwk"] }
 pem = "3"
 der = "0.8.0"
 argon2 = { version = "0.5", features = ["std"] }
-rand_core = { version = "0.6", features = ["getrandom"] }
+rand_core = { version = "0.10", features = ["getrandom"] }
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1.18.1", features = ["v4", "serde"] }
 digest = "0.10.7"
@@ -75,4 +75,4 @@ rstest = "=0.26.1"
 mockall = "=0.14.0"
 testcontainers = "=0.27.3"
 testcontainers-modules = { version = "=0.15.0", features = ["kafka"] }
-tokio = { version = "=1.52.1", features = ["macros", "rt-multi-thread", "time"] }
+tokio = { version = "=1.52.3", features = ["macros", "rt-multi-thread", "time"] }
