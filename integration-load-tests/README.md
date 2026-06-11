@@ -52,7 +52,7 @@ cargo run --release -- generate \
 | Option | Default | Description |
 |--------|---------|-------------|
 | `--bff-url` | *(required)* | BFF base URL |
-| `--server-pubkey-pem` | *(required)* | Path to server EC P-256 public key PEM |
+| `--server-pubkey-pem` | *(required)* | Path to the server JWE (encryption) EC P-256 public key PEM |
 | `-n, --count` | `10` | Number of clients to generate |
 | `--pin` | `123456` | PIN to use for all clients |
 | `-o, --output` | `test-data.json.gz` | Output file path (gzip JSON) |
@@ -107,7 +107,7 @@ cargo run --release -- load-test \
 | Option | Default | Description |
 |--------|---------|-------------|
 | `--bff-url` | *(required)* | BFF base URL |
-| `--server-pubkey-pem` | *(required)* | Path to server EC P-256 public key PEM |
+| `--server-pubkey-pem` | *(required)* | Path to the server JWE (encryption) EC P-256 public key PEM |
 | `--test-data` | *(required)* | Path to test data file (`.json.gz` or `.json`) |
 | `-t, --threads` | `4` | Number of concurrent worker tasks |
 | `--mean-delay-ms` | `100` | Mean inter-request delay per worker in ms (0 = burst) |

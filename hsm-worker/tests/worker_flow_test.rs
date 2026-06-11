@@ -117,23 +117,31 @@ impl WorkerResponseSpiPort for CapturingResponseSink {
 // Test helpers
 // ---------------------------------------------------------------------------
 
-/// Creates a real JoseAdapter keyed with a fresh P-256 server key.
-/// Returns the adapter, a verifier for decoding signed responses, and the server's public PEM
-/// (needed by the client side to encrypt inner JWEs toward the server).
+/// Creates a real JoseAdapter keyed with fresh P-256 server keys (signing + encryption).
+/// Returns the adapter, a verifier for decoding signed responses, and the server's
+/// encryption public PEM (needed by the client side to encrypt inner JWEs toward the server).
 fn setup_server_crypto() -> (
     Arc<JoseAdapter>,
     josekit::jws::alg::ecdsa::EcdsaJwsVerifier,
     String,
 ) {
-    let secret = SecretKey::random(&mut OsRng);
-    let pub_pem_str = secret
+    let signing_secret = SecretKey::random(&mut OsRng);
+    let encryption_secret = SecretKey::random(&mut OsRng);
+    let signing_pub_pem_str = signing_secret
         .public_key()
         .to_public_key_pem(Default::default())
         .unwrap()
         .to_string();
-    let jose = Arc::new(JoseAdapter::new(secret).unwrap());
-    let verifier = ES256.verifier_from_pem(pub_pem_str.as_bytes()).unwrap();
-    (jose, verifier, pub_pem_str)
+    let encryption_pub_pem_str = encryption_secret
+        .public_key()
+        .to_public_key_pem(Default::default())
+        .unwrap()
+        .to_string();
+    let jose = Arc::new(JoseAdapter::new(signing_secret, encryption_secret).unwrap());
+    let verifier = ES256
+        .verifier_from_pem(signing_pub_pem_str.as_bytes())
+        .unwrap();
+    (jose, verifier, encryption_pub_pem_str)
 }
 
 /// Client-side helper: sign an OuterRequest payload as a JWT using the device's private key.

@@ -218,6 +218,8 @@ fn ok_state_init_response() -> StateInitResponse {
         dev_authorization_code: "abc123".to_string(),
         server_jws_public_key: None,
         server_jws_kid: None,
+        server_jwe_public_key: None,
+        server_jwe_kid: None,
         opaque_server_id: None,
         initial_hsm_key: None,
     }

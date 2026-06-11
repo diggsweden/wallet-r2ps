@@ -81,7 +81,7 @@ SOFTHSM2_CONF=softhsm/softhsm2.conf make hsm-create-wrapping-key
 # Create the HMAC root key (pin the label with HSM_ROOT_KEY_LABEL=rk-YYYYMM format (suggestion))
 SOFTHSM2_CONF=softhsm/softhsm2.conf make hsm-create-root-key HSM_ROOT_KEY_LABEL=rk-202601
 
-# Print the derived JWS and OPAQUE public keys
+# Print the derived JWS, JWE and OPAQUE public keys
 SOFTHSM2_CONF=softhsm/softhsm2.conf make hsm-derive-public-keys HSM_ROOT_KEY_LABEL=rk-202601
 ```
 
@@ -96,10 +96,16 @@ Enable key derivation in `.env` by setting (uncomment and fill in with the label
 ```text
 HSM_ROOT_KEY_LABEL=rk-202601
 JWS_DOMAIN_SEPARATOR=rk-202601_jws-v1
+JWE_DOMAIN_SEPARATOR=rk-202601_jwe-v1
 OPAQUE_DOMAIN_SEPARATOR=rk-202601_opaque-v1
 ```
 
-When these variables are set the legacy `SERVER_PRIVATE_KEY` value is ignored.
+The three domain separators must all differ: the JWS key signs (ES256), the JWE key decrypts
+pre-auth inner JWEs (ECDH-ES), and reusing one EC key for both signing and key agreement would
+violate key separation.
+
+When these variables are set the legacy `SERVER_PRIVATE_KEY` and `SERVER_ENCRYPTION_KEY` values
+are ignored.
 
 `OPAQUE_SERVER_SETUP` is still required in both legacy and HSM key derivation modes. The OPAQUE
 `ServerSetup` contains an OPRF key that is randomly generated on first startup and is independent

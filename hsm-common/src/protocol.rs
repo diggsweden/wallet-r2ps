@@ -281,10 +281,16 @@ pub struct StateInitResponse {
     /// JWS-encoded DeviceHsmState (compact serialization)
     pub state_jws: String,
     pub dev_authorization_code: String,
+    /// Server JWS public key; clients use this to verify the servers' signature.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub server_jws_public_key: Option<EcPublicJwk>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub server_jws_kid: Option<String>,
+    /// Server JWE public key; clients encrypt pre-auth inner JWEs to this key (ECDH-ES).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub server_jwe_public_key: Option<EcPublicJwk>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub server_jwe_kid: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub opaque_server_id: Option<String>,
     /// Public key of the initial HSM key, present when `initial_key_curve` was set in the request.

@@ -104,6 +104,8 @@ impl StateInitService {
             dev_authorization_code: dev_auth_code,
             server_jws_public_key: self.jose.jws_public_key().clone(),
             server_jws_kid: self.jose.jws_kid().to_owned(),
+            server_jwe_public_key: self.jose.jwe_public_key().clone(),
+            server_jwe_kid: self.jose.jwe_kid().to_owned(),
             opaque_server_id: self.opaque_server_id.clone(),
             initial_hsm_key,
         };
