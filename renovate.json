@@ -39,6 +39,12 @@
       "matchManagers": ["cargo"],
       "matchPackageNames": ["hkdf"],
       "allowedVersions": "<0.13"
+    },
+    {
+      "description": "rand_core is capped below 0.7 — 0.10 removed the `getrandom` feature flag that OsRng depends on, breaking the build. Updating requires verifying opaque-ke 4.x compatibility with rand_core 0.10 and adjusting OsRng usage in opaque_pake_adapter, hsm_wrapper, and worker_service. Update in the same PR as the opaque-ke upgrade.",
+      "matchManagers": ["cargo"],
+      "matchPackageNames": ["rand_core"],
+      "allowedVersions": "<0.7"
     }
   ]
 }
