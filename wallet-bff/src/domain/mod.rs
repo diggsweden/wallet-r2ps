@@ -52,7 +52,10 @@ pub struct BffRequest {
 #[derive(Debug, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct NewStateRequestDto {
-    pub public_key: EcPublicJwk,
+    /// Client public key used to verify the device's request signatures (JWS)
+    pub client_jws_public_key: EcPublicJwk,
+    /// Client public key the server encrypts pre-session responses to (JWE, ECDH-ES)
+    pub client_jwe_public_key: EcPublicJwk,
     pub client_id: Option<String>,
     /// When `true`, overwrites any existing device state for the supplied `clientId`.
     /// When `false` (default), a fresh `clientId` is always generated.

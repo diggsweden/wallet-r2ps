@@ -124,7 +124,8 @@ fn test_valid_initialization_pipeline() {
 
     let request = StateInitRequest {
         request_id: "test-req-123".to_string(),
-        public_key: create_valid_jwk(),
+        client_jws_public_key: create_valid_jwk(),
+        client_jwe_public_key: create_valid_jwe_jwk(),
         response_topic: "test-topic".to_string(),
         initial_key_curve: Curve::P256,
     };
@@ -174,7 +175,8 @@ fn test_initialization_fails_on_hsm_key_generation_error() {
 
     let request = StateInitRequest {
         request_id: "test-req-fail".to_string(),
-        public_key: create_valid_jwk(),
+        client_jws_public_key: create_valid_jwk(),
+        client_jwe_public_key: create_valid_jwe_jwk(),
         response_topic: "test-topic".to_string(),
         initial_key_curve: Curve::P256,
     };
@@ -208,7 +210,8 @@ fn test_initialization_fails_on_signing_error() {
 
     let request = StateInitRequest {
         request_id: "test-req-123".to_string(),
-        public_key: create_valid_jwk(),
+        client_jws_public_key: create_valid_jwk(),
+        client_jwe_public_key: create_valid_jwe_jwk(),
         response_topic: "test-topic".to_string(),
         initial_key_curve: Curve::P256,
     };
@@ -239,7 +242,8 @@ fn test_initialization_fails_on_spi_send_error() {
 
     let request = StateInitRequest {
         request_id: "test-req-123".to_string(),
-        public_key: create_valid_jwk(),
+        client_jws_public_key: create_valid_jwk(),
+        client_jwe_public_key: create_valid_jwe_jwk(),
         response_topic: "test-topic".to_string(),
         initial_key_curve: Curve::P256,
     };
@@ -279,13 +283,14 @@ fn test_strict_jwk_validation_rejection(
 
     let request = StateInitRequest {
         request_id: "test-req-123".to_string(),
-        public_key: EcPublicJwk {
+        client_jws_public_key: EcPublicJwk {
             kty: kty.to_string(),
             crv: crv.to_string(),
             x: x.to_string(),
             y: y.to_string(),
             kid: kid.to_string(),
         },
+        client_jwe_public_key: create_valid_jwk(),
         response_topic: "test-topic".to_string(),
         initial_key_curve: Curve::P256,
     };
@@ -298,4 +303,37 @@ fn test_strict_jwk_validation_rejection(
     // Verify that no payload was signed or sent to downstream systems
     let responses = mock_spi.responses.lock().unwrap();
     assert_eq!(responses.len(), 0);
+}
+
+#[test]
+fn test_initialization_rejects_identical_client_jws_and_jwe_keys() {
+    let mock_spi = Arc::new(MockStateInitResponseSpi {
+        responses: Mutex::new(Vec::new()),
+        fail: false,
+    });
+    let service = StateInitService::new(
+        mock_spi.clone(),
+        Arc::new(MockJosePort::new()),
+        Arc::new(MockHsmSpiPort::new()),
+        "wallet-hsm-key".to_string(),
+        "mock-opaque-id".to_string(),
+    );
+
+    // Same key material with a different kid — must still be rejected,
+    // since kid is client-supplied and proves nothing about the key.
+    let mut jwe_key = create_valid_jwk();
+    jwe_key.kid = "different-kid".to_string();
+
+    let request = StateInitRequest {
+        request_id: "test-req-same-key".to_string(),
+        client_jws_public_key: create_valid_jwk(),
+        client_jwe_public_key: jwe_key,
+        response_topic: "test-topic".to_string(),
+        initial_key_curve: Curve::P256,
+    };
+
+    let result = service.initialize(request);
+
+    assert!(matches!(result, Err(StateInitError::InvalidJwk)));
+    assert_eq!(mock_spi.responses.lock().unwrap().len(), 0);
 }

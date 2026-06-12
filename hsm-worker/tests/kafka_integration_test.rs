@@ -359,15 +359,28 @@ async fn test_state_init_consumer_receives_and_processes() {
     let device_secret = SecretKey::random(&mut OsRng);
     let ec_point = device_secret.public_key().to_encoded_point(false);
 
+    let client_jwk = EcPublicJwk {
+        kty: "EC".to_string(),
+        crv: "P-256".to_string(),
+        x: BASE64_URL_SAFE_NO_PAD.encode(ec_point.x().unwrap()),
+        y: BASE64_URL_SAFE_NO_PAD.encode(ec_point.y().unwrap()),
+        kid: "test-device-kid".to_string(),
+    };
+    // The JWE key must be a distinct key — the worker rejects identical
+    // JWS/JWE key material at state init.
+    let device_jwe_secret = SecretKey::random(&mut OsRng);
+    let jwe_ec_point = device_jwe_secret.public_key().to_encoded_point(false);
+    let client_jwe_jwk = EcPublicJwk {
+        kty: "EC".to_string(),
+        crv: "P-256".to_string(),
+        x: BASE64_URL_SAFE_NO_PAD.encode(jwe_ec_point.x().unwrap()),
+        y: BASE64_URL_SAFE_NO_PAD.encode(jwe_ec_point.y().unwrap()),
+        kid: "test-device-jwe-kid".to_string(),
+    };
     let request = StateInitRequest {
         request_id: "req-401".to_string(),
-        public_key: EcPublicJwk {
-            kty: "EC".to_string(),
-            crv: "P-256".to_string(),
-            x: BASE64_URL_SAFE_NO_PAD.encode(ec_point.x().unwrap()),
-            y: BASE64_URL_SAFE_NO_PAD.encode(ec_point.y().unwrap()),
-            kid: "test-device-kid".to_string(),
-        },
+        client_jws_public_key: client_jwk,
+        client_jwe_public_key: client_jwe_jwk,
         response_topic: "test-state-init-response-topic".to_string(),
         initial_key_curve: Curve::P256,
     };
@@ -554,7 +567,8 @@ async fn test_worker_kafka_round_trip() {
     let device_state = hsm_worker::domain::DeviceHsmState {
         version: 1,
         device_keys: vec![hsm_worker::domain::DeviceKeyEntry {
-            public_key: device_jwk.clone(),
+            jws_public_key: device_jwk.clone(),
+            jwe_public_key: device_jwk.clone(),
             password_files: vec![],
             dev_authorization_code: None,
         }],

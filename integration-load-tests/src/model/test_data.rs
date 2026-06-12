@@ -27,6 +27,8 @@ pub struct ClientTestData {
     pub pin: String,
     pub pin_stretch_d: String,
     pub device_key: DeviceKey,
+    /// Distinct key pair used to decrypt Device-encrypted responses (ECDH-ES)
+    pub device_jwe_key: DeviceKey,
     pub hsm_kid: String,
 }
 

@@ -455,7 +455,8 @@ async fn initializing_a_new_device_state_returns_a_device_authorization_code() {
     });
 
     let body = serde_json::json!({
-        "publicKey": dummy_public_key_json(),
+        "clientJwsPublicKey": dummy_public_key_json(),
+        "clientJwePublicKey": dummy_public_key_json(),
         "overwrite": false
     });
 
@@ -491,7 +492,8 @@ async fn a_device_state_init_request_that_times_out_returns_a_server_error() {
     });
 
     let body = serde_json::json!({
-        "publicKey": dummy_public_key_json(),
+        "clientJwsPublicKey": dummy_public_key_json(),
+        "clientJwePublicKey": dummy_public_key_json(),
         "overwrite": false
     });
 
@@ -559,7 +561,8 @@ async fn initializing_an_existing_device_state_without_overwrite_returns_the_cur
     let ctx = make_test_app(TestAppConfig::default());
 
     let body = serde_json::json!({
-        "publicKey": dummy_public_key_json(),
+        "clientJwsPublicKey": dummy_public_key_json(),
+        "clientJwePublicKey": dummy_public_key_json(),
         "overwrite": false
     });
 
@@ -593,7 +596,8 @@ async fn initializing_a_new_device_state_returns_the_state_token_from_the_worker
     });
 
     let body = serde_json::json!({
-        "publicKey": dummy_public_key_json(),
+        "clientJwsPublicKey": dummy_public_key_json(),
+        "clientJwePublicKey": dummy_public_key_json(),
         "overwrite": false
     });
 

@@ -49,12 +49,23 @@ impl StateInitService {
         debug!("Initializing state, request id: {}", request.request_id);
         let response_topic = request.response_topic.clone();
 
-        // 1. Validate public_key JWK (EC P-256)
-        validate_ec_public_jwk(&request.public_key)?;
+        // 1. Validate client JWK keys (EC P-256)
+        validate_ec_public_jwk(&request.client_jws_public_key)?;
+        validate_ec_public_jwk(&request.client_jwe_public_key)?;
+
+        // Key separation: the same EC key must not be used for both ECDSA (JWS)
+        // and ECDH-ES (JWE). Compare coordinates — kid is client-supplied and
+        // could differ even for identical key material.
+        if request.client_jws_public_key.x == request.client_jwe_public_key.x
+            && request.client_jws_public_key.y == request.client_jwe_public_key.y
+        {
+            error!("Client JWS and JWE public keys must be distinct keys");
+            return Err(StateInitError::InvalidJwk);
+        }
 
         info!(
-            "Initializing state for public key with kid: {}",
-            request.public_key.kid
+            "Initializing state for JWS public key with kid: {} (JWE kid: {})",
+            request.client_jws_public_key.kid, request.client_jwe_public_key.kid
         );
 
         // 2. Generate dev_authorization_code
@@ -82,7 +93,8 @@ impl StateInitService {
         let state = DeviceHsmState {
             version: 1,
             device_keys: vec![DeviceKeyEntry {
-                public_key: request.public_key,
+                jws_public_key: request.client_jws_public_key,
+                jwe_public_key: request.client_jwe_public_key,
                 password_files: vec![],
                 dev_authorization_code: Some(dev_auth_code.clone()),
             }],

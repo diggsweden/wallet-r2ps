@@ -13,7 +13,8 @@ pub struct ResponseContext {
     pub request_type: OperationId,
     pub session_key: Option<SessionKey>,
     pub ttl: Option<Duration>,
-    pub device_public_key: EcPublicJwk,
+    /// Client JWE public key; Device-encrypted responses are encrypted to this key (ECDH-ES)
+    pub device_jwe_public_key: EcPublicJwk,
 }
 
 #[derive(Debug)]

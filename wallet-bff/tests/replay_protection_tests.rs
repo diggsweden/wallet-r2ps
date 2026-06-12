@@ -134,7 +134,8 @@ async fn get_request_skips_nonce_check() {
 async fn state_init_endpoint_skips_nonce_check() {
     let app = make_app(Ok(false));
     let body = serde_json::json!({
-        "publicKey": { "kty": "EC", "crv": "P-256", "x": "x", "y": "y", "kid": "" }
+        "clientJwsPublicKey": { "kty": "EC", "crv": "P-256", "x": "x", "y": "y", "kid": "" },
+        "clientJwePublicKey": { "kty": "EC", "crv": "P-256", "x": "x", "y": "y", "kid": "" }
     })
     .to_string();
     let resp = post_to(app, "/hsm/v1/device-states", body).await;
