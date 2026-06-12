@@ -337,7 +337,8 @@ pub async fn create_state(
 
     let init_request = StateInitRequest {
         request_id: request_id.clone(),
-        public_key: req.public_key,
+        client_jws_public_key: req.client_jws_public_key,
+        client_jwe_public_key: req.client_jwe_public_key,
         // response_topic is injected by the Kafka sender
         response_topic: String::new(),
         initial_key_curve: req

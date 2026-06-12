@@ -21,7 +21,7 @@ pub fn build_pake_request_jws(
     pake_request: &PakeRequest,
     session_id: Option<&str>,
     server_public_key: &Jwk,
-    device_private_key: &Jwk,
+    device_jws_private_key: &Jwk,
     kid: &str,
 ) -> Result<String> {
     let inner_request = InnerRequest {
@@ -41,7 +41,7 @@ pub fn build_pake_request_jws(
     };
     jose::jws_sign(
         &serde_json::to_vec(&outer_request)?,
-        device_private_key,
+        device_jws_private_key,
         kid,
     )
     .context("JWS sign failed")
@@ -55,7 +55,7 @@ pub fn build_session_request_jws(
     data_payload: &serde_json::Value,
     session_id: &str,
     session_key: &[u8],
-    device_private_key: &Jwk,
+    device_jws_private_key: &Jwk,
     kid: &str,
 ) -> Result<String> {
     let inner_request = InnerRequest {
@@ -75,7 +75,7 @@ pub fn build_session_request_jws(
     };
     jose::jws_sign(
         &serde_json::to_vec(&outer_request)?,
-        device_private_key,
+        device_jws_private_key,
         kid,
     )
     .context("JWS sign failed")

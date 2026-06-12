@@ -98,25 +98,40 @@ async fn generate_one_client(
     args: &GenerateArgs,
     index: usize,
 ) -> Result<ClientTestData> {
-    // 1. Generate key pairs
+    // 1. Generate key pairs (separate keys for JWS signing and JWE decryption)
     let device_key = keygen::generate_ec_p256_keypair();
+    let device_jwe_key = keygen::generate_ec_p256_keypair();
     let pin_stretch_key = keygen::generate_ec_p256_keypair();
 
     let device_jwk =
         build_device_jwk(&device_key.x, &device_key.y, &device_key.d, &device_key.kid)?;
+    let device_jwe_jwk = build_device_jwk(
+        &device_jwe_key.x,
+        &device_jwe_key.y,
+        &device_jwe_key.d,
+        &device_jwe_key.kid,
+    )?;
 
-    let public_key = EcPublicJwk {
+    let jws_public_key = EcPublicJwk {
         kty: "EC".to_string(),
         crv: "P-256".to_string(),
         x: device_key.x.clone(),
         y: device_key.y.clone(),
         kid: device_key.kid.clone(),
     };
+    let jwe_public_key = EcPublicJwk {
+        kty: "EC".to_string(),
+        crv: "P-256".to_string(),
+        x: device_jwe_key.x.clone(),
+        y: device_jwe_key.y.clone(),
+        kid: device_jwe_key.kid.clone(),
+    };
 
     let am = AccessMechanismClient::new(
         rest,
         server_pubkey.clone(),
         device_jwk,
+        device_jwe_jwk,
         device_key.kid.clone(),
         pin_stretch_key.d.clone(),
         args.opaque_context.clone(),
@@ -124,7 +139,9 @@ async fn generate_one_client(
     );
 
     // 2. Init state
-    let (client_id, auth_code) = am.init_state(&public_key, &args.ttl).await?;
+    let (client_id, auth_code) = am
+        .init_state(&jws_public_key, &jwe_public_key, &args.ttl)
+        .await?;
     tracing::debug!("Client {}: initialized, client_id={}", index, client_id);
 
     // 3. Register PIN
@@ -147,6 +164,7 @@ async fn generate_one_client(
         pin: args.pin.clone(),
         pin_stretch_d: pin_stretch_key.d.clone(),
         device_key: device_key_to_model(&device_key),
+        device_jwe_key: device_key_to_model(&device_jwe_key),
         hsm_kid,
     })
 }

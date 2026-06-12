@@ -31,7 +31,7 @@ pub struct ResponseData {
 /// Returns the session_id, status, and raw OPAQUE bytes from PakeResponse.data.
 pub fn unwrap_pake_response(
     response_jws: &str,
-    device_private_key: &Jwk,
+    device_jwe_private_key: &Jwk,
 ) -> Result<PakeResponseData> {
     let outer: OuterResponse = serde_json::from_slice(
         &jose::jws_decode_unverified(response_jws).context("JWS decode failed")?,
@@ -50,7 +50,7 @@ pub fn unwrap_pake_response(
     };
 
     let inner: InnerResponse = serde_json::from_slice(
-        &jose::jwe_decrypt_ecdh_es(inner_jwe.as_str(), device_private_key)
+        &jose::jwe_decrypt_ecdh_es(inner_jwe.as_str(), device_jwe_private_key)
             .context("ECDH-ES decrypt failed")?,
     )
     .context("Failed to parse InnerResponse")?;

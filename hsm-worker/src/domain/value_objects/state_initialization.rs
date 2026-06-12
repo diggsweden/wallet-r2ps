@@ -16,7 +16,10 @@ use utoipa::ToSchema;
 pub struct StateInitRequest {
     /// Correlation ID for this initialization request
     pub request_id: String,
-    pub public_key: EcPublicJwk,
+    /// Client JWS public key; the worker verifies device request signatures with this key
+    pub client_jws_public_key: EcPublicJwk,
+    /// Client JWE public key; the worker encrypts pre-session responses to this key (ECDH-ES)
+    pub client_jwe_public_key: EcPublicJwk,
     /// Kafka topic the worker should send its response to
     pub response_topic: String,
     /// Curve used to generate the initial HSM key during state initialization.

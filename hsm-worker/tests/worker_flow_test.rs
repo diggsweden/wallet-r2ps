@@ -255,6 +255,8 @@ struct TestFixture {
     server_verifier: josekit::jws::alg::ecdsa::EcdsaJwsVerifier,
     server_pub_pem: String,
     device_private_pem: String,
+    /// Private key matching `device_keys[0].jwe_public_key`; decrypts Device-encrypted responses
+    device_jwe_private_pem: String,
     device_kid: String,
     state_jws: TypedJws<DeviceHsmState>,
 }
@@ -378,10 +380,25 @@ fn make_fixture_with_hsm_keys(
         kid: device_kid.clone(),
     };
 
+    let device_jwe_secret = SecretKey::random(&mut OsRng);
+    let device_jwe_private_pem = device_jwe_secret
+        .to_pkcs8_pem(Default::default())
+        .unwrap()
+        .to_string();
+    let jwe_ec_point = device_jwe_secret.public_key().to_encoded_point(false);
+    let device_jwe_pub_jwk = EcPublicJwk {
+        kty: "EC".to_string(),
+        crv: "P-256".to_string(),
+        x: BASE64_URL_SAFE_NO_PAD.encode(jwe_ec_point.x().unwrap()),
+        y: BASE64_URL_SAFE_NO_PAD.encode(jwe_ec_point.y().unwrap()),
+        kid: "test-device-jwe-key".to_string(),
+    };
+
     let state = DeviceHsmState {
         version: 1,
         device_keys: vec![DeviceKeyEntry {
-            public_key: device_pub_jwk,
+            jws_public_key: device_pub_jwk,
+            jwe_public_key: device_jwe_pub_jwk,
             password_files: vec![PasswordFileEntry {
                 password_file: PasswordFile(vec![1, 2, 3]),
                 opaque_domain_separator: "cloud-wallet.digg.se".to_string(),
@@ -410,6 +427,7 @@ fn make_fixture_with_hsm_keys(
         server_verifier,
         server_pub_pem,
         device_private_pem,
+        device_jwe_private_pem,
         device_kid,
         state_jws,
     }
@@ -583,7 +601,7 @@ fn test_register_start_invalid_authorization_fails() {
     let outer = fixture.decode_outer_response(last.outer_response_jws.as_ref().unwrap().as_str());
     let inner_bytes = client_decrypt_inner_device(
         outer.inner_jwe.as_ref().unwrap().as_str(),
-        &fixture.device_private_pem,
+        &fixture.device_jwe_private_pem,
     );
     let inner: InnerResponse = serde_json::from_slice(&inner_bytes).unwrap();
     assert_eq!(inner.status, Status::Error);
@@ -812,7 +830,7 @@ fn test_authenticate_finish_without_start_fails() {
     let outer = fixture.decode_outer_response(last.outer_response_jws.as_ref().unwrap().as_str());
     let inner_bytes = client_decrypt_inner_device(
         outer.inner_jwe.as_ref().unwrap().as_str(),
-        &fixture.device_private_pem,
+        &fixture.device_jwe_private_pem,
     );
     let inner: InnerResponse = serde_json::from_slice(&inner_bytes).unwrap();
     assert_eq!(

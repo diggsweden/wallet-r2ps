@@ -65,7 +65,7 @@ fn build_problem_response(
 
 #[derive(OpenApi)]
 #[openapi(
-    info(title = "wallet-bff", version = "0.1.0"),
+    info(title = "wallet-bff", version = "0.2.0"),
     paths(
         handlers::task_response,
         handlers::service,

@@ -455,7 +455,8 @@ async fn test_post_device_state_init_success() {
     });
 
     let body = serde_json::json!({
-        "publicKey": dummy_public_key_json(),
+        "clientJwsPublicKey": dummy_public_key_json(),
+        "clientJwePublicKey": dummy_public_key_json(),
         "overwrite": false
     });
 
@@ -491,7 +492,8 @@ async fn test_post_device_state_init_timeout() {
     });
 
     let body = serde_json::json!({
-        "publicKey": dummy_public_key_json(),
+        "clientJwsPublicKey": dummy_public_key_json(),
+        "clientJwePublicKey": dummy_public_key_json(),
         "overwrite": false
     });
 
@@ -629,7 +631,8 @@ async fn test_post_device_state_existing_overwrite_false_returns_state_jws() {
     let ctx = make_test_app(TestAppConfig::default());
 
     let body = serde_json::json!({
-        "publicKey": dummy_public_key_json(),
+        "clientJwsPublicKey": dummy_public_key_json(),
+        "clientJwePublicKey": dummy_public_key_json(),
         "overwrite": false
     });
 
@@ -663,7 +666,8 @@ async fn test_post_device_state_init_success_includes_state_jws() {
     });
 
     let body = serde_json::json!({
-        "publicKey": dummy_public_key_json(),
+        "clientJwsPublicKey": dummy_public_key_json(),
+        "clientJwePublicKey": dummy_public_key_json(),
         "overwrite": false
     });
 

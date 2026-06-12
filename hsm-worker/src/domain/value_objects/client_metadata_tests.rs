@@ -20,7 +20,8 @@ fn make_ec_jwk(kid: &str) -> EcPublicJwk {
 
 fn make_device_key(kid: &str) -> DeviceKeyEntry {
     DeviceKeyEntry {
-        public_key: make_ec_jwk(kid),
+        jws_public_key: make_ec_jwk(kid),
+        jwe_public_key: make_ec_jwk(&format!("{kid}-jwe")),
         password_files: vec![],
         dev_authorization_code: None,
     }
@@ -28,7 +29,8 @@ fn make_device_key(kid: &str) -> DeviceKeyEntry {
 
 fn make_device_key_with_auth_code(kid: &str, code: &str) -> DeviceKeyEntry {
     DeviceKeyEntry {
-        public_key: make_ec_jwk(kid),
+        jws_public_key: make_ec_jwk(kid),
+        jwe_public_key: make_ec_jwk(&format!("{kid}-jwe")),
         password_files: vec![],
         dev_authorization_code: Some(code.to_string()),
     }

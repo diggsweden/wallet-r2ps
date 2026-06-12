@@ -50,7 +50,7 @@ fn mock_context(request_id: &str, op_id: OperationId) -> ResponseContext {
         request_type: op_id,
         session_key: Some(SessionKey::new(vec![0u8; 32])),
         ttl: Some(Duration::from_secs(30)),
-        device_public_key: EcPublicJwk {
+        device_jwe_public_key: EcPublicJwk {
             kty: "EC".to_string(),
             crv: "P-256".to_string(),
             x,

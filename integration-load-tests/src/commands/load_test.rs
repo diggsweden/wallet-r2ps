@@ -160,10 +160,17 @@ async fn worker_loop(
         .map(|c| {
             let device_jwk =
                 build_device_jwk(&c.device_key.x, &c.device_key.y, &c.device_key.d, &c.kid)?;
+            let device_jwe_jwk = build_device_jwk(
+                &c.device_jwe_key.x,
+                &c.device_jwe_key.y,
+                &c.device_jwe_key.d,
+                &c.device_jwe_key.kid,
+            )?;
             let am = AccessMechanismClient::new(
                 Arc::clone(&rest),
                 server_pubkey.clone(),
                 device_jwk,
+                device_jwe_jwk,
                 c.kid.clone(),
                 c.pin_stretch_d.clone(),
                 envelope.opaque_context.clone(),
