@@ -95,9 +95,6 @@ impl JosePort for MockJoseDeterministic {
     fn jwe_public_key(&self) -> &EcPublicJwk {
         unimplemented!()
     }
-    fn jwe_kid(&self) -> &str {
-        "mock-jwe-kid"
-    }
 }
 
 // --- SPI Mocks ---

@@ -40,5 +40,4 @@ pub trait JosePort: Send + Sync {
     fn jws_public_key(&self) -> &EcPublicJwk;
     fn jws_kid(&self) -> &str;
     fn jwe_public_key(&self) -> &EcPublicJwk;
-    fn jwe_kid(&self) -> &str;
 }
