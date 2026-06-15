@@ -27,7 +27,6 @@ pub struct JoseAdapter {
     jws_public_key: EcPublicJwk,
     jws_kid: String,
     jwe_public_key: EcPublicJwk,
-    jwe_kid: String,
 }
 
 impl JoseAdapter {
@@ -82,7 +81,6 @@ impl JoseAdapter {
             })?;
 
         let jws_kid = jws_public_key.kid.clone();
-        let jwe_kid = jwe_public_key.kid.clone();
 
         Ok(Self {
             signer,
@@ -91,7 +89,6 @@ impl JoseAdapter {
             jws_public_key,
             jws_kid,
             jwe_public_key,
-            jwe_kid,
         })
     }
 }
@@ -198,9 +195,5 @@ impl JosePort for JoseAdapter {
 
     fn jwe_public_key(&self) -> &EcPublicJwk {
         &self.jwe_public_key
-    }
-
-    fn jwe_kid(&self) -> &str {
-        &self.jwe_kid
     }
 }

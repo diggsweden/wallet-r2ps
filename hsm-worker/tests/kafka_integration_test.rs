@@ -161,7 +161,6 @@ async fn test_state_init_response_sender_produces_to_kafka() {
             y: "test-y".to_string(),
             kid: "test-server-kid".to_string(),
         },
-        server_jws_kid: "test-server-kid".to_string(),
         server_jwe_public_key: EcPublicJwk {
             kty: "EC".to_string(),
             crv: "P-256".to_string(),
@@ -169,7 +168,6 @@ async fn test_state_init_response_sender_produces_to_kafka() {
             y: "test-jwe-y".to_string(),
             kid: "test-server-jwe-kid".to_string(),
         },
-        server_jwe_kid: "test-server-jwe-kid".to_string(),
         opaque_server_id: "test-server-id".to_string(),
         initial_hsm_key: EcPublicJwk {
             kty: "EC".to_string(),

@@ -42,12 +42,8 @@ pub struct StateInitResponse {
     pub dev_authorization_code: String,
     /// Server JWS public key. Clients use this for JWS verification only
     pub server_jws_public_key: EcPublicJwk,
-    /// KID of the server JWS public key
-    pub server_jws_kid: String,
     /// Server JWE public key. Clients encrypt pre-auth inner JWEs to this key (ECDH-ES).
     pub server_jwe_public_key: EcPublicJwk,
-    /// KID of the server JWE public key
-    pub server_jwe_kid: String,
     /// OPAQUE server identifier used during registration (must match on authenticate)
     pub opaque_server_id: String,
     /// Public key of the initial HSM key generated during state initialization.
