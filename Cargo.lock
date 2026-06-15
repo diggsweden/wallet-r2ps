@@ -1500,6 +1500,7 @@ dependencies = [
  "chrono",
  "clap",
  "config",
+ "crossbeam-channel",
  "cryptoki",
  "ctrlc",
  "der 0.8.0",
