@@ -251,7 +251,7 @@ async fn read_body_json(response: axum::response::Response) -> serde_json::Value
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-async fn test_post_hsm_request_sends_to_kafka() {
+async fn submitting_an_hsm_request_is_accepted_and_forwarded_for_processing() {
     let ctx = make_test_app(TestAppConfig::default());
 
     let body = serde_json::json!({
@@ -279,7 +279,7 @@ async fn test_post_hsm_request_sends_to_kafka() {
 }
 
 #[tokio::test]
-async fn test_post_hsm_request_sync_returns_result() {
+async fn an_hsm_request_with_an_immediately_available_result_is_returned_as_complete() {
     let ctx = make_test_app(TestAppConfig {
         serve_sync: true,
         sync_response: Some(ok_cached_response()),
@@ -312,7 +312,7 @@ async fn test_post_hsm_request_sync_returns_result() {
 }
 
 #[tokio::test]
-async fn test_post_hsm_request_sync_timeout_returns_pending() {
+async fn an_hsm_request_with_no_result_yet_is_returned_as_pending() {
     let ctx = make_test_app(TestAppConfig {
         serve_sync: true,
         sync_response: None,
@@ -348,7 +348,7 @@ async fn test_post_hsm_request_sync_timeout_returns_pending() {
 }
 
 #[tokio::test]
-async fn test_post_hsm_request_missing_device_state() {
+async fn an_hsm_request_for_an_unknown_device_is_rejected_as_not_found() {
     let ctx = make_test_app(TestAppConfig {
         device_state: None,
         ..Default::default()
@@ -384,7 +384,7 @@ async fn test_post_hsm_request_missing_device_state() {
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-async fn test_get_hsm_request_complete() {
+async fn polling_a_request_with_a_ready_result_returns_it_as_complete() {
     let ctx = make_test_app(TestAppConfig {
         sync_response: Some(ok_cached_response()),
         ..Default::default()
@@ -412,7 +412,7 @@ async fn test_get_hsm_request_complete() {
 }
 
 #[tokio::test]
-async fn test_get_hsm_request_pending() {
+async fn polling_a_request_with_no_result_yet_returns_it_as_pending() {
     let ctx = make_test_app(TestAppConfig {
         sync_response: None,
         sync_timeout_ms: 1,
@@ -445,7 +445,7 @@ async fn test_get_hsm_request_pending() {
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-async fn test_post_device_state_init_success() {
+async fn initializing_a_new_device_state_returns_a_device_authorization_code() {
     let ctx = make_test_app(TestAppConfig {
         device_state: None, // no pre-existing state so handler doesn't short-circuit
         state_init_response: Some(ok_state_init_response()),
@@ -480,7 +480,7 @@ async fn test_post_device_state_init_success() {
 }
 
 #[tokio::test]
-async fn test_post_device_state_init_timeout() {
+async fn a_device_state_init_request_that_times_out_returns_a_server_error() {
     let ctx = make_test_app(TestAppConfig {
         device_state: None, // no pre-existing state so handler doesn't short-circuit
         state_init_response: None,
@@ -518,7 +518,7 @@ async fn test_post_device_state_init_timeout() {
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-async fn test_post_hsm_request_state_jws_in_body_bypasses_port_lookup() {
+async fn an_hsm_request_carrying_its_own_state_token_succeeds_even_if_no_stored_state_exists() {
     // No state in port — request should succeed because stateJws is in the body.
     let ctx = make_test_app(TestAppConfig {
         device_state: None,
@@ -552,7 +552,7 @@ async fn test_post_hsm_request_state_jws_in_body_bypasses_port_lookup() {
 }
 
 #[tokio::test]
-async fn test_post_device_state_existing_overwrite_false_returns_state_jws() {
+async fn initializing_an_existing_device_state_without_overwrite_returns_the_current_state_token() {
     // Default config has device_state = Some("mock-state-jws").
     let ctx = make_test_app(TestAppConfig::default());
 
@@ -583,7 +583,7 @@ async fn test_post_device_state_existing_overwrite_false_returns_state_jws() {
 }
 
 #[tokio::test]
-async fn test_post_device_state_init_success_includes_state_jws() {
+async fn initializing_a_new_device_state_returns_the_state_token_from_the_worker() {
     let ctx = make_test_app(TestAppConfig {
         device_state: None,
         state_init_response: Some(ok_state_init_response()),
@@ -617,7 +617,7 @@ async fn test_post_device_state_init_success_includes_state_jws() {
 }
 
 #[tokio::test]
-async fn test_post_hsm_request_sync_complete_includes_state_jws() {
+async fn a_completed_hsm_request_forwards_the_updated_state_token_from_the_worker() {
     let mut cached = ok_cached_response();
     cached.state_jws = Some("updated-state-token".to_string());
 
@@ -658,7 +658,7 @@ async fn test_post_hsm_request_sync_complete_includes_state_jws() {
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-async fn test_malformed_json_returns_problem_json() {
+async fn malformed_json_in_a_request_returns_a_problem_json_error() {
     let ctx = make_test_app(TestAppConfig::default());
 
     let response = ctx
