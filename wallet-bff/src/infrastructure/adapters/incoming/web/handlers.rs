@@ -215,66 +215,6 @@ pub async fn service(
     (StatusCode::ACCEPTED, headers, Json(body)).into_response()
 }
 
-/// POST /hsm/v1/operations (synchronous endpoint)
-#[utoipa::path(
-    post,
-    path = "/hsm/v1/operations",
-    request_body(content = BffRequest, content_type = "application/json"),
-    responses(
-        (status = 200, description = "Worker result (plain JWS string)", content_type = "text/plain"),
-        (status = 404, description = "Device state not found", body = ProblemDetail, content_type = "application/problem+json"),
-        (status = 408, description = "Request timeout", body = ProblemDetail, content_type = "application/problem+json"),
-        (status = 409, description = "Duplicate nonce — generate a new nonce and retry", body = ProblemDetail, content_type = "application/problem+json"),
-        (status = 500, description = "Internal server error", body = ProblemDetail, content_type = "application/problem+json"),
-        (status = "default", description = "Unexpected error", body = ProblemDetail, content_type = "application/problem+json"),
-    )
-)]
-pub async fn legacy_service(
-    state: State<Arc<AppState>>,
-    OriginalUri(uri): OriginalUri,
-    body: Result<Json<BffRequest>, JsonRejection>,
-) -> impl IntoResponse {
-    let response = service(state, OriginalUri(uri.clone()), body)
-        .await
-        .into_response();
-    let status = response.status();
-
-    let bytes = match axum::body::to_bytes(response.into_body(), usize::MAX).await {
-        Ok(b) => b,
-        Err(_) => {
-            return problem_response(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Internal Server Error",
-                Some("Failed to read response body."),
-                uri.path(),
-            );
-        }
-    };
-
-    let dto: serde_json::Value = match serde_json::from_slice(&bytes) {
-        Ok(v) => v,
-        Err(_) => {
-            return problem_response(
-                StatusCode::REQUEST_TIMEOUT,
-                "Request Timeout",
-                Some("No response received within the timeout period."),
-                uri.path(),
-            );
-        }
-    };
-
-    if let Some(result) = dto.get("result").and_then(|v| v.as_str()) {
-        return (status, result.to_string()).into_response();
-    }
-
-    problem_response(
-        StatusCode::REQUEST_TIMEOUT,
-        "Request Timeout",
-        Some("No response received within the timeout period."),
-        uri.path(),
-    )
-}
-
 /// POST /hsm/v1/device-states
 #[utoipa::path(
     post,
