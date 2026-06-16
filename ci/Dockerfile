@@ -11,7 +11,7 @@
 # Run (from workspace root):
 #   docker run --rm -v "$(pwd):/src" hsm-verify
 
-FROM rust:1.96-bookworm@sha256:13c186980fa33cc12759b429662a1322939dbe697484b7c33b47dd2698d28460
+FROM rust:1.96-bookworm@sha256:19817ead3289c8c631c73df281e18b59b172f6a31f4f563290f69cddd06c30e9
 
 RUN apt-get update && apt-get install -y \
     git \
