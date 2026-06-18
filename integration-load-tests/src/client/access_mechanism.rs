@@ -11,6 +11,7 @@ use base64::Engine;
 use josekit::jwk::Jwk;
 use std::sync::Arc;
 
+use crate::backend::BackendClient;
 use crate::crypto::{opaque_client, pin_stretch};
 use crate::protocol::message_builder::{build_pake_request_jws, build_session_request_jws};
 use crate::protocol::response_parser::{unwrap_pake_response, unwrap_session_response};
@@ -19,10 +20,8 @@ use crate::protocol::types::{
     MessageVector, OperationId, PakePayloadVector, PakeRequest, SignRequest,
 };
 
-use super::rest_client::RestClient;
-
 pub struct AccessMechanismClient {
-    rest: Arc<RestClient>,
+    backend: Arc<dyn BackendClient>,
     server_public_key: Jwk,
     device_private_key: Jwk,
     kid: String,
@@ -33,7 +32,7 @@ pub struct AccessMechanismClient {
 
 impl AccessMechanismClient {
     pub fn new(
-        rest: Arc<RestClient>,
+        backend: Arc<dyn BackendClient>,
         server_public_key: Jwk,
         device_private_key: Jwk,
         kid: String,
@@ -42,7 +41,7 @@ impl AccessMechanismClient {
         opaque_server_identifier: String,
     ) -> Self {
         Self {
-            rest,
+            backend,
             server_public_key,
             device_private_key,
             kid,
@@ -64,7 +63,7 @@ impl AccessMechanismClient {
             ttl: Some(ttl.to_string()),
         };
 
-        let resp = self.rest.create_device_state(&request).await?;
+        let resp = self.backend.create_device_state(&request).await?;
         let client_id = resp.client_id;
         let auth_code = resp
             .dev_authorization_code
@@ -98,7 +97,7 @@ impl AccessMechanismClient {
             &self.device_private_key,
             &self.kid,
         )?;
-        let resp = self.rest.submit_request(client_id, &jws).await?;
+        let resp = self.backend.submit_request(client_id, &jws).await?;
         if resp.status != "complete" {
             bail!("Registration start failed: {:?}", resp);
         }
@@ -136,12 +135,36 @@ impl AccessMechanismClient {
             &self.device_private_key,
             &self.kid,
         )?;
-        let resp = self.rest.submit_request(client_id, &jws).await?;
+        let resp = self.backend.submit_request(client_id, &jws).await?;
         if resp.status != "complete" {
             bail!("Registration finish failed: {:?}", resp);
         }
 
         Ok(reg_finish.export_key)
+    }
+
+    /// Build a fresh `AuthenticateStart` (KE1) JWS without sending it. Each
+    /// call performs the OPAQUE login-start, JOSE encode, and JWS sign — the
+    /// per-message client-side cost of producing a real KE1.
+    ///
+    /// Used by producer-throughput tests that fire KE1 in a tight loop
+    /// without awaiting the worker's KE2 response.
+    pub fn build_login_start_jws(&self, pin: &str) -> Result<String> {
+        let stretched = pin_stretch::stretch_pin(pin, &self.pin_stretch_d)?;
+        let login_start = opaque_client::client_login_start(&stretched)?;
+        let pake_req = PakeRequest {
+            authorization: None,
+            purpose: None,
+            data: PakePayloadVector::new(login_start.credential_request),
+        };
+        build_pake_request_jws(
+            OperationId::AuthenticateStart,
+            &pake_req,
+            None,
+            &self.server_public_key,
+            &self.device_private_key,
+            &self.kid,
+        )
     }
 
     /// Create a session (two-round OPAQUE login).
@@ -164,7 +187,7 @@ impl AccessMechanismClient {
             &self.device_private_key,
             &self.kid,
         )?;
-        let resp = self.rest.submit_request(client_id, &jws).await?;
+        let resp = self.backend.submit_request(client_id, &jws).await?;
         if resp.status != "complete" {
             bail!("Login start failed: {:?}", resp);
         }
@@ -205,7 +228,7 @@ impl AccessMechanismClient {
             &self.device_private_key,
             &self.kid,
         )?;
-        let resp = self.rest.submit_request(client_id, &jws).await?;
+        let resp = self.backend.submit_request(client_id, &jws).await?;
         if resp.status != "complete" {
             bail!("Login finish failed: {:?}", resp);
         }
@@ -229,7 +252,7 @@ impl AccessMechanismClient {
             &self.device_private_key,
             &self.kid,
         )?;
-        let resp = self.rest.submit_request(client_id, &jws).await?;
+        let resp = self.backend.submit_request(client_id, &jws).await?;
         if resp.status != "complete" {
             bail!("HSM generate key failed: {:?}", resp);
         }
@@ -275,7 +298,7 @@ impl AccessMechanismClient {
             &self.device_private_key,
             &self.kid,
         )?;
-        let resp = self.rest.submit_request(client_id, &jws).await?;
+        let resp = self.backend.submit_request(client_id, &jws).await?;
         if resp.status != "complete" {
             bail!("HSM sign failed: {:?}", resp);
         }

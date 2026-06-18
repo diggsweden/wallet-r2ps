@@ -202,6 +202,23 @@ RUST_LOG=debug cargo run --release -- generate ...
 RUST_LOG=integration_load_tests=debug cargo run --release -- load-test ...
 ```
 
+## Async BFF flow
+
+The BFF exposes a fully async API:
+
+```
+POST /hsm/v1/device-states      → 202 Accepted, Location: /hsm/v1/device-states/{id}
+POST /hsm/v1/requests           → 202 Accepted, Location: /hsm/v1/requests/{id}
+GET  /hsm/v1/device-states/{id} → 200 OK (NewStateResponseDto) | 202 Accepted
+GET  /hsm/v1/requests/{id}      → 200 OK (AsyncResponseDto)    | 202 Accepted
+```
+
+The GETs long-poll server-side (Redis Pub/Sub) — typical wait time per GET is
+bounded by the BFF's `LONG_POLL_TIMEOUT_SECONDS` (default 25 s), after which
+the client re-polls. `RestClient::submit_request` and
+`RestClient::create_device_state` hide this behind a single call that returns
+once the worker response has arrived.
+
 ## Architecture
 
 ```text
@@ -215,7 +232,7 @@ src/
 │   ├── message_builder.rs  # JWS(ES256) → JWE(ECDH-ES or dir + A256GCM) envelope builder
 │   └── response_parser.rs  # JWS decode → JWE decrypt → InnerResponse parser
 ├── client/
-│   ├── rest_client.rs      # HTTP client for BFF REST API (with 404 retry for race conditions)
+│   ├── rest_client.rs      # HTTP client: POST → 202 → follow Location → long-poll until 200
 │   └── access_mechanism.rs # High-level client matching Android OpaqueClient API
 ├── model/
 │   └── test_data.rs     # Test data envelope — gzip JSON serialization

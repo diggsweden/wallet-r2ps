@@ -9,11 +9,16 @@ edition = "2021"
 license = "EUPL-1.2"
 description = "Integration and load testing tool for the R2PS wallet system"
 
+[lib]
+name = "integration_load_tests"
+path = "src/lib.rs"
+
 [[bin]]
 name = "integration-load-tests"
 path = "src/main.rs"
 
 [dependencies]
+async-trait = "0.1"
 # Shared protocol types
 hsm-common = { path = "../hsm-common" }
 

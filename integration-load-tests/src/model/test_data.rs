@@ -28,6 +28,12 @@ pub struct ClientTestData {
     pub pin_stretch_d: String,
     pub device_key: DeviceKey,
     pub hsm_kid: String,
+    /// JWS-encoded DeviceHsmState after onboarding. Required by direct-Kafka
+    /// load tests (they must include it in every `HsmWorkerRequest`); left
+    /// `None` by REST-based onboarding because the BFF keeps the state in
+    /// Redis and never returns it to the client.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state_jws: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

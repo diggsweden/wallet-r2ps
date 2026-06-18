@@ -23,12 +23,13 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::cli::LoadTestArgs;
-use crate::client::access_mechanism::{
+use integration_load_tests::client::access_mechanism::{
     build_device_jwk, load_server_public_key_pem, AccessMechanismClient,
 };
-use crate::client::rest_client::RestClient;
-use crate::model::test_data::TestDataEnvelope;
-use crate::stats::Stats;
+use integration_load_tests::backend::BackendClient;
+use integration_load_tests::client::rest_client::RestClient;
+use integration_load_tests::model::test_data::TestDataEnvelope;
+use integration_load_tests::stats::Stats;
 
 pub async fn run(args: LoadTestArgs) -> Result<()> {
     let envelope = TestDataEnvelope::read_from(Path::new(&args.test_data))?;
@@ -141,7 +142,7 @@ async fn worker_loop(
     stats: &Stats,
     running: &AtomicBool,
 ) {
-    let rest = match RestClient::new(&args.bff_url) {
+    let backend: Arc<dyn BackendClient> = match RestClient::new(&args.bff_url) {
         Ok(r) => Arc::new(r),
         Err(e) => {
             eprintln!(
@@ -161,7 +162,7 @@ async fn worker_loop(
             let device_jwk =
                 build_device_jwk(&c.device_key.x, &c.device_key.y, &c.device_key.d, &c.kid)?;
             let am = AccessMechanismClient::new(
-                Arc::clone(&rest),
+                Arc::clone(&backend),
                 server_pubkey.clone(),
                 device_jwk,
                 c.kid.clone(),

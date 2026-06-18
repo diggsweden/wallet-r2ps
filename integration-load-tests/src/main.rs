@@ -7,12 +7,7 @@ use clap::Parser;
 use tracing_subscriber::EnvFilter;
 
 mod cli;
-mod client;
 mod commands;
-mod crypto;
-mod model;
-mod protocol;
-mod stats;
 
 use cli::{Cli, Command};
 

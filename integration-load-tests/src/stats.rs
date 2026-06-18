@@ -30,6 +30,12 @@ pub struct StatsSnapshot {
     pub elapsed_seconds: u64,
 }
 
+impl Default for Stats {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Stats {
     pub fn new() -> Self {
         Self {

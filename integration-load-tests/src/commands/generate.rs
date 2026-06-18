@@ -18,17 +18,18 @@ use std::sync::Arc;
 use tokio::sync::Semaphore;
 
 use crate::cli::GenerateArgs;
-use crate::client::access_mechanism::{
+use integration_load_tests::client::access_mechanism::{
     build_device_jwk, load_server_public_key_pem, AccessMechanismClient,
 };
-use crate::client::rest_client::RestClient;
-use crate::crypto::keygen::{self, EcKeyPair};
-use crate::model::test_data::{ClientTestData, DeviceKey, TestDataEnvelope};
-use crate::protocol::types::EcPublicJwk;
+use integration_load_tests::backend::BackendClient;
+use integration_load_tests::client::rest_client::RestClient;
+use integration_load_tests::crypto::keygen::{self, EcKeyPair};
+use integration_load_tests::model::test_data::{ClientTestData, DeviceKey, TestDataEnvelope};
+use integration_load_tests::protocol::types::EcPublicJwk;
 
 pub async fn run(args: GenerateArgs) -> Result<()> {
     let server_pubkey = load_server_public_key_pem(&args.server_pubkey_pem)?;
-    let rest: Arc<RestClient> = Arc::new(RestClient::new(&args.bff_url)?);
+    let backend: Arc<dyn BackendClient> = Arc::new(RestClient::new(&args.bff_url)?);
     let semaphore = Arc::new(Semaphore::new(args.concurrency));
 
     println!(
@@ -40,14 +41,14 @@ pub async fn run(args: GenerateArgs) -> Result<()> {
     let mut handles = Vec::with_capacity(args.count);
 
     for i in 0..args.count {
-        let rest = Arc::clone(&rest);
+        let backend = Arc::clone(&backend);
         let sem = Arc::clone(&semaphore);
         let server_pk = server_pubkey.clone();
         let args = args.clone();
 
         let handle = tokio::spawn(async move {
             let _permit = sem.acquire().await.unwrap();
-            generate_one_client(rest, &server_pk, &args, i).await
+            generate_one_client(backend, &server_pk, &args, i).await
         });
         handles.push(handle);
     }
@@ -93,7 +94,7 @@ pub async fn run(args: GenerateArgs) -> Result<()> {
 }
 
 async fn generate_one_client(
-    rest: Arc<RestClient>,
+    backend: Arc<dyn BackendClient>,
     server_pubkey: &josekit::jwk::Jwk,
     args: &GenerateArgs,
     index: usize,
@@ -114,7 +115,7 @@ async fn generate_one_client(
     };
 
     let am = AccessMechanismClient::new(
-        rest,
+        backend,
         server_pubkey.clone(),
         device_jwk,
         device_key.kid.clone(),
@@ -148,6 +149,7 @@ async fn generate_one_client(
         pin_stretch_d: pin_stretch_key.d.clone(),
         device_key: device_key_to_model(&device_key),
         hsm_kid,
+        state_jws: None,
     })
 }
 
