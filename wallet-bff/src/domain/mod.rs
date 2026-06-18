@@ -12,8 +12,8 @@ pub use hsm_common::{
     StateInitRequest, StateInitResponse, Status,
 };
 
-/// Cached worker response stored in memory for polling.
-#[derive(Debug, Clone)]
+/// Cached worker response, serialized into the Redis response store.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CachedResponse {
     pub request_id: String,
     pub state_jws: Option<String>,
@@ -32,6 +32,35 @@ impl From<HsmWorkerResponse> for CachedResponse {
             error_message: r.error_message,
         }
     }
+}
+
+/// State-init response envelope as serialized into the Redis response store.
+/// Mirrors [`StateInitResponse`] plus the BFF-assigned `client_id`, which the
+/// worker does not know about.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CachedStateInitResponse {
+    pub request_id: String,
+    pub client_id: String,
+    pub state_jws: String,
+    pub dev_authorization_code: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub server_jws_public_key: Option<EcPublicJwk>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub server_jws_kid: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opaque_server_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub initial_hsm_key: Option<EcPublicJwk>,
+}
+
+/// Context the BFF persists for each in-flight Kafka request so the response
+/// — which may be consumed by a different replica — can be attributed to a
+/// device and have its state stored under the right key.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RequestContext {
+    pub client_id: String,
+    pub ttl_seconds: u64,
 }
 
 // ── HTTP DTOs ────────────────────────────────────────────────────────────────

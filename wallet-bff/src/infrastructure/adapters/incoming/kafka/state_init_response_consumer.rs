@@ -8,16 +8,16 @@ use rdkafka::consumer::{Consumer, StreamConsumer};
 use std::sync::Arc;
 use tracing::{error, info};
 
-use crate::application::port::outgoing::StateInitCorrelationPort;
+use crate::application::port::incoming::StateInitResponseSinkPort;
 use crate::domain::StateInitResponse;
 
-/// Starts a background task that consumes from the per-instance state-init
-/// response topic and notifies the correlation service.
+/// Background task that consumes from the per-instance state-init response
+/// topic and hands every response to the sink.
 pub fn start(
     bootstrap_servers: &str,
     group_id: &str,
     topic: &str,
-    correlation_port: Arc<dyn StateInitCorrelationPort>,
+    sink: Arc<dyn StateInitResponseSinkPort>,
 ) {
     let consumer: StreamConsumer = ClientConfig::new()
         .set("bootstrap.servers", bootstrap_servers)
@@ -61,7 +61,7 @@ pub fn start(
                         response.request_id, topic
                     );
 
-                    correlation_port.response_received(response).await;
+                    sink.ingest(response).await;
                 }
                 Err(e) => {
                     error!("Kafka consumer error on state-init response topic: {}", e);

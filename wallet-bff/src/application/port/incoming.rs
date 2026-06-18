@@ -2,27 +2,19 @@
 //
 // SPDX-License-Identifier: EUPL-1.2
 
-use tokio::sync::oneshot;
+use crate::domain::{HsmWorkerResponse, StateInitResponse};
 
-use crate::domain::{CachedResponse, HsmWorkerResponse};
-
-/// Use case port for handling incoming worker responses.
+/// Use case port: ingest an hsm-worker response from Kafka, save any updated
+/// device state, and publish the response envelope to the shared store so a
+/// polling client can pick it up.
 #[async_trait::async_trait]
-pub trait ResponseUseCase: Send + Sync {
-    /// Register a pending hsm-worker request and return a receiver that fires
-    /// when the worker response arrives. Await the receiver with a timeout in
-    /// the HTTP handler.
-    fn register_pending(
-        &self,
-        request_id: &str,
-        state_key: &str,
-        ttl_seconds: u64,
-    ) -> oneshot::Receiver<CachedResponse>;
+pub trait HsmResponseSinkPort: Send + Sync {
+    async fn ingest(&self, response: HsmWorkerResponse);
+}
 
-    /// Called by the Kafka consumer when a response arrives.
-    fn response_ready(&self, response: HsmWorkerResponse);
-
-    /// Polling path (GET /hsm/v1/requests/{id}): returns a cached response if
-    /// already completed, or waits up to `timeout_ms` for it to arrive.
-    async fn wait_for_response(&self, request_id: &str, timeout_ms: u64) -> Option<CachedResponse>;
+/// Use case port: ingest a state-init response from Kafka, save the device
+/// state, and publish the response envelope to the shared store.
+#[async_trait::async_trait]
+pub trait StateInitResponseSinkPort: Send + Sync {
+    async fn ingest(&self, response: StateInitResponse);
 }

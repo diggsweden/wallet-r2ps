@@ -15,16 +15,19 @@ use testcontainers_modules::kafka::apache::{self, Kafka};
 use testcontainers_modules::valkey::Valkey;
 use tokio::sync::Mutex;
 
-use wallet_bff::application::port::incoming::ResponseUseCase;
+use wallet_bff::application::port::incoming::{HsmResponseSinkPort, StateInitResponseSinkPort};
 use wallet_bff::application::port::outgoing::{
-    DeviceStatePort, NoncePort, StateInitCorrelationPort,
+    DeviceStatePort, NoncePort, RequestContextPort, ResponseStorePort,
 };
-use wallet_bff::application::service::ResponseService;
+use wallet_bff::application::service::{
+    HsmResponseSinkService, StateInitResponseSinkService, hsm_response_key,
+    state_init_response_key,
+};
 use wallet_bff::domain::{
-    CachedResponse, Curve, EcPublicJwk, HsmWorkerRequest, HsmWorkerResponse, OuterRequest,
-    OuterResponse, StateInitRequest, StateInitResponse, Status, TypedJws,
+    CachedResponse, CachedStateInitResponse, Curve, EcPublicJwk, HsmWorkerRequest,
+    HsmWorkerResponse, OuterRequest, OuterResponse, RequestContext, StateInitRequest,
+    StateInitResponse, Status, TypedJws,
 };
-use wallet_bff::infrastructure::adapters::incoming::kafka::state_init_cache::StateInitCorrelationService;
 use wallet_bff::infrastructure::adapters::incoming::kafka::{
     r2ps_response_consumer, state_init_response_consumer,
 };
@@ -33,6 +36,8 @@ use wallet_bff::infrastructure::adapters::outgoing::kafka::request_sender::{
 };
 use wallet_bff::infrastructure::adapters::outgoing::redis::device_state::DeviceStateRedisAdapter;
 use wallet_bff::infrastructure::adapters::outgoing::redis::nonce::NonceRedisAdapter;
+use wallet_bff::infrastructure::adapters::outgoing::redis::request_context::RequestContextRedisAdapter;
+use wallet_bff::infrastructure::adapters::outgoing::redis::response_store::ResponseStoreRedisAdapter;
 
 // ── Container helpers ────────────────────────────────────────────────────────
 
@@ -92,9 +97,6 @@ async fn test_device_state_valkey_ttl_expiry() {
     assert_eq!(adapter.load("ttl-key").await, None);
 }
 
-// Verifies that a second save() on the same key replaces the previous value.
-// The device state machine writes to the same key at each step (Registered →
-// Authenticated), so silent no-op or append behaviour would be a data bug.
 #[tokio::test]
 #[cfg_attr(not(feature = "testcontainers"), ignore)]
 async fn test_device_state_valkey_overwrite() {
@@ -136,8 +138,6 @@ async fn test_nonce_adapter_duplicate_nonce_returns_false() {
     assert_eq!(second, Ok(false));
 }
 
-// Nonces are scoped per client: the same nonce value from two different clients
-// must produce distinct Valkey keys and both be accepted.
 #[tokio::test]
 #[cfg_attr(not(feature = "testcontainers"), ignore)]
 async fn test_nonce_adapter_different_client_same_nonce_is_allowed() {
@@ -151,7 +151,6 @@ async fn test_nonce_adapter_different_client_same_nonce_is_allowed() {
     assert_eq!(b, Ok(true));
 }
 
-// A nonce stored with TTL=1 must be accepted again after the key expires.
 #[tokio::test]
 #[cfg_attr(not(feature = "testcontainers"), ignore)]
 async fn test_nonce_adapter_expired_nonce_can_be_reused() {
@@ -166,6 +165,78 @@ async fn test_nonce_adapter_expired_nonce_can_be_reused() {
     assert_eq!(after_expiry, Ok(true));
 }
 
+// ── Request-context adapter tests ────────────────────────────────────────────
+
+#[tokio::test]
+#[cfg_attr(not(feature = "testcontainers"), ignore)]
+async fn test_request_context_round_trip_and_take_is_atomic() {
+    let (_container, url) = start_valkey().await;
+    let conn = valkey_connection_manager(&url).await;
+    let adapter = RequestContextRedisAdapter::new(conn);
+
+    let ctx = RequestContext {
+        client_id: "device-rt".to_string(),
+        ttl_seconds: 60,
+    };
+    adapter.store("req-1", &ctx, 60).await.unwrap();
+
+    let first = adapter.take("req-1").await.expect("first take returns ctx");
+    assert_eq!(first.client_id, "device-rt");
+
+    // GETDEL removes the key — a duplicate Kafka delivery must see None.
+    assert!(adapter.take("req-1").await.is_none());
+}
+
+// ── Response-store adapter tests ─────────────────────────────────────────────
+
+async fn valkey_client(url: &str) -> redis::Client {
+    redis::Client::open(url).expect("Failed to create Valkey client")
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "testcontainers"), ignore)]
+async fn test_response_store_put_then_await_returns_value() {
+    let (_container, url) = start_valkey().await;
+    let conn = valkey_connection_manager(&url).await;
+    let client = valkey_client(&url).await;
+    let store = ResponseStoreRedisAdapter::with_pubsub(conn, client);
+
+    store.put("k1", b"hello", 60).await.unwrap();
+    let v = store.await_value("k1", 0).await.unwrap();
+    assert_eq!(v.as_deref(), Some(&b"hello"[..]));
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "testcontainers"), ignore)]
+async fn test_response_store_await_blocks_until_put_arrives() {
+    let (_container, url) = start_valkey().await;
+    let conn = valkey_connection_manager(&url).await;
+    let client = valkey_client(&url).await;
+    let writer = Arc::new(ResponseStoreRedisAdapter::new(conn.clone()));
+    let reader = Arc::new(ResponseStoreRedisAdapter::with_pubsub(conn, client));
+
+    let writer_clone = writer.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        writer_clone.put("k-wait", b"awakened", 60).await.unwrap();
+    });
+
+    let v = reader.await_value("k-wait", 5).await.unwrap();
+    assert_eq!(v.as_deref(), Some(&b"awakened"[..]));
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "testcontainers"), ignore)]
+async fn test_response_store_await_returns_none_on_timeout() {
+    let (_container, url) = start_valkey().await;
+    let conn = valkey_connection_manager(&url).await;
+    let client = valkey_client(&url).await;
+    let store = ResponseStoreRedisAdapter::with_pubsub(conn, client);
+
+    let v = store.await_value("never-written", 1).await.unwrap();
+    assert!(v.is_none());
+}
+
 // ── Kafka producer tests ─────────────────────────────────────────────────────
 
 #[tokio::test]
@@ -178,7 +249,7 @@ async fn test_request_sender_produces_to_kafka() {
         request_id: "req-100".to_string(),
         state_jws: "test-state-jws".to_string(),
         outer_request_jws: TypedJws::<OuterRequest>::new("test-outer-jws".to_string()),
-        response_topic: String::new(), // overwritten by sender
+        response_topic: String::new(),
     };
 
     use wallet_bff::application::port::outgoing::RequestSenderPort;
@@ -187,7 +258,6 @@ async fn test_request_sender_produces_to_kafka() {
         .await
         .expect("send failed");
 
-    // Consume and verify
     let consumer: StreamConsumer = ClientConfig::new()
         .set("bootstrap.servers", &bootstrap)
         .set("group.id", "test-request-sender")
@@ -219,7 +289,7 @@ async fn test_state_init_sender_produces_to_kafka() {
     let request = StateInitRequest {
         request_id: "req-200".to_string(),
         public_key: test_ec_jwk(),
-        response_topic: String::new(), // overwritten by sender
+        response_topic: String::new(),
         initial_key_curve: Curve::P256,
     };
 
@@ -252,12 +322,12 @@ async fn test_state_init_sender_produces_to_kafka() {
 
 // ── Kafka consumer tests ─────────────────────────────────────────────────────
 
-/// Test-local capturing implementation of ResponseUseCase.
-struct CapturingResponseUseCase {
+/// Test-local capturing sink for hsm-worker responses.
+struct CapturingHsmSink {
     responses: Mutex<Vec<HsmWorkerResponse>>,
 }
 
-impl CapturingResponseUseCase {
+impl CapturingHsmSink {
     fn new() -> Self {
         Self {
             responses: Mutex::new(Vec::new()),
@@ -266,39 +336,21 @@ impl CapturingResponseUseCase {
 }
 
 #[async_trait::async_trait]
-impl ResponseUseCase for CapturingResponseUseCase {
-    fn register_pending(
-        &self,
-        _: &str,
-        _: &str,
-        _: u64,
-    ) -> tokio::sync::oneshot::Receiver<CachedResponse> {
-        tokio::sync::oneshot::channel().1
-    }
-
-    fn response_ready(&self, response: HsmWorkerResponse) {
-        // block_in_place so we can use the sync Mutex inside an async context
-        tokio::task::block_in_place(|| {
-            self.responses.blocking_lock().push(response);
-        });
-    }
-
-    async fn wait_for_response(&self, _: &str, _: u64) -> Option<CachedResponse> {
-        None
+impl HsmResponseSinkPort for CapturingHsmSink {
+    async fn ingest(&self, response: HsmWorkerResponse) {
+        self.responses.lock().await.push(response);
     }
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[cfg_attr(not(feature = "testcontainers"), ignore)]
-async fn test_response_consumer_receives_and_calls_use_case() {
+async fn test_response_consumer_forwards_to_sink() {
     let (_container, bootstrap) = start_kafka().await;
 
-    let capturing = Arc::new(CapturingResponseUseCase::new());
+    let capturing = Arc::new(CapturingHsmSink::new());
     let group_id = format!("it-{}", uuid::Uuid::new_v4());
     let topic = format!("test-responses-{}", uuid::Uuid::new_v4());
 
-    // Produce before starting the consumer — auto.offset.reset=earliest means the
-    // consumer will replay this message on its first poll without needing a sleep.
     let producer: FutureProducer = ClientConfig::new()
         .set("bootstrap.servers", &bootstrap)
         .set("message.timeout.ms", "5000")
@@ -326,10 +378,9 @@ async fn test_response_consumer_receives_and_calls_use_case() {
         &bootstrap,
         &group_id,
         &topic,
-        capturing.clone() as Arc<dyn ResponseUseCase>,
+        capturing.clone() as Arc<dyn HsmResponseSinkPort>,
     );
 
-    // Wait for the consumer to process the message
     let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
     loop {
         let captured = capturing.responses.lock().await;
@@ -340,33 +391,35 @@ async fn test_response_consumer_receives_and_calls_use_case() {
         }
         drop(captured);
         if tokio::time::Instant::now() >= deadline {
-            panic!("Timeout waiting for consumer to receive message");
+            panic!("Timeout waiting for consumer to deliver message to sink");
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
 }
 
-#[tokio::test]
-#[ignore]
-async fn test_state_init_consumer_receives_and_notifies_correlation_service() {
-    let (_kafka, bootstrap) = start_kafka().await;
-    let (_valkey, valkey_url) = start_valkey().await;
-    let conn = valkey_connection_manager(&valkey_url).await;
+/// Test-local capturing sink for state-init responses.
+struct CapturingStateInitSink {
+    responses: Mutex<Vec<StateInitResponse>>,
+}
 
-    let device_state_port: Arc<dyn DeviceStatePort> =
-        Arc::new(DeviceStateRedisAdapter::new(conn.clone()));
-    let correlation = Arc::new(StateInitCorrelationService::new(device_state_port.clone()));
+#[async_trait::async_trait]
+impl StateInitResponseSinkPort for CapturingStateInitSink {
+    async fn ingest(&self, response: StateInitResponse) {
+        self.responses.lock().await.push(response);
+    }
+}
 
-    let request_id = "req-400";
-    let topic = format!("test-state-init-responses-{}", uuid::Uuid::new_v4());
+#[tokio::test(flavor = "multi_thread")]
+#[cfg_attr(not(feature = "testcontainers"), ignore)]
+async fn test_state_init_consumer_forwards_to_sink() {
+    let (_container, bootstrap) = start_kafka().await;
 
-    // Register before producing so we don't miss the response
-    let rx = correlation
-        .register_pending(request_id, "device-xyz", 300)
-        .await;
+    let capturing = Arc::new(CapturingStateInitSink {
+        responses: Mutex::new(Vec::new()),
+    });
+    let group_id = format!("it-{}", uuid::Uuid::new_v4());
+    let topic = format!("test-state-init-{}", uuid::Uuid::new_v4());
 
-    // Produce before starting the consumer — auto.offset.reset=earliest means the
-    // consumer will replay this message on its first poll without needing a sleep.
     let producer: FutureProducer = ClientConfig::new()
         .set("bootstrap.servers", &bootstrap)
         .set("message.timeout.ms", "5000")
@@ -374,7 +427,7 @@ async fn test_state_init_consumer_receives_and_notifies_correlation_service() {
         .expect("producer creation failed");
 
     let response = StateInitResponse {
-        request_id: request_id.to_string(),
+        request_id: "req-400".to_string(),
         state_jws: "init-state-jws".to_string(),
         dev_authorization_code: "dac_test_123".to_string(),
         server_jws_public_key: None,
@@ -386,66 +439,85 @@ async fn test_state_init_consumer_receives_and_notifies_correlation_service() {
 
     producer
         .send(
-            FutureRecord::to(&topic).key("device-xyz").payload(&payload),
+            FutureRecord::to(&topic).key("device-x").payload(&payload),
             Duration::from_secs(5),
         )
         .await
         .expect("produce failed");
 
-    let group_id = format!("it-{}", uuid::Uuid::new_v4());
     state_init_response_consumer::start(
         &bootstrap,
         &group_id,
         &topic,
-        correlation.clone() as Arc<dyn StateInitCorrelationPort>,
+        capturing.clone() as Arc<dyn StateInitResponseSinkPort>,
     );
 
-    // Wait for the correlation service to deliver the response
-    let result = tokio::time::timeout(Duration::from_secs(30), rx)
-        .await
-        .expect("timeout waiting for state-init response")
-        .expect("channel closed");
-
-    assert_eq!(result.request_id, request_id);
-    assert_eq!(result.dev_authorization_code, "dac_test_123");
-
-    // Verify device state was persisted in Valkey
-    let state = device_state_port.load("device-xyz").await;
-    assert_eq!(state, Some("init-state-jws".to_string()));
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    loop {
+        let captured = capturing.responses.lock().await;
+        if !captured.is_empty() {
+            assert_eq!(captured[0].request_id, "req-400");
+            assert_eq!(captured[0].dev_authorization_code, "dac_test_123");
+            break;
+        }
+        drop(captured);
+        if tokio::time::Instant::now() >= deadline {
+            panic!("Timeout waiting for state-init consumer to deliver message");
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
 }
 
-// ── BFF round-trip test ──────────────────────────────────────────────────────
+// ── BFF round-trip test: Kafka response → Redis sink → poll ──────────────────
 
 #[tokio::test]
 #[ignore]
-async fn test_bff_kafka_round_trip() {
+async fn test_bff_kafka_redis_round_trip_async_flow() {
     let (_kafka, bootstrap) = start_kafka().await;
     let (_valkey, valkey_url) = start_valkey().await;
     let conn = valkey_connection_manager(&valkey_url).await;
 
+    let client = valkey_client(&valkey_url).await;
     let device_state_port: Arc<dyn DeviceStatePort> =
         Arc::new(DeviceStateRedisAdapter::new(conn.clone()));
+    let response_store_writer: Arc<dyn ResponseStorePort> =
+        Arc::new(ResponseStoreRedisAdapter::new(conn.clone()));
+    let response_store_reader: Arc<dyn ResponseStorePort> = Arc::new(
+        ResponseStoreRedisAdapter::with_pubsub(conn.clone(), client),
+    );
+    let request_context: Arc<dyn RequestContextPort> =
+        Arc::new(RequestContextRedisAdapter::new(conn.clone()));
 
     let response_topic = format!("test-bff-responses-{}", uuid::Uuid::new_v4());
 
-    // Pre-save device state
     let request_id = "req-500";
     device_state_port.save("device-rt", "old-state", 300).await;
+    request_context
+        .store(
+            request_id,
+            &RequestContext {
+                client_id: "device-rt".to_string(),
+                ttl_seconds: 300,
+            },
+            300,
+        )
+        .await
+        .unwrap();
 
-    let response_service = Arc::new(ResponseService::new(
+    let sink = Arc::new(HsmResponseSinkService::new(
         device_state_port.clone(),
-        Duration::from_secs(60),
+        response_store_writer.clone(),
+        request_context.clone(),
+        60,
     ));
 
-    // Register the pending entry before sending the request
-    let rx = response_service.register_pending(request_id, "device-rt", 300);
-
+    // Send the request to Kafka.
     let request_sender = KafkaRequestSender::new(&bootstrap, "v4", response_topic.clone());
     let request = HsmWorkerRequest {
         request_id: request_id.to_string(),
         state_jws: "old-state".to_string(),
         outer_request_jws: TypedJws::<OuterRequest>::new("outer-jws".to_string()),
-        response_topic: String::new(), // overwritten by sender
+        response_topic: String::new(),
     };
     use wallet_bff::application::port::outgoing::RequestSenderPort;
     request_sender
@@ -453,16 +525,15 @@ async fn test_bff_kafka_round_trip() {
         .await
         .expect("send failed");
 
-    // Start response consumer on the per-instance response topic
     let group_id = format!("it-{}", uuid::Uuid::new_v4());
     r2ps_response_consumer::start(
         &bootstrap,
         &group_id,
         &response_topic,
-        response_service.clone() as Arc<dyn ResponseUseCase>,
+        sink as Arc<dyn HsmResponseSinkPort>,
     );
 
-    // Background task: consume from hsm-requests, fabricate a HsmWorkerResponse, produce to response_topic
+    // Simulated worker: consume the request, produce a response.
     let bootstrap_clone = bootstrap.clone();
     let response_topic_clone = response_topic.clone();
     tokio::spawn(async move {
@@ -483,7 +554,6 @@ async fn test_bff_kafka_round_trip() {
         let payload = msg.payload().expect("empty payload");
         let req: HsmWorkerRequest = serde_json::from_slice(payload).expect("deserialize failed");
 
-        // Fabricate a worker response
         let response = HsmWorkerResponse {
             request_id: req.request_id,
             state_jws: Some("new-state-jws".to_string()),
@@ -510,19 +580,108 @@ async fn test_bff_kafka_round_trip() {
             .expect("produce failed");
     });
 
-    // Wait for the oneshot receiver to fire
-    let cached = tokio::time::timeout(Duration::from_secs(30), rx)
+    // Acting as the HTTP poll handler: long-poll the response store.
+    let bytes = response_store_reader
+        .await_value(&hsm_response_key(request_id), 30)
         .await
-        .expect("timeout waiting for round-trip response")
-        .expect("channel closed");
+        .expect("store error")
+        .expect("response must arrive within timeout");
 
+    let cached: CachedResponse =
+        serde_json::from_slice(&bytes).expect("envelope must deserialize");
     assert_eq!(cached.request_id, request_id);
     assert_eq!(cached.status, Status::Ok);
 
-    // Device state saved asynchronously — give it a moment
-    tokio::time::sleep(Duration::from_millis(100)).await;
     let state = device_state_port.load("device-rt").await;
     assert_eq!(state, Some("new-state-jws".to_string()));
+}
+
+#[tokio::test]
+#[ignore]
+async fn test_state_init_kafka_redis_round_trip_async_flow() {
+    let (_kafka, bootstrap) = start_kafka().await;
+    let (_valkey, valkey_url) = start_valkey().await;
+    let conn = valkey_connection_manager(&valkey_url).await;
+
+    let client = valkey_client(&valkey_url).await;
+    let device_state_port: Arc<dyn DeviceStatePort> =
+        Arc::new(DeviceStateRedisAdapter::new(conn.clone()));
+    let response_store_writer: Arc<dyn ResponseStorePort> =
+        Arc::new(ResponseStoreRedisAdapter::new(conn.clone()));
+    let response_store_reader: Arc<dyn ResponseStorePort> = Arc::new(
+        ResponseStoreRedisAdapter::with_pubsub(conn.clone(), client),
+    );
+    let request_context: Arc<dyn RequestContextPort> =
+        Arc::new(RequestContextRedisAdapter::new(conn.clone()));
+
+    let request_id = "init-req-1";
+    let topic = format!("test-state-init-responses-{}", uuid::Uuid::new_v4());
+
+    request_context
+        .store(
+            request_id,
+            &RequestContext {
+                client_id: "device-xyz".to_string(),
+                ttl_seconds: 300,
+            },
+            300,
+        )
+        .await
+        .unwrap();
+
+    let sink = Arc::new(StateInitResponseSinkService::new(
+        device_state_port.clone(),
+        response_store_writer.clone(),
+        request_context.clone(),
+        60,
+    ));
+
+    let producer: FutureProducer = ClientConfig::new()
+        .set("bootstrap.servers", &bootstrap)
+        .set("message.timeout.ms", "5000")
+        .create()
+        .expect("producer creation failed");
+
+    let response = StateInitResponse {
+        request_id: request_id.to_string(),
+        state_jws: "init-state-jws".to_string(),
+        dev_authorization_code: "dac_test_123".to_string(),
+        server_jws_public_key: None,
+        server_jws_kid: None,
+        opaque_server_id: None,
+        initial_hsm_key: None,
+    };
+    let payload = serde_json::to_string(&response).unwrap();
+    producer
+        .send(
+            FutureRecord::to(&topic).key("device-xyz").payload(&payload),
+            Duration::from_secs(5),
+        )
+        .await
+        .expect("produce failed");
+
+    let group_id = format!("it-{}", uuid::Uuid::new_v4());
+    state_init_response_consumer::start(
+        &bootstrap,
+        &group_id,
+        &topic,
+        sink as Arc<dyn StateInitResponseSinkPort>,
+    );
+
+    let bytes = response_store_reader
+        .await_value(&state_init_response_key(request_id), 30)
+        .await
+        .expect("store error")
+        .expect("response must arrive within timeout");
+
+    let cached: CachedStateInitResponse =
+        serde_json::from_slice(&bytes).expect("envelope must deserialize");
+    assert_eq!(cached.request_id, request_id);
+    assert_eq!(cached.client_id, "device-xyz");
+    assert_eq!(cached.dev_authorization_code, "dac_test_123");
+
+    let state = device_state_port.load("device-xyz").await;
+    assert_eq!(state, Some("init-state-jws".to_string()));
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -536,3 +695,8 @@ fn test_ec_jwk() -> EcPublicJwk {
         kid: String::new(),
     }
 }
+
+// Quiet `unused` warnings on test-only helpers that only the disabled
+// (`#[ignore]`) tests exercise.
+#[allow(dead_code)]
+fn _unused_nonce_port_marker(_: Arc<dyn NoncePort>) {}

@@ -8,16 +8,17 @@ use rdkafka::consumer::{Consumer, StreamConsumer};
 use std::sync::Arc;
 use tracing::{error, info};
 
-use crate::application::port::incoming::ResponseUseCase;
+use crate::application::port::incoming::HsmResponseSinkPort;
 use crate::domain::HsmWorkerResponse;
 
-/// Starts a background task that consumes from the per-instance response topic
-/// and calls the response use case.
+/// Background task that consumes from the per-instance response topic and
+/// hands every response to the sink, which writes it to the durable response
+/// store.
 pub fn start(
     bootstrap_servers: &str,
     group_id: &str,
     topic: &str,
-    response_use_case: Arc<dyn ResponseUseCase>,
+    sink: Arc<dyn HsmResponseSinkPort>,
 ) {
     let consumer: StreamConsumer = ClientConfig::new()
         .set("bootstrap.servers", bootstrap_servers)
@@ -50,7 +51,7 @@ pub fn start(
                                 "Received worker response for requestId: {} on topic: {}",
                                 response.request_id, topic
                             );
-                            response_use_case.response_ready(response);
+                            sink.ingest(response).await;
                         }
                         Err(e) => {
                             error!(

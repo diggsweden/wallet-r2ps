@@ -7,19 +7,18 @@ use axum::extract::{OriginalUri, Path, State, rejection::JsonRejection};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::IntoResponse;
 use std::sync::{Arc, OnceLock};
-use std::time::Duration;
-use tracing::info;
+use tracing::{info, warn};
 use uuid::Uuid;
 
 use super::{problem_response, tracked_problem_response};
-use crate::application::port::incoming::ResponseUseCase;
 use crate::application::port::outgoing::{
-    DeviceStatePort, RequestSenderPort, StateInitCorrelationPort, StateInitSenderPort,
+    DeviceStatePort, RequestContextPort, RequestSenderPort, ResponseStorePort, StateInitSenderPort,
 };
+use crate::application::service::{hsm_response_key, state_init_response_key};
 use crate::domain::{
-    AsyncResponseDto, AsyncResponseStatus, BffRequest, CachedResponse, Curve, DEFAULT_TTL_SECONDS,
-    HsmWorkerRequest, NewStateRequestDto, NewStateResponseDto, ProblemDetail, StateInitRequest,
-    TypedJws,
+    AsyncResponseDto, AsyncResponseStatus, BffRequest, CachedResponse, CachedStateInitResponse,
+    Curve, DEFAULT_TTL_SECONDS, HsmWorkerRequest, NewStateRequestDto, NewStateResponseDto,
+    ProblemDetail, RequestContext, StateInitRequest, TypedJws,
 };
 
 pub const PROBLEM_CONTENT_TYPE: &str = "application/problem+json";
@@ -35,18 +34,22 @@ pub struct AppState {
     pub device_state_port: Arc<dyn DeviceStatePort>,
     pub request_sender_port: Arc<dyn RequestSenderPort>,
     pub state_init_sender_port: Arc<dyn StateInitSenderPort>,
-    pub response_use_case: Arc<dyn ResponseUseCase>,
-    pub state_init_correlation: Arc<dyn StateInitCorrelationPort>,
-    pub serve_sync: bool,
-    pub sync_timeout_ms: u64,
-    pub state_init_timeout_ms: u64,
+    pub response_store: Arc<dyn ResponseStorePort>,
+    pub request_context_port: Arc<dyn RequestContextPort>,
+    pub long_poll_timeout_seconds: u64,
     pub response_events_template_url: String,
+    pub state_init_events_template_url: String,
     pub default_initial_key_curve: Curve,
 }
 
 impl AppState {
-    fn polling_url(&self, correlation_id: &str) -> String {
+    fn request_polling_url(&self, correlation_id: &str) -> String {
         self.response_events_template_url
+            .replace("%s", correlation_id)
+    }
+
+    fn state_init_polling_url(&self, correlation_id: &str) -> String {
+        self.state_init_events_template_url
             .replace("%s", correlation_id)
     }
 }
@@ -78,14 +81,14 @@ fn json_rejection_response(e: JsonRejection, instance: &str) -> axum::response::
     problem_response(status, title, Some(detail), instance)
 }
 
-/// GET /hsm/requests/{correlationId}
+/// GET /hsm/v1/requests/{correlationId}
 #[utoipa::path(
     get,
     path = "/hsm/v1/requests/{correlationId}",
     params(("correlationId" = Uuid, Path, description = "Correlation ID returned by a prior POST /hsm/requests")),
     responses(
         (status = 200, description = "Request completed", body = AsyncResponseDto),
-        (status = 202, description = "Request still pending", body = AsyncResponseDto,
+        (status = 202, description = "Request still pending — keep polling", body = AsyncResponseDto,
             headers(("Location" = String, description = "URL to poll for the result"))),
         (status = 500, description = "Internal server error", body = ProblemDetail, content_type = "application/problem+json"),
         (status = "default", description = "Unexpected error", body = ProblemDetail, content_type = "application/problem+json"),
@@ -97,22 +100,44 @@ pub async fn task_response(
     Path(correlation_id): Path<Uuid>,
 ) -> impl IntoResponse {
     let id_str = correlation_id.to_string();
-    let cached = state
-        .response_use_case
-        .wait_for_response(&id_str, state.sync_timeout_ms)
-        .await;
-    let polling_url = state.polling_url(&id_str);
+    let polling_url = state.request_polling_url(&id_str);
+    let key = hsm_response_key(&id_str);
+
+    let bytes = match state
+        .response_store
+        .await_value(&key, state.long_poll_timeout_seconds)
+        .await
+    {
+        Ok(b) => b,
+        Err(e) => {
+            tracing::error!("Response store error for {}: {}", id_str, e);
+            return tracked_problem_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Internal Server Error",
+                Some("Failed to read response store."),
+                uri.path(),
+                &id_str,
+            );
+        }
+    };
+
+    let cached: Option<CachedResponse> = bytes.and_then(|b| match serde_json::from_slice(&b) {
+        Ok(c) => Some(c),
+        Err(e) => {
+            tracing::error!("Failed to decode cached response for {}: {}", id_str, e);
+            None
+        }
+    });
 
     build_async_response(correlation_id, cached, polling_url, uri.path())
 }
 
-/// POST /hsm/requests
+/// POST /hsm/v1/requests — fully async: enqueue and return 202 with Location.
 #[utoipa::path(
     post,
     path = "/hsm/v1/requests",
     request_body(content = BffRequest, content_type = "application/json"),
     responses(
-        (status = 200, description = "Request completed synchronously", body = AsyncResponseDto),
         (status = 202, description = "Request accepted, poll for result", body = AsyncResponseDto,
             headers(("Location" = String, description = "URL to poll for the result"))),
         (status = 404, description = "Device state not found", body = ProblemDetail, content_type = "application/problem+json"),
@@ -154,13 +179,26 @@ pub async fn service(
     let request_id = Uuid::new_v4();
     let request_id_str = request_id.to_string();
 
-    // Register the pending entry before sending to Kafka so the response can
-    // never arrive before we are ready to receive it.
-    let rx = state.response_use_case.register_pending(
-        &request_id_str,
-        &req.client_id,
-        DEFAULT_TTL_SECONDS,
-    );
+    // Persist {request_id -> client_id} BEFORE Kafka send so the response
+    // consumer — possibly on a different replica — can locate this device.
+    let ctx = RequestContext {
+        client_id: req.client_id.clone(),
+        ttl_seconds: DEFAULT_TTL_SECONDS,
+    };
+    if let Err(e) = state
+        .request_context_port
+        .store(&request_id_str, &ctx, DEFAULT_TTL_SECONDS)
+        .await
+    {
+        tracing::error!("Failed to store request context: {}", e);
+        return tracked_problem_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Internal Server Error",
+            Some("Failed to persist request context."),
+            &instance,
+            &request_id_str,
+        );
+    }
 
     let worker_req = HsmWorkerRequest {
         request_id: request_id_str.clone(),
@@ -185,22 +223,7 @@ pub async fn service(
         );
     }
 
-    if state.serve_sync {
-        info!(
-            "Waiting for synchronous response for requestId: {}",
-            request_id_str
-        );
-        let cached = tokio::time::timeout(Duration::from_millis(state.sync_timeout_ms), async {
-            rx.await.ok()
-        })
-        .await
-        .ok()
-        .flatten();
-        let polling_url = state.polling_url(&request_id_str);
-        return build_async_response(request_id, cached, polling_url, &instance);
-    }
-
-    let location = state.polling_url(&request_id_str);
+    let location = state.request_polling_url(&request_id_str);
     let body = AsyncResponseDto {
         correlation_id: request_id,
         status: AsyncResponseStatus::Pending,
@@ -215,73 +238,14 @@ pub async fn service(
     (StatusCode::ACCEPTED, headers, Json(body)).into_response()
 }
 
-/// POST /hsm/v1/operations (synchronous endpoint)
-#[utoipa::path(
-    post,
-    path = "/hsm/v1/operations",
-    request_body(content = BffRequest, content_type = "application/json"),
-    responses(
-        (status = 200, description = "Worker result (plain JWS string)", content_type = "text/plain"),
-        (status = 404, description = "Device state not found", body = ProblemDetail, content_type = "application/problem+json"),
-        (status = 408, description = "Request timeout", body = ProblemDetail, content_type = "application/problem+json"),
-        (status = 409, description = "Duplicate nonce — generate a new nonce and retry", body = ProblemDetail, content_type = "application/problem+json"),
-        (status = 500, description = "Internal server error", body = ProblemDetail, content_type = "application/problem+json"),
-        (status = "default", description = "Unexpected error", body = ProblemDetail, content_type = "application/problem+json"),
-    )
-)]
-pub async fn legacy_service(
-    state: State<Arc<AppState>>,
-    OriginalUri(uri): OriginalUri,
-    body: Result<Json<BffRequest>, JsonRejection>,
-) -> impl IntoResponse {
-    let response = service(state, OriginalUri(uri.clone()), body)
-        .await
-        .into_response();
-    let status = response.status();
-
-    let bytes = match axum::body::to_bytes(response.into_body(), usize::MAX).await {
-        Ok(b) => b,
-        Err(_) => {
-            return problem_response(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Internal Server Error",
-                Some("Failed to read response body."),
-                uri.path(),
-            );
-        }
-    };
-
-    let dto: serde_json::Value = match serde_json::from_slice(&bytes) {
-        Ok(v) => v,
-        Err(_) => {
-            return problem_response(
-                StatusCode::REQUEST_TIMEOUT,
-                "Request Timeout",
-                Some("No response received within the timeout period."),
-                uri.path(),
-            );
-        }
-    };
-
-    if let Some(result) = dto.get("result").and_then(|v| v.as_str()) {
-        return (status, result.to_string()).into_response();
-    }
-
-    problem_response(
-        StatusCode::REQUEST_TIMEOUT,
-        "Request Timeout",
-        Some("No response received within the timeout period."),
-        uri.path(),
-    )
-}
-
-/// POST /hsm/v1/device-states
+/// POST /hsm/v1/device-states — fully async: enqueue state-init and return 202.
 #[utoipa::path(
     post,
     path = "/hsm/v1/device-states",
     request_body(content = NewStateRequestDto, content_type = "application/json"),
     responses(
-        (status = 200, description = "State initialized successfully", body = NewStateResponseDto),
+        (status = 202, description = "State init accepted, poll the Location URL for the result", body = AsyncResponseDto,
+            headers(("Location" = String, description = "URL to poll for the result"))),
         (status = 500, description = "Internal server error", body = ProblemDetail, content_type = "application/problem+json"),
         (status = "default", description = "Unexpected error", body = ProblemDetail, content_type = "application/problem+json"),
     )
@@ -312,27 +276,27 @@ pub async fn create_state(
         Uuid::new_v4().to_string()
     };
 
-    if !req.overwrite
-        && let Some(existing_state) = state.device_state_port.load(&client_id).await
-    {
-        let dto = NewStateResponseDto {
-            status: "OK".to_string(),
-            client_id,
-            dev_authorization_code: None,
-            server_jws_public_key: None,
-            opaque_server_id: None,
-            state_jws: Some(existing_state),
-        };
-        return Json(dto).into_response();
-    }
-
     let request_id = Uuid::new_v4().to_string();
 
-    // Register before sending to Kafka.
-    let rx = state
-        .state_init_correlation
-        .register_pending(&request_id, &client_id, ttl_seconds)
-        .await;
+    let ctx = RequestContext {
+        client_id: client_id.clone(),
+        ttl_seconds,
+    };
+    if let Err(e) = state
+        .request_context_port
+        .store(&request_id, &ctx, ttl_seconds)
+        .await
+    {
+        tracing::error!("Failed to store state-init request context: {}", e);
+        return tracked_problem_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Internal Server Error",
+            Some("Failed to persist request context."),
+            &instance,
+            &request_id,
+        )
+        .into_response();
+    }
 
     let init_request = StateInitRequest {
         request_id: request_id.clone(),
@@ -365,42 +329,110 @@ pub async fn create_state(
         client_id, request_id
     );
 
-    let init_response =
-        tokio::time::timeout(Duration::from_millis(state.state_init_timeout_ms), async {
-            rx.await.ok()
-        })
-        .await
-        .ok()
-        .flatten();
+    let location = state.state_init_polling_url(&request_id);
+    let correlation_id = match Uuid::parse_str(&request_id) {
+        Ok(u) => u,
+        Err(_) => Uuid::nil(),
+    };
+    let body = AsyncResponseDto {
+        correlation_id,
+        status: AsyncResponseStatus::Pending,
+        result: None,
+        result_url: Some(location.clone()),
+        state_jws: None,
+    };
+    let mut headers = HeaderMap::new();
+    if let Ok(v) = location.parse() {
+        headers.insert(header::LOCATION, v);
+    }
+    (StatusCode::ACCEPTED, headers, Json(body)).into_response()
+}
 
-    match init_response {
-        Some(resp) => {
-            info!(
-                "New state created for clientId: {}, dev_authorization_code: {}",
-                client_id, resp.dev_authorization_code
-            );
-            let dto = NewStateResponseDto {
-                status: "OK".to_string(),
-                client_id,
-                dev_authorization_code: Some(resp.dev_authorization_code),
-                server_jws_public_key: resp.server_jws_public_key,
-                opaque_server_id: resp.opaque_server_id,
-                state_jws: Some(resp.state_jws),
-            };
-            Json(dto).into_response()
-        }
-        None => {
-            tracing::error!("State initialization timeout for clientId: {}", client_id);
-            tracked_problem_response(
+/// GET /hsm/v1/device-states/{correlationId} — long-poll for state-init.
+#[utoipa::path(
+    get,
+    path = "/hsm/v1/device-states/{correlationId}",
+    params(("correlationId" = Uuid, Path, description = "Correlation ID returned by POST /hsm/v1/device-states")),
+    responses(
+        (status = 200, description = "State init completed", body = NewStateResponseDto),
+        (status = 202, description = "State init still pending — keep polling", body = AsyncResponseDto,
+            headers(("Location" = String, description = "URL to poll for the result"))),
+        (status = 500, description = "Internal server error", body = ProblemDetail, content_type = "application/problem+json"),
+        (status = "default", description = "Unexpected error", body = ProblemDetail, content_type = "application/problem+json"),
+    )
+)]
+pub async fn state_init_response(
+    State(state): State<Arc<AppState>>,
+    OriginalUri(uri): OriginalUri,
+    Path(correlation_id): Path<Uuid>,
+) -> impl IntoResponse {
+    let id_str = correlation_id.to_string();
+    let polling_url = state.state_init_polling_url(&id_str);
+    let key = state_init_response_key(&id_str);
+
+    let bytes = match state
+        .response_store
+        .await_value(&key, state.long_poll_timeout_seconds)
+        .await
+    {
+        Ok(b) => b,
+        Err(e) => {
+            tracing::error!("Response store error for state-init {}: {}", id_str, e);
+            return tracked_problem_response(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Internal Server Error",
-                Some("State initialization did not complete within the expected time."),
-                &instance,
-                &request_id,
-            )
-            .into_response()
+                Some("Failed to read response store."),
+                uri.path(),
+                &id_str,
+            );
         }
+    };
+
+    let Some(bytes) = bytes else {
+        return state_init_pending(correlation_id, polling_url);
+    };
+
+    let cached: CachedStateInitResponse = match serde_json::from_slice(&bytes) {
+        Ok(c) => c,
+        Err(e) => {
+            warn!(
+                "Failed to decode cached state-init response for {}: {}",
+                id_str, e
+            );
+            return tracked_problem_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Internal Server Error",
+                Some("Failed to decode response."),
+                uri.path(),
+                &id_str,
+            );
+        }
+    };
+
+    let dto = NewStateResponseDto {
+        status: "OK".to_string(),
+        client_id: cached.client_id,
+        dev_authorization_code: Some(cached.dev_authorization_code),
+        server_jws_public_key: cached.server_jws_public_key,
+        opaque_server_id: cached.opaque_server_id,
+        state_jws: Some(cached.state_jws),
+    };
+    Json(dto).into_response()
+}
+
+fn state_init_pending(correlation_id: Uuid, polling_url: String) -> axum::response::Response {
+    let body = AsyncResponseDto {
+        correlation_id,
+        status: AsyncResponseStatus::Pending,
+        result: None,
+        result_url: Some(polling_url.clone()),
+        state_jws: None,
+    };
+    let mut headers = HeaderMap::new();
+    if let Ok(v) = polling_url.parse() {
+        headers.insert(header::LOCATION, v);
     }
+    (StatusCode::ACCEPTED, headers, Json(body)).into_response()
 }
 
 pub fn build_async_response(

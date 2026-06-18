@@ -2,135 +2,167 @@
 //
 // SPDX-License-Identifier: EUPL-1.2
 
-use std::collections::HashMap;
-use std::sync::Mutex;
-use std::time::{Duration, Instant};
-use tokio::sync::oneshot;
-use tracing::{info, warn};
-
-use crate::application::port::incoming::ResponseUseCase;
-use crate::application::port::outgoing::DeviceStatePort;
-use crate::domain::{CachedResponse, HsmWorkerResponse};
 use std::sync::Arc;
+use tracing::{error, info, warn};
 
-struct PendingEntry {
-    state_key: String,
-    ttl_seconds: u64,
-    tx: oneshot::Sender<CachedResponse>,
+use crate::application::port::incoming::{HsmResponseSinkPort, StateInitResponseSinkPort};
+use crate::application::port::outgoing::{DeviceStatePort, RequestContextPort, ResponseStorePort};
+use crate::domain::{
+    CachedResponse, CachedStateInitResponse, HsmWorkerResponse, StateInitResponse,
+};
+
+/// Redis key under which the JSON-encoded [`CachedResponse`] for a given
+/// `request_id` is stored.
+pub fn hsm_response_key(request_id: &str) -> String {
+    format!("hsm-response:{request_id}")
 }
 
-struct CachedEntry {
-    response: CachedResponse,
-    expires_at: Instant,
+/// Redis key under which the JSON-encoded [`CachedStateInitResponse`] for a
+/// given `request_id` is stored.
+pub fn state_init_response_key(request_id: &str) -> String {
+    format!("state-init-response:{request_id}")
 }
 
-pub struct ResponseService {
+/// Ingests hsm-worker responses from Kafka and writes them — together with the
+/// updated device state — into the durable response/state store. Replaces the
+/// in-memory pending map: a poll landing on a different BFF replica than the
+/// one that issued the POST can still read the response.
+pub struct HsmResponseSinkService {
     device_state_port: Arc<dyn DeviceStatePort>,
-    pending: Mutex<HashMap<String, PendingEntry>>,
-    cache: Mutex<HashMap<String, CachedEntry>>,
-    response_ttl: Duration,
+    response_store: Arc<dyn ResponseStorePort>,
+    request_context: Arc<dyn RequestContextPort>,
+    response_ttl_seconds: u64,
 }
 
-impl ResponseService {
-    pub fn new(device_state_port: Arc<dyn DeviceStatePort>, response_ttl: Duration) -> Self {
+impl HsmResponseSinkService {
+    pub fn new(
+        device_state_port: Arc<dyn DeviceStatePort>,
+        response_store: Arc<dyn ResponseStorePort>,
+        request_context: Arc<dyn RequestContextPort>,
+        response_ttl_seconds: u64,
+    ) -> Self {
         Self {
             device_state_port,
-            pending: Mutex::new(HashMap::new()),
-            cache: Mutex::new(HashMap::new()),
-            response_ttl,
+            response_store,
+            request_context,
+            response_ttl_seconds,
         }
-    }
-
-    fn store_in_cache(&self, response: CachedResponse) {
-        let entry = CachedEntry {
-            expires_at: Instant::now() + self.response_ttl,
-            response,
-        };
-        self.cache
-            .lock()
-            .unwrap()
-            .insert(entry.response.request_id.clone(), entry);
     }
 }
 
 #[async_trait::async_trait]
-impl ResponseUseCase for ResponseService {
-    fn register_pending(
-        &self,
-        request_id: &str,
-        state_key: &str,
-        ttl_seconds: u64,
-    ) -> oneshot::Receiver<CachedResponse> {
-        let (tx, rx) = oneshot::channel();
-        self.pending.lock().unwrap().insert(
-            request_id.to_string(),
-            PendingEntry {
-                state_key: state_key.to_string(),
-                ttl_seconds,
-                tx,
-            },
-        );
-        rx
-    }
-
-    fn response_ready(&self, response: HsmWorkerResponse) {
-        let entry = self.pending.lock().unwrap().remove(&response.request_id);
+impl HsmResponseSinkPort for HsmResponseSinkService {
+    async fn ingest(&self, response: HsmWorkerResponse) {
+        let request_id = response.request_id.clone();
+        let ctx = self.request_context.take(&request_id).await;
 
         let cached = CachedResponse::from(response);
 
-        if let Some(e) = entry {
-            // Save device state asynchronously via a spawned task so we don't
-            // block the Kafka consumer thread. The state_key and ttl come from
-            // the in-memory pending entry rather than Redis.
-            if let Some(ref state_jws) = cached.state_jws {
-                let port = self.device_state_port.clone();
-                let key = e.state_key.clone();
-                let jws = state_jws.clone();
-                let ttl = e.ttl_seconds;
-                tokio::spawn(async move {
-                    port.save(&key, &jws, ttl).await;
-                });
-            }
-
-            info!("Response ready for requestId: {}", cached.request_id);
-
-            if e.tx.send(cached.clone()).is_err() {
-                // Receiver was dropped (HTTP handler timed out); park in cache.
-                self.store_in_cache(cached);
-            }
-        } else {
-            // No sync waiter — this can happen when a pod restarts and reuses a
-            // topic that still has responses from the previous session.
-            // TODO: forward undeliverable responses to a shared durable store
-            // (e.g. a dedicated Kafka topic) so clients can reconnect and
-            // retrieve the result of a request that outlived its original pod.
-            warn!(
-                "No pending entry for requestId: {}, caching for polling",
-                cached.request_id
-            );
-            self.store_in_cache(cached);
+        // Persist the (possibly updated) device state under the original client_id.
+        // The context may be missing if a stale duplicate response was delivered, in
+        // which case we still publish the envelope so a slow poll can read it.
+        if let (Some(state_jws), Some(ctx)) = (cached.state_jws.as_ref(), ctx.as_ref()) {
+            self.device_state_port
+                .save(&ctx.client_id, state_jws, ctx.ttl_seconds)
+                .await;
         }
-    }
 
-    async fn wait_for_response(&self, request_id: &str, timeout_ms: u64) -> Option<CachedResponse> {
-        // TODO: cache is in-memory — async GET polling requires sticky sessions in the load
-        // balancer, otherwise a poll landing on a different instance than the original POST
-        // will miss the response.
-        let deadline = tokio::time::Instant::now() + Duration::from_millis(timeout_ms);
-        loop {
-            {
-                let mut map = self.cache.lock().unwrap();
-                if let Some(entry) = map.get(request_id) {
-                    if entry.expires_at > Instant::now() {
-                        return Some(entry.response.clone());
-                    }
-                    map.remove(request_id);
+        if ctx.is_none() {
+            warn!(
+                "No request context for hsm-worker requestId: {} — publishing anyway",
+                request_id
+            );
+        }
+
+        match serde_json::to_vec(&cached) {
+            Ok(bytes) => {
+                if let Err(e) = self
+                    .response_store
+                    .put(&hsm_response_key(&request_id), &bytes, self.response_ttl_seconds)
+                    .await
+                {
+                    error!("Failed to publish hsm response {}: {}", request_id, e);
+                } else {
+                    info!("Published hsm response for requestId: {}", request_id);
                 }
             }
-            if tokio::time::Instant::now() >= deadline {
-                return None;
+            Err(e) => error!("Failed to serialize CachedResponse {}: {}", request_id, e),
+        }
+    }
+}
+
+/// Ingests state-init responses from Kafka. Mirrors [`HsmResponseSinkService`]
+/// but for the state-init topic.
+pub struct StateInitResponseSinkService {
+    device_state_port: Arc<dyn DeviceStatePort>,
+    response_store: Arc<dyn ResponseStorePort>,
+    request_context: Arc<dyn RequestContextPort>,
+    response_ttl_seconds: u64,
+}
+
+impl StateInitResponseSinkService {
+    pub fn new(
+        device_state_port: Arc<dyn DeviceStatePort>,
+        response_store: Arc<dyn ResponseStorePort>,
+        request_context: Arc<dyn RequestContextPort>,
+        response_ttl_seconds: u64,
+    ) -> Self {
+        Self {
+            device_state_port,
+            response_store,
+            request_context,
+            response_ttl_seconds,
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl StateInitResponseSinkPort for StateInitResponseSinkService {
+    async fn ingest(&self, response: StateInitResponse) {
+        let request_id = response.request_id.clone();
+        let Some(ctx) = self.request_context.take(&request_id).await else {
+            warn!(
+                "No request context for state-init requestId: {} — dropping",
+                request_id
+            );
+            return;
+        };
+
+        self.device_state_port
+            .save(&ctx.client_id, &response.state_jws, ctx.ttl_seconds)
+            .await;
+
+        let cached = CachedStateInitResponse {
+            request_id: response.request_id.clone(),
+            client_id: ctx.client_id,
+            state_jws: response.state_jws,
+            dev_authorization_code: response.dev_authorization_code,
+            server_jws_public_key: response.server_jws_public_key,
+            server_jws_kid: response.server_jws_kid,
+            opaque_server_id: response.opaque_server_id,
+            initial_hsm_key: response.initial_hsm_key,
+        };
+
+        match serde_json::to_vec(&cached) {
+            Ok(bytes) => {
+                if let Err(e) = self
+                    .response_store
+                    .put(
+                        &state_init_response_key(&request_id),
+                        &bytes,
+                        self.response_ttl_seconds,
+                    )
+                    .await
+                {
+                    error!("Failed to publish state-init response {}: {}", request_id, e);
+                } else {
+                    info!("Published state-init response for requestId: {}", request_id);
+                }
             }
-            tokio::time::sleep(Duration::from_millis(50)).await;
+            Err(e) => error!(
+                "Failed to serialize CachedStateInitResponse {}: {}",
+                request_id, e
+            ),
         }
     }
 }

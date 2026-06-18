@@ -5,24 +5,25 @@
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use tokio::sync::oneshot;
 use tower::ServiceExt;
 
-use wallet_bff::application::port::incoming::ResponseUseCase;
 use wallet_bff::application::port::outgoing::{
-    DeviceStatePort, NoncePort, RequestSenderPort, StateInitCorrelationPort, StateInitSenderPort,
+    DeviceStatePort, NoncePort, RequestContextPort, RequestSenderPort, ResponseStorePort,
+    StateInitSenderPort,
 };
+use wallet_bff::application::service::{hsm_response_key, state_init_response_key};
 use wallet_bff::domain::{
-    CachedResponse, Curve, HsmWorkerRequest, HsmWorkerResponse, OuterResponse, StateInitRequest,
-    StateInitResponse, Status, TypedJws,
+    CachedResponse, CachedStateInitResponse, Curve, HsmWorkerRequest, OuterResponse,
+    RequestContext, StateInitRequest, Status, TypedJws,
 };
 use wallet_bff::infrastructure::adapters::incoming::web;
 use wallet_bff::infrastructure::adapters::incoming::web::handlers::AppState;
 use wallet_bff::infrastructure::adapters::incoming::web::replay_protection::ReplayProtectionState;
 
 // ---------------------------------------------------------------------------
-// Hand-written test mocks (consistent with existing response_service test style)
+// Hand-written test mocks
 // ---------------------------------------------------------------------------
 
 struct MockDeviceStatePort {
@@ -49,43 +50,59 @@ impl RequestSenderPort for MockRequestSenderPort {
     }
 }
 
-struct MockStateInitSenderPort;
+struct MockStateInitSenderPort {
+    sent: Arc<Mutex<Vec<StateInitRequest>>>,
+}
 
 #[async_trait::async_trait]
 impl StateInitSenderPort for MockStateInitSenderPort {
-    async fn send(&self, _request: &StateInitRequest, _device_id: &str) -> Result<(), String> {
+    async fn send(&self, request: &StateInitRequest, _device_id: &str) -> Result<(), String> {
+        self.sent.lock().unwrap().push(request.clone());
         Ok(())
     }
 }
 
-struct MockResponseUseCase {
-    sync_response: Option<CachedResponse>,
+#[derive(Default)]
+struct MockResponseStore {
+    values: Mutex<HashMap<String, Vec<u8>>>,
 }
 
 #[async_trait::async_trait]
-impl ResponseUseCase for MockResponseUseCase {
-    fn register_pending(
-        &self,
-        _request_id: &str,
-        _state_key: &str,
-        _ttl_seconds: u64,
-    ) -> oneshot::Receiver<CachedResponse> {
-        let (tx, rx) = oneshot::channel();
-        if let Some(ref r) = self.sync_response {
-            let _ = tx.send(r.clone());
-        }
-        // If sync_response is None, tx is dropped and rx returns Err on await.
-        rx
+impl ResponseStorePort for MockResponseStore {
+    async fn put(&self, key: &str, value: &[u8], _ttl_seconds: u64) -> Result<(), String> {
+        self.values.lock().unwrap().insert(key.to_string(), value.to_vec());
+        Ok(())
     }
-
-    fn response_ready(&self, _response: HsmWorkerResponse) {}
-
-    async fn wait_for_response(
+    async fn await_value(
         &self,
-        _request_id: &str,
-        _timeout_ms: u64,
-    ) -> Option<CachedResponse> {
-        self.sync_response.clone()
+        key: &str,
+        _timeout_seconds: u64,
+    ) -> Result<Option<Vec<u8>>, String> {
+        Ok(self.values.lock().unwrap().get(key).cloned())
+    }
+}
+
+#[derive(Default)]
+struct MockRequestContextPort {
+    contexts: Mutex<HashMap<String, RequestContext>>,
+}
+
+#[async_trait::async_trait]
+impl RequestContextPort for MockRequestContextPort {
+    async fn store(
+        &self,
+        request_id: &str,
+        ctx: &RequestContext,
+        _ttl_seconds: u64,
+    ) -> Result<(), String> {
+        self.contexts
+            .lock()
+            .unwrap()
+            .insert(request_id.to_string(), ctx.clone());
+        Ok(())
+    }
+    async fn take(&self, request_id: &str) -> Option<RequestContext> {
+        self.contexts.lock().unwrap().remove(request_id)
     }
 }
 
@@ -99,65 +116,55 @@ impl NoncePort for MockNoncePort {
         _nonce: &str,
         _ttl_seconds: u64,
     ) -> Result<bool, String> {
-        Ok(true) // always accept in tests
+        Ok(true)
     }
-}
-
-struct MockStateInitCorrelationPort {
-    response: Option<StateInitResponse>,
-}
-
-#[async_trait::async_trait]
-impl StateInitCorrelationPort for MockStateInitCorrelationPort {
-    async fn register_pending(
-        &self,
-        _request_id: &str,
-        _state_key: &str,
-        _ttl_seconds: u64,
-    ) -> oneshot::Receiver<StateInitResponse> {
-        let (tx, rx) = oneshot::channel();
-        if let Some(ref r) = self.response {
-            let _ = tx.send(r.clone());
-        }
-        rx
-    }
-
-    async fn response_received(&self, _response: StateInitResponse) {}
 }
 
 // ---------------------------------------------------------------------------
 // Test app factory
 // ---------------------------------------------------------------------------
 
+#[derive(Default)]
 struct TestAppConfig {
     device_state: Option<String>,
-    sync_response: Option<CachedResponse>,
-    state_init_response: Option<StateInitResponse>,
-    serve_sync: bool,
-    sync_timeout_ms: u64,
-    state_init_timeout_ms: u64,
-}
-
-impl Default for TestAppConfig {
-    fn default() -> Self {
-        Self {
-            device_state: Some("mock-state-jws".to_string()),
-            sync_response: None,
-            state_init_response: None,
-            serve_sync: false,
-            sync_timeout_ms: 100,
-            state_init_timeout_ms: 100,
-        }
-    }
+    /// Pre-populated cached HSM response (by request_id) — simulates the case
+    /// where the Kafka consumer has already written the envelope.
+    preset_hsm_response: Option<(String, CachedResponse)>,
+    /// Pre-populated cached state-init response.
+    preset_state_init: Option<(String, CachedStateInitResponse)>,
 }
 
 struct TestContext {
     app: Router,
     sent_requests: Arc<Mutex<Vec<HsmWorkerRequest>>>,
+    sent_state_inits: Arc<Mutex<Vec<StateInitRequest>>>,
+    response_store: Arc<MockResponseStore>,
+    request_context: Arc<MockRequestContextPort>,
 }
 
 fn make_test_app(cfg: TestAppConfig) -> TestContext {
     let sent_requests = Arc::new(Mutex::new(vec![]));
+    let sent_state_inits = Arc::new(Mutex::new(vec![]));
+    let response_store = Arc::new(MockResponseStore::default());
+    let request_context = Arc::new(MockRequestContextPort::default());
+
+    if let Some((request_id, cached)) = cfg.preset_hsm_response {
+        let bytes = serde_json::to_vec(&cached).unwrap();
+        response_store
+            .values
+            .lock()
+            .unwrap()
+            .insert(hsm_response_key(&request_id), bytes);
+    }
+    if let Some((request_id, cached)) = cfg.preset_state_init {
+        let bytes = serde_json::to_vec(&cached).unwrap();
+        response_store
+            .values
+            .lock()
+            .unwrap()
+            .insert(state_init_response_key(&request_id), bytes);
+    }
+
     let state = Arc::new(AppState {
         device_state_port: Arc::new(MockDeviceStatePort {
             state: cfg.device_state,
@@ -165,17 +172,14 @@ fn make_test_app(cfg: TestAppConfig) -> TestContext {
         request_sender_port: Arc::new(MockRequestSenderPort {
             sent: sent_requests.clone(),
         }),
-        state_init_sender_port: Arc::new(MockStateInitSenderPort),
-        response_use_case: Arc::new(MockResponseUseCase {
-            sync_response: cfg.sync_response,
+        state_init_sender_port: Arc::new(MockStateInitSenderPort {
+            sent: sent_state_inits.clone(),
         }),
-        state_init_correlation: Arc::new(MockStateInitCorrelationPort {
-            response: cfg.state_init_response,
-        }),
-        serve_sync: cfg.serve_sync,
-        sync_timeout_ms: cfg.sync_timeout_ms,
-        state_init_timeout_ms: cfg.state_init_timeout_ms,
+        response_store: response_store.clone(),
+        request_context_port: request_context.clone(),
+        long_poll_timeout_seconds: 0, // fast-path only: don't actually block in unit tests
         response_events_template_url: "http://localhost/hsm/v1/requests/%s".to_string(),
+        state_init_events_template_url: "http://localhost/hsm/v1/device-states/%s".to_string(),
         default_initial_key_curve: Curve::P256,
     });
 
@@ -187,6 +191,9 @@ fn make_test_app(cfg: TestAppConfig) -> TestContext {
     TestContext {
         app: web::router(state, rp_state),
         sent_requests,
+        sent_state_inits,
+        response_store,
+        request_context,
     }
 }
 
@@ -199,9 +206,9 @@ fn dummy_public_key_json() -> serde_json::Value {
     })
 }
 
-fn ok_cached_response() -> CachedResponse {
+fn ok_cached_response(request_id: &str) -> CachedResponse {
     CachedResponse {
-        request_id: "any-id".to_string(),
+        request_id: request_id.to_string(),
         state_jws: None,
         outer_response_jws: Some(TypedJws::<OuterResponse>::new(
             "some-jws-result".to_string(),
@@ -211,10 +218,11 @@ fn ok_cached_response() -> CachedResponse {
     }
 }
 
-fn ok_state_init_response() -> StateInitResponse {
-    StateInitResponse {
-        request_id: "any-id".to_string(),
-        state_jws: "mock-state-jws".to_string(),
+fn ok_cached_state_init(request_id: &str) -> CachedStateInitResponse {
+    CachedStateInitResponse {
+        request_id: request_id.to_string(),
+        client_id: "assigned-client-id".to_string(),
+        state_jws: "fresh-state".to_string(),
         dev_authorization_code: "abc123".to_string(),
         server_jws_public_key: None,
         server_jws_kid: None,
@@ -224,8 +232,6 @@ fn ok_state_init_response() -> StateInitResponse {
 }
 
 /// Build a minimal fake JWS whose payload is an OuterRequest JSON containing a fresh nonce.
-/// The middleware decodes the payload without verifying the signature, so the signature
-/// bytes can be anything — tests only need a structurally valid compact JWS.
 fn build_test_outer_jws() -> String {
     use base64::Engine;
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -247,12 +253,15 @@ async fn read_body_json(response: axum::response::Response) -> serde_json::Value
 }
 
 // ---------------------------------------------------------------------------
-// POST /hsm/v1/requests
+// POST /hsm/v1/requests — always 202 + Location, never waits
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-async fn test_post_hsm_request_sends_to_kafka() {
-    let ctx = make_test_app(TestAppConfig::default());
+async fn post_hsm_request_returns_202_with_location() {
+    let ctx = make_test_app(TestAppConfig {
+        device_state: Some("mock-state-jws".to_string()),
+        ..Default::default()
+    });
 
     let body = serde_json::json!({
         "clientId": "test-client",
@@ -261,6 +270,7 @@ async fn test_post_hsm_request_sends_to_kafka() {
 
     let response = ctx
         .app
+        .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -273,82 +283,31 @@ async fn test_post_hsm_request_sends_to_kafka() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::ACCEPTED);
+    let location = response
+        .headers()
+        .get(axum::http::header::LOCATION)
+        .and_then(|v| v.to_str().ok())
+        .expect("Location header present");
+    assert!(
+        location.starts_with("http://localhost/hsm/v1/requests/"),
+        "Location must point to poll URL, got: {location}"
+    );
 
     let sent = ctx.sent_requests.lock().unwrap();
     assert_eq!(sent.len(), 1, "one request must be sent to Kafka");
-}
 
-#[tokio::test]
-async fn test_post_hsm_request_sync_returns_result() {
-    let ctx = make_test_app(TestAppConfig {
-        serve_sync: true,
-        sync_response: Some(ok_cached_response()),
-        ..Default::default()
-    });
-
-    let body = serde_json::json!({
-        "clientId": "test-client",
-        "outerRequestJws": build_test_outer_jws()
-    });
-
-    let response = ctx
-        .app
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/hsm/v1/requests")
-                .header("content-type", "application/json")
-                .body(Body::from(serde_json::to_string(&body).unwrap()))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::OK);
-
-    let dto = read_body_json(response).await;
-    assert_eq!(dto["status"], "complete", "status must be 'complete'");
-    assert!(!dto["result"].is_null(), "result must be present");
-}
-
-#[tokio::test]
-async fn test_post_hsm_request_sync_timeout_returns_pending() {
-    let ctx = make_test_app(TestAppConfig {
-        serve_sync: true,
-        sync_response: None,
-        sync_timeout_ms: 1, // very short to avoid test slowdown
-        ..Default::default()
-    });
-
-    let body = serde_json::json!({
-        "clientId": "test-client",
-        "outerRequestJws": build_test_outer_jws()
-    });
-
-    let response = ctx
-        .app
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/hsm/v1/requests")
-                .header("content-type", "application/json")
-                .body(Body::from(serde_json::to_string(&body).unwrap()))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::ACCEPTED);
-
-    let dto = read_body_json(response).await;
+    // The handler must persist the request context for the response consumer.
+    let ctxs = ctx.request_context.contexts.lock().unwrap();
+    assert_eq!(ctxs.len(), 1);
     assert_eq!(
-        dto["status"], "pending",
-        "status must be 'pending' when no response is ready"
+        ctxs.values().next().unwrap().client_id,
+        "test-client",
+        "context must carry the client_id"
     );
 }
 
 #[tokio::test]
-async fn test_post_hsm_request_missing_device_state() {
+async fn post_hsm_request_missing_device_state_returns_404() {
     let ctx = make_test_app(TestAppConfig {
         device_state: None,
         ..Default::default()
@@ -372,224 +331,11 @@ async fn test_post_hsm_request_missing_device_state() {
         .await
         .unwrap();
 
-    assert_eq!(
-        response.status(),
-        StatusCode::NOT_FOUND,
-        "missing device state must return 404"
-    );
-}
-
-// ---------------------------------------------------------------------------
-// GET /hsm/v1/requests/{correlationId}
-// ---------------------------------------------------------------------------
-
-#[tokio::test]
-async fn test_get_hsm_request_complete() {
-    let ctx = make_test_app(TestAppConfig {
-        sync_response: Some(ok_cached_response()),
-        ..Default::default()
-    });
-
-    let response = ctx
-        .app
-        .oneshot(
-            Request::builder()
-                .method("GET")
-                .uri("/hsm/v1/requests/550e8400-e29b-41d4-a716-446655440000")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::OK);
-
-    let dto = read_body_json(response).await;
-    assert_eq!(
-        dto["status"], "complete",
-        "status must be 'complete' when response is ready"
-    );
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]
-async fn test_get_hsm_request_pending() {
-    let ctx = make_test_app(TestAppConfig {
-        sync_response: None,
-        sync_timeout_ms: 1,
-        ..Default::default()
-    });
-
-    let response = ctx
-        .app
-        .oneshot(
-            Request::builder()
-                .method("GET")
-                .uri("/hsm/v1/requests/550e8400-e29b-41d4-a716-446655440000")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::ACCEPTED);
-
-    let dto = read_body_json(response).await;
-    assert_eq!(
-        dto["status"], "pending",
-        "status must be 'pending' when no response is cached"
-    );
-}
-
-// ---------------------------------------------------------------------------
-// POST /hsm/v1/device-states
-// ---------------------------------------------------------------------------
-
-#[tokio::test]
-async fn test_post_device_state_init_success() {
-    let ctx = make_test_app(TestAppConfig {
-        device_state: None, // no pre-existing state so handler doesn't short-circuit
-        state_init_response: Some(ok_state_init_response()),
-        ..Default::default()
-    });
-
-    let body = serde_json::json!({
-        "publicKey": dummy_public_key_json(),
-        "overwrite": false
-    });
-
-    let response = ctx
-        .app
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/hsm/v1/device-states")
-                .header("content-type", "application/json")
-                .body(Body::from(serde_json::to_string(&body).unwrap()))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::OK);
-
-    let dto = read_body_json(response).await;
-    assert_eq!(
-        dto["devAuthorizationCode"], "abc123",
-        "devAuthorizationCode must be present in response"
-    );
-}
-
-#[tokio::test]
-async fn test_post_device_state_init_timeout() {
-    let ctx = make_test_app(TestAppConfig {
-        device_state: None, // no pre-existing state so handler doesn't short-circuit
-        state_init_response: None,
-        state_init_timeout_ms: 1, // immediate timeout
-        ..Default::default()
-    });
-
-    let body = serde_json::json!({
-        "publicKey": dummy_public_key_json(),
-        "overwrite": false
-    });
-
-    let response = ctx
-        .app
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/hsm/v1/device-states")
-                .header("content-type", "application/json")
-                .body(Body::from(serde_json::to_string(&body).unwrap()))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(
-        response.status(),
-        StatusCode::INTERNAL_SERVER_ERROR,
-        "timeout must return 500"
-    );
-}
-
-// ---------------------------------------------------------------------------
-// POST /hsm/v1/operations (legacy synchronous endpoint)
-// ---------------------------------------------------------------------------
-
-#[tokio::test]
-async fn test_post_legacy_operations_with_result_returns_jws_string() {
-    let ctx = make_test_app(TestAppConfig {
-        serve_sync: true,
-        sync_response: Some(ok_cached_response()),
-        ..Default::default()
-    });
-
-    let body = serde_json::json!({
-        "clientId": "test-client",
-        "outerRequestJws": build_test_outer_jws()
-    });
-
-    let response = ctx
-        .app
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/hsm/v1/operations")
-                .header("content-type", "application/json")
-                .body(Body::from(serde_json::to_string(&body).unwrap()))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::OK);
-
-    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
-        .await
-        .unwrap();
-    // Legacy endpoint returns the raw JWS result string (not JSON envelope)
-    let result_str = std::str::from_utf8(&bytes).unwrap();
-    assert_eq!(result_str, "some-jws-result");
-}
-
-#[tokio::test]
-async fn test_post_legacy_operations_timeout_returns_408() {
-    let ctx = make_test_app(TestAppConfig {
-        serve_sync: true,
-        sync_response: None,
-        sync_timeout_ms: 1,
-        ..Default::default()
-    });
-
-    let body = serde_json::json!({
-        "clientId": "test-client",
-        "outerRequestJws": build_test_outer_jws()
-    });
-
-    let response = ctx
-        .app
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/hsm/v1/operations")
-                .header("content-type", "application/json")
-                .body(Body::from(serde_json::to_string(&body).unwrap()))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::REQUEST_TIMEOUT);
-}
-
-// ---------------------------------------------------------------------------
-// state_jws passthrough tests
-// ---------------------------------------------------------------------------
-
-#[tokio::test]
-async fn test_post_hsm_request_state_jws_in_body_bypasses_port_lookup() {
-    // No state in port — request should succeed because stateJws is in the body.
+async fn post_hsm_request_with_inline_state_jws_skips_lookup() {
     let ctx = make_test_app(TestAppConfig {
         device_state: None,
         ..Default::default()
@@ -614,16 +360,67 @@ async fn test_post_hsm_request_state_jws_in_body_bypasses_port_lookup() {
         .await
         .unwrap();
 
-    assert_eq!(
-        response.status(),
-        StatusCode::ACCEPTED,
-        "stateJws in body must prevent 404 even when port has no state"
-    );
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+}
+
+// ---------------------------------------------------------------------------
+// GET /hsm/v1/requests/{correlationId}
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn get_hsm_request_returns_200_when_cached() {
+    let request_id = "550e8400-e29b-41d4-a716-446655440000";
+    let ctx = make_test_app(TestAppConfig {
+        preset_hsm_response: Some((request_id.to_string(), ok_cached_response(request_id))),
+        ..Default::default()
+    });
+
+    let response = ctx
+        .app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/hsm/v1/requests/{}", request_id))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let dto = read_body_json(response).await;
+    assert_eq!(dto["status"], "complete");
+    assert_eq!(dto["result"], "some-jws-result");
 }
 
 #[tokio::test]
-async fn test_post_device_state_existing_overwrite_false_returns_state_jws() {
-    // Default config has device_state = Some("mock-state-jws").
+async fn get_hsm_request_returns_202_when_pending() {
+    let ctx = make_test_app(TestAppConfig::default());
+
+    let response = ctx
+        .app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/hsm/v1/requests/550e8400-e29b-41d4-a716-446655440000")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+    let dto = read_body_json(response).await;
+    assert_eq!(dto["status"], "pending");
+    assert!(dto["resultUrl"].as_str().is_some());
+}
+
+// ---------------------------------------------------------------------------
+// POST /hsm/v1/device-states — always 202 + Location
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn post_device_state_returns_202_with_location() {
     let ctx = make_test_app(TestAppConfig::default());
 
     let body = serde_json::json!({
@@ -633,6 +430,7 @@ async fn test_post_device_state_existing_overwrite_false_returns_state_jws() {
 
     let response = ctx
         .app
+        .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -644,35 +442,39 @@ async fn test_post_device_state_existing_overwrite_false_returns_state_jws() {
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::OK);
-    let dto = read_body_json(response).await;
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+    let location = response
+        .headers()
+        .get(axum::http::header::LOCATION)
+        .and_then(|v| v.to_str().ok())
+        .expect("Location header present");
+    assert!(
+        location.starts_with("http://localhost/hsm/v1/device-states/"),
+        "Location must point to state-init poll URL, got: {location}"
+    );
+
     assert_eq!(
-        dto["stateJws"], "mock-state-jws",
-        "existing stateJws must be returned when overwrite=false"
+        ctx.sent_state_inits.lock().unwrap().len(),
+        1,
+        "one state-init request must be sent to Kafka"
     );
 }
 
 #[tokio::test]
-async fn test_post_device_state_init_success_includes_state_jws() {
+async fn get_device_state_returns_200_when_cached() {
+    let request_id = "660e8400-e29b-41d4-a716-446655440000";
     let ctx = make_test_app(TestAppConfig {
-        device_state: None,
-        state_init_response: Some(ok_state_init_response()),
+        preset_state_init: Some((request_id.to_string(), ok_cached_state_init(request_id))),
         ..Default::default()
-    });
-
-    let body = serde_json::json!({
-        "publicKey": dummy_public_key_json(),
-        "overwrite": false
     });
 
     let response = ctx
         .app
         .oneshot(
             Request::builder()
-                .method("POST")
-                .uri("/hsm/v1/device-states")
-                .header("content-type", "application/json")
-                .body(Body::from(serde_json::to_string(&body).unwrap()))
+                .method("GET")
+                .uri(format!("/hsm/v1/device-states/{}", request_id))
+                .body(Body::empty())
                 .unwrap(),
         )
         .await
@@ -680,47 +482,30 @@ async fn test_post_device_state_init_success_includes_state_jws() {
 
     assert_eq!(response.status(), StatusCode::OK);
     let dto = read_body_json(response).await;
-    assert_eq!(
-        dto["stateJws"], "mock-state-jws",
-        "stateJws from StateInitResponse must be present in success response"
-    );
+    assert_eq!(dto["clientId"], "assigned-client-id");
+    assert_eq!(dto["devAuthorizationCode"], "abc123");
+    assert_eq!(dto["stateJws"], "fresh-state");
 }
 
 #[tokio::test]
-async fn test_post_hsm_request_sync_complete_includes_state_jws() {
-    let mut cached = ok_cached_response();
-    cached.state_jws = Some("updated-state-token".to_string());
-
-    let ctx = make_test_app(TestAppConfig {
-        serve_sync: true,
-        sync_response: Some(cached),
-        ..Default::default()
-    });
-
-    let body = serde_json::json!({
-        "clientId": "test-client",
-        "outerRequestJws": build_test_outer_jws()
-    });
+async fn get_device_state_returns_202_when_pending() {
+    let ctx = make_test_app(TestAppConfig::default());
 
     let response = ctx
         .app
         .oneshot(
             Request::builder()
-                .method("POST")
-                .uri("/hsm/v1/requests")
-                .header("content-type", "application/json")
-                .body(Body::from(serde_json::to_string(&body).unwrap()))
+                .method("GET")
+                .uri("/hsm/v1/device-states/660e8400-e29b-41d4-a716-446655440000")
+                .body(Body::empty())
                 .unwrap(),
         )
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
     let dto = read_body_json(response).await;
-    assert_eq!(
-        dto["stateJws"], "updated-state-token",
-        "stateJws from worker response must be forwarded in complete async response"
-    );
+    assert_eq!(dto["status"], "pending");
 }
 
 // ---------------------------------------------------------------------------
@@ -755,4 +540,11 @@ async fn test_malformed_json_returns_problem_json() {
         content_type.contains("application/problem+json"),
         "malformed JSON must return application/problem+json, got: {content_type}"
     );
+}
+
+// Reference response_store to silence unused warnings on the field.
+#[tokio::test]
+async fn response_store_field_is_used() {
+    let ctx = make_test_app(TestAppConfig::default());
+    assert!(ctx.response_store.values.lock().unwrap().is_empty());
 }

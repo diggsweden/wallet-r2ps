@@ -25,33 +25,35 @@ pub struct AppConfig {
     pub redis_password: String,
     /// Redis database index
     pub redis_database: u8,
+    /// Comma-separated `host:port` sentinel nodes. When set together with
+    /// [`redis_sentinel_master`], the BFF resolves the current master via
+    /// Sentinel instead of connecting directly to [`redis_host`].
+    pub redis_sentinel_hosts: String,
+    /// Sentinel-managed master (service) name. Required when
+    /// [`redis_sentinel_hosts`] is set.
+    pub redis_sentinel_master: String,
 
     /// HTTP server bind host
     pub server_host: String,
     /// HTTP server port
     pub server_port: u16,
 
-    /// Enable synchronous response support (wait for Kafka reply inline)
-    pub serve_sync: bool,
-    /// Max milliseconds to wait for a synchronous response
-    pub sync_timeout_ms: u64,
-    /// Max milliseconds to wait for a state-init response
-    pub state_init_timeout_ms: u64,
-    /// Response cache TTL in seconds
+    /// Max seconds a GET handler will block (BLPOP) waiting for the response.
+    /// Clients must keep re-polling after a 202.
+    pub long_poll_timeout_seconds: u64,
+    /// TTL for cached response envelopes in the Redis response store.
     pub response_ttl_seconds: u64,
     /// Replay-protection: nonce TTL in seconds (default 600, matches session TTL)
     pub nonce_ttl_seconds: u64,
-    /// URL template for the polling endpoint (%s = correlationId)
+    /// URL template for the request polling endpoint (%s = correlationId)
     pub response_events_template_url: String,
+    /// URL template for the state-init polling endpoint (%s = correlationId)
+    pub state_init_events_template_url: String,
 
     /// Kafka topic for HSM worker responses directed to this instance.
-    /// Set explicitly via HSM_WORKER_RESPONSE_TOPIC, or defaulted to
-    /// `hsm-worker-responses-${POD_NAME}` when POD_NAME is injected (StatefulSet).
     pub hsm_worker_response_topic: String,
 
     /// Kafka topic for state-init responses directed to this instance.
-    /// Set explicitly via STATE_INIT_RESPONSE_TOPIC, or defaulted to
-    /// `state-init-responses-${POD_NAME}` when POD_NAME is injected (StatefulSet).
     pub state_init_response_topic: String,
     /// Default curve for initial HSM key generation when the client does not specify one (e.g. "P-256")
     pub default_initial_key_curve: Curve,
@@ -69,16 +71,20 @@ impl AppConfig {
             .set_default("redis_username", "default")?
             .set_default("redis_password", "secret")?
             .set_default("redis_database", 0)?
+            .set_default("redis_sentinel_hosts", "")?
+            .set_default("redis_sentinel_master", "")?
             .set_default("server_host", "0.0.0.0")?
             .set_default("server_port", 8088)?
-            .set_default("serve_sync", true)?
-            .set_default("sync_timeout_ms", 3000)?
-            .set_default("state_init_timeout_ms", 5000)?
+            .set_default("long_poll_timeout_seconds", 25)?
             .set_default("response_ttl_seconds", 600)?
             .set_default("nonce_ttl_seconds", 600)?
             .set_default(
                 "response_events_template_url",
                 "http://localhost:8088/hsm/v1/requests/%s",
+            )?
+            .set_default(
+                "state_init_events_template_url",
+                "http://localhost:8088/hsm/v1/device-states/%s",
             )?
             .set_default("default_initial_key_curve", "P-256")?
             .set_default(

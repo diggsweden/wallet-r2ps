@@ -2,9 +2,7 @@
 //
 // SPDX-License-Identifier: EUPL-1.2
 
-use tokio::sync::oneshot;
-
-use crate::domain::{HsmWorkerRequest, StateInitRequest, StateInitResponse};
+use crate::domain::{HsmWorkerRequest, RequestContext, StateInitRequest};
 
 /// SPI port: load and save device state (JWS) in the state store.
 #[async_trait::async_trait]
@@ -39,18 +37,40 @@ pub trait NoncePort: Send + Sync {
     ) -> Result<bool, String>;
 }
 
-/// SPI port: register and correlate state-init requests with their responses.
+/// SPI port: durable, multi-instance response store backing the async flow.
+///
+/// The Kafka response consumers call [`put`] to publish the worker response;
+/// HTTP GET handlers call [`await_value`] to long-poll for it. Any BFF replica
+/// can serve the GET regardless of which replica's consumer received the
+/// response from Kafka.
 #[async_trait::async_trait]
-pub trait StateInitCorrelationPort: Send + Sync {
-    /// Register a pending state-init request. Returns a receiver that resolves
-    /// when the response arrives (or is dropped on timeout/cleanup).
-    async fn register_pending(
+pub trait ResponseStorePort: Send + Sync {
+    /// Store the serialized response under `key` with `ttl_seconds` TTL and
+    /// wake any waiters blocked in [`await_value`].
+    async fn put(&self, key: &str, value: &[u8], ttl_seconds: u64) -> Result<(), String>;
+
+    /// Return the value if already present, otherwise block up to
+    /// `timeout_seconds` waiting for a [`put`]. Returns `Ok(None)` on timeout.
+    async fn await_value(
+        &self,
+        key: &str,
+        timeout_seconds: u64,
+    ) -> Result<Option<Vec<u8>>, String>;
+}
+
+/// SPI port: persists the `{request_id -> (client_id, ttl)}` context an
+/// in-flight Kafka request needs in order to attribute its response to a
+/// device when it eventually arrives. Required because responses may be
+/// consumed by a different BFF replica than the one that issued the request.
+#[async_trait::async_trait]
+pub trait RequestContextPort: Send + Sync {
+    async fn store(
         &self,
         request_id: &str,
-        state_key: &str,
+        ctx: &RequestContext,
         ttl_seconds: u64,
-    ) -> oneshot::Receiver<StateInitResponse>;
+    ) -> Result<(), String>;
 
-    /// Called by the Kafka consumer when a response arrives.
-    async fn response_received(&self, response: StateInitResponse);
+    /// Remove and return the context (so duplicate Kafka deliveries are no-ops).
+    async fn take(&self, request_id: &str) -> Option<RequestContext>;
 }

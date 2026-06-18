@@ -6,7 +6,19 @@ SPDX-License-Identifier: EUPL-1.2
 
 # Wallet BFF
 
-Axum-based REST API (BFF) that forwards requests to the R2PS worker via Kafka and caches state in Valkey.
+Axum-based REST API (BFF). Every request is one Kafka message: the POST returns
+`202 Accepted` immediately with a `Location` header, and a GET on that URL
+long-polls (Redis Pub/Sub) until the worker's response is available. Any BFF
+replica can serve the GET regardless of which replica produced the request,
+because both the request context (`req-ctx:{id}`) and the response envelope
+(`hsm-response:{id}`, `state-init-response:{id}`) live in Redis/Valkey.
+
+Endpoints:
+
+- `POST /hsm/v1/device-states`      — enqueue state-init, returns 202 + Location
+- `GET  /hsm/v1/device-states/{id}` — long-poll for state-init result
+- `POST /hsm/v1/requests`           — enqueue worker request, returns 202 + Location
+- `GET  /hsm/v1/requests/{id}`      — long-poll for worker result
 
 ## Dev tools
 
