@@ -23,6 +23,9 @@ artifacts:
   - name: wallet-bff
     project-type: cargo
     working-directory: ./wallet-bff
+  - name: loadtest-kafka
+    project-type: cargo
+    working-directory: ./loadtest-kafka
 
 containers:
   - name: hsm-worker
@@ -49,6 +52,16 @@ containers:
         target: export-binary
         names: [wallet-bff]
 
+  - name: loadtest-kafka
+    from: [loadtest-kafka]
+    container-file: loadtest-kafka/Containerfile
+    context: .
+    target: runtime
+    # linux/amd64 needed for the OpenShift cluster (x86 nodes); arm64 kept
+    # so the image runs locally on Apple Silicon for fast dev loops.
+    platforms: linux/amd64,linux/arm64
+    registry: ghcr.io
+
 publishers:
   - type: github-packages
-    artifacts: [hsm-worker, wallet-bff]
+    artifacts: [hsm-worker, wallet-bff, loadtest-kafka]
