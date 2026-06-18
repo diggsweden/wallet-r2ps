@@ -104,8 +104,7 @@ impl StateInitRequestKafkaReceiver {
                 .set("auto.offset.reset", "earliest")
                 // Throughput-tuned: see r2ps_request_kafka_message_receiver
                 // for rationale on the fetch.* and queued.* knobs.
-                .set("fetch.wait.max.ms", "100")
-                .set("fetch.min.bytes", "65536")
+                .set("fetch.wait.max.ms", "50")
                 .set("max.partition.fetch.bytes", "1048576")
                 .set("queued.max.messages.kbytes", "524288")
                 .set("session.timeout.ms", "6000")
