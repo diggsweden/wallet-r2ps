@@ -5,10 +5,12 @@
 //! Per-process response consumer.
 //!
 //! A single [`StreamConsumer`] runs on a dedicated Tokio task and reads from
-//! the load-test's private response topic. Each incoming message is parsed,
-//! its `request_id` is looked up in the shared `DashMap`, and the matched
-//! `oneshot::Sender` is fulfilled. The per-VU code only sees a `oneshot
-//! ::Receiver` and never touches Kafka directly.
+//! the load-test's private response topic. Each incoming message is parsed
+//! and routed to the originating VU's `oneshot::Sender` via a shared
+//! [`DashMap`]; per-message work (JSON parse + map lookup + oneshot send)
+//! is fanned across [`RESPONSE_PROCESS_CONCURRENCY`] Tokio tasks via
+//! [`futures_util::StreamExt::for_each_concurrent`] so a high response rate
+//! doesn't bind on a single processing thread.
 
 use anyhow::{Context, Result};
 use dashmap::DashMap;
@@ -25,6 +27,13 @@ use tracing::{debug, error, warn};
 pub type ResponseSlot<T> = oneshot::Sender<T>;
 pub type ResponseMap<T> = Arc<DashMap<String, ResponseSlot<T>>>;
 
+/// Number of in-flight per-message processing futures per response stream.
+/// Each future does JSON parse + DashMap lookup + oneshot send — cheap,
+/// but at multi-k-msg/s rates a single processing future can saturate one
+/// Tokio worker thread. 32 was chosen to handle bursts well past the
+/// per-task ceiling without spawning more state than necessary.
+const RESPONSE_PROCESS_CONCURRENCY: usize = 32;
+
 /// Background reader for the worker-response topic.
 pub fn spawn_hsm_response_reader(
     bootstrap_servers: &str,
@@ -40,26 +49,39 @@ pub fn spawn_hsm_response_reader(
 
     let topic = topic.to_string();
     let handle = tokio::spawn(async move {
-        let mut stream = consumer.stream();
-        while let Some(msg) = stream.next().await {
-            match msg {
-                Ok(borrowed) => {
-                    let Some(payload) = borrowed.payload() else { continue };
-                    match serde_json::from_slice::<HsmWorkerResponse>(payload) {
-                        Ok(resp) => {
-                            let id = resp.request_id.clone();
-                            if let Some((_, slot)) = pending.remove(&id) {
-                                let _ = slot.send(resp);
-                            } else {
-                                debug!("Orphan hsm-worker response: {}", id);
+        // Detach payload bytes from the BorrowedMessage immediately so the
+        // per-message future can be scheduled onto another Tokio worker
+        // thread without holding the consumer borrow across the await.
+        consumer
+            .stream()
+            .map(|msg| match msg {
+                Ok(borrowed) => Ok(borrowed.payload().map(<[u8]>::to_vec)),
+                Err(e) => Err(e),
+            })
+            .for_each_concurrent(Some(RESPONSE_PROCESS_CONCURRENCY), |item| {
+                let topic = topic.clone();
+                let pending = pending.clone();
+                async move {
+                    match item {
+                        Ok(Some(payload)) => {
+                            match serde_json::from_slice::<HsmWorkerResponse>(&payload) {
+                                Ok(resp) => {
+                                    let id = resp.request_id.clone();
+                                    if let Some((_, slot)) = pending.remove(&id) {
+                                        let _ = slot.send(resp);
+                                    } else {
+                                        debug!("Orphan hsm-worker response: {}", id);
+                                    }
+                                }
+                                Err(e) => warn!("Bad hsm-worker response on {}: {}", topic, e),
                             }
                         }
-                        Err(e) => warn!("Bad hsm-worker response on {}: {}", topic, e),
+                        Ok(None) => {}
+                        Err(e) => error!("Kafka error on {}: {}", topic, e),
                     }
                 }
-                Err(e) => error!("Kafka error on {}: {}", topic, e),
-            }
-        }
+            })
+            .await;
     });
     Ok(handle)
 }
@@ -79,26 +101,36 @@ pub fn spawn_state_init_response_reader(
 
     let topic = topic.to_string();
     let handle = tokio::spawn(async move {
-        let mut stream = consumer.stream();
-        while let Some(msg) = stream.next().await {
-            match msg {
-                Ok(borrowed) => {
-                    let Some(payload) = borrowed.payload() else { continue };
-                    match serde_json::from_slice::<StateInitResponse>(payload) {
-                        Ok(resp) => {
-                            let id = resp.request_id.clone();
-                            if let Some((_, slot)) = pending.remove(&id) {
-                                let _ = slot.send(resp);
-                            } else {
-                                debug!("Orphan state-init response: {}", id);
+        consumer
+            .stream()
+            .map(|msg| match msg {
+                Ok(borrowed) => Ok(borrowed.payload().map(<[u8]>::to_vec)),
+                Err(e) => Err(e),
+            })
+            .for_each_concurrent(Some(RESPONSE_PROCESS_CONCURRENCY), |item| {
+                let topic = topic.clone();
+                let pending = pending.clone();
+                async move {
+                    match item {
+                        Ok(Some(payload)) => {
+                            match serde_json::from_slice::<StateInitResponse>(&payload) {
+                                Ok(resp) => {
+                                    let id = resp.request_id.clone();
+                                    if let Some((_, slot)) = pending.remove(&id) {
+                                        let _ = slot.send(resp);
+                                    } else {
+                                        debug!("Orphan state-init response: {}", id);
+                                    }
+                                }
+                                Err(e) => warn!("Bad state-init response on {}: {}", topic, e),
                             }
                         }
-                        Err(e) => warn!("Bad state-init response on {}: {}", topic, e),
+                        Ok(None) => {}
+                        Err(e) => error!("Kafka error on {}: {}", topic, e),
                     }
                 }
-                Err(e) => error!("Kafka error on {}: {}", topic, e),
-            }
-        }
+            })
+            .await;
     });
     Ok(handle)
 }
