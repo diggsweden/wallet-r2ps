@@ -24,8 +24,8 @@ impl StateInitResponseKafkaMessageSender {
             .set("bootstrap.servers", &config.bootstrap_servers)
             .set("broker.address.family", &config.broker_address_family)
             .set("message.timeout.ms", "5000")
-            // acks=1 (leader-only): see WorkerResponseKafkaSender for rationale.
-            .set("acks", "1")
+            // acks=0 (fire-and-forget): see WorkerResponseKafkaSender for rationale.
+            .set("acks", "0")
             // See WorkerResponseKafkaSender for rationale.
             .set("linger.ms", config.producer_linger_ms.to_string())
             .set("batch.size", "1048576")
