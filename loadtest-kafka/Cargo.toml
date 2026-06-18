@@ -1,0 +1,64 @@
+# SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
+#
+# SPDX-License-Identifier: EUPL-1.2
+
+[package]
+name = "loadtest-kafka"
+version = "0.1.0"
+edition = "2021"
+license = "EUPL-1.2"
+description = "Direct-to-Kafka load test for the R2PS wallet stack (bypasses the BFF)"
+
+[[bin]]
+name = "loadtest-kafka"
+path = "src/main.rs"
+
+[dependencies]
+# Shared crypto / protocol / OPAQUE / JOSE / AccessMechanismClient
+integration-load-tests = { path = "../integration-load-tests" }
+
+# Same wire types as hsm-worker
+hsm-common = { path = "../hsm-common" }
+
+# Kafka producer/consumer/admin client
+rdkafka = { version = "0.39", features = ["cmake-build", "curl-static", "tokio"] }
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Async trait
+async-trait = "0.1"
+
+# Concurrent correlation map
+dashmap = "6"
+
+# Streams
+futures-util = "0.3"
+
+# Optional shared state across processes
+redis = { version = "1.0", features = ["tokio-comp", "connection-manager"] }
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Random sampling
+rand = "0.10"
+
+# Required transitively by AccessMechanismClient — kept explicit so the load
+# tool's worker loop can pass through `josekit::jwk::Jwk` without forcing
+# callers to re-export.
+josekit = "0.10.3"
+
+# UUIDs (request_id, response topic suffix)
+uuid = { version = "1", features = ["v4"] }
+
+# Errors
+anyhow = "1"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

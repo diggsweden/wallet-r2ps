@@ -44,6 +44,7 @@ COPY hsm-common ./hsm-common
 COPY hsm-worker ./hsm-worker
 COPY wallet-bff ./wallet-bff
 COPY integration-load-tests ./integration-load-tests
+COPY loadtest-kafka ./loadtest-kafka
 
 RUN cargo build --release -p hsm-worker
 

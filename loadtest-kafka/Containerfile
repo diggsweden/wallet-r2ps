@@ -22,11 +22,7 @@ COPY wallet-bff ./wallet-bff
 COPY integration-load-tests ./integration-load-tests
 COPY loadtest-kafka ./loadtest-kafka
 
-RUN cargo build --release -p wallet-bff
-
-# Lets reusable-ci's extract.binary export the built binary.
-FROM scratch AS export-binary
-COPY --from=builder /app/target/release/wallet-bff /wallet-bff
+RUN cargo build --release -p loadtest-kafka
 
 FROM debian:bookworm-slim@sha256:0104b334637a5f19aa9c983a91b54c89887c0984081f2068983107a6f6c21eeb AS runtime
 
@@ -38,11 +34,6 @@ RUN apt-get update && apt-get install -y \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-RUN useradd -m appuser
-USER appuser
+COPY --from=builder /app/target/release/loadtest-kafka /usr/local/bin/loadtest-kafka
 
-COPY --from=builder /app/target/release/wallet-bff /wallet-bff
-
-EXPOSE 8088
-
-CMD ["/wallet-bff"]
+ENTRYPOINT ["/usr/local/bin/loadtest-kafka"]
