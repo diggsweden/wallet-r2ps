@@ -276,14 +276,15 @@ impl WorkerRequestKafkaReceiver {
                 .set("partition.assignment.strategy", "cooperative-sticky")
                 .set("enable.auto.commit", "true")
                 .set("auto.offset.reset", "earliest")
-                // Throughput-tuned: 50 ms purgatory wait is short enough
-                // to drain quiet partitions promptly but long enough that
-                // a burst gets coalesced into one fetch. Keep fetch.min.bytes
-                // at the rdkafka default of 1 — raising it past traffic rate
-                // starves the consumer (every fetch hits the wait ceiling
-                // instead of returning ready messages). Per-partition fetch
-                // cap stays high so a burst can return a full batch.
-                .set("fetch.wait.max.ms", "50")
+                // Throughput-tuned: 5 ms purgatory wait keeps the consumer
+                // poll loop spinning fast under a large backlog where 2 small
+                // partitions per consumer would otherwise serialise behind
+                // 50 ms wait stalls. Keep fetch.min.bytes at the rdkafka
+                // default of 1 — raising it past traffic rate starves the
+                // consumer (every fetch hits the wait ceiling instead of
+                // returning ready messages). Per-partition fetch cap stays
+                // high so a burst can return a full batch.
+                .set("fetch.wait.max.ms", "5")
                 .set("max.partition.fetch.bytes", "1048576")
                 .set("queued.max.messages.kbytes", "524288")
                 .set("session.timeout.ms", "6000") // Default: 45000ms
