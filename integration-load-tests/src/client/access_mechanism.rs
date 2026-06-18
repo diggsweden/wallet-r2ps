@@ -9,7 +9,7 @@ use anyhow::{bail, Context, Result};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use josekit::jwk::Jwk;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use crate::backend::BackendClient;
 use crate::crypto::{opaque_client, pin_stretch};
@@ -28,6 +28,17 @@ pub struct AccessMechanismClient {
     pin_stretch_d: String,
     opaque_context: String,
     opaque_server_identifier: String,
+    /// Cached output of `pin_stretch::stretch_pin(pin, pin_stretch_d)` for
+    /// this client. The stretch is hash-to-curve(P-256, SHA-256) + ECDH
+    /// scalar-mul + HKDF — deterministic in `(pin, pin_stretch_d)` and
+    /// the dominant per-cycle CPU cost on the load-test client. Caching
+    /// it here removes 2 stretches per cycle (login_start + login_finish)
+    /// from the hot loop.
+    ///
+    /// Assumes a single `pin` per `AccessMechanismClient` instance, which
+    /// the load-test commands always satisfy (one client per (kid, pin)
+    /// row in the test-data envelope).
+    stretched_pin: OnceLock<Vec<u8>>,
 }
 
 impl AccessMechanismClient {
@@ -48,7 +59,26 @@ impl AccessMechanismClient {
             pin_stretch_d,
             opaque_context,
             opaque_server_identifier,
+            stretched_pin: OnceLock::new(),
         }
+    }
+
+    /// Lazily compute and cache the PIN-stretch output for this client.
+    /// The first call pays the hash-to-curve + ECDH + HKDF cost; every
+    /// subsequent call returns the cached 32 bytes.
+    fn stretched(&self, pin: &str) -> Result<&[u8]> {
+        // Two concurrent callers can both win the race here — `OnceLock`
+        // serialises them so only the first observed value is stored.
+        // Subsequent callers' stretches are wasted CPU exactly once per
+        // race, never repeated.
+        if let Some(v) = self.stretched_pin.get() {
+            return Ok(v);
+        }
+        let computed = pin_stretch::stretch_pin(pin, &self.pin_stretch_d)?;
+        let stored = self
+            .stretched_pin
+            .get_or_init(|| computed.clone());
+        Ok(stored)
     }
 
     /// Initialize device state via the BFF.
@@ -80,10 +110,10 @@ impl AccessMechanismClient {
         client_id: &str,
         auth_code: &str,
     ) -> Result<Vec<u8>> {
-        let stretched = pin_stretch::stretch_pin(pin, &self.pin_stretch_d)?;
+        let stretched = self.stretched(pin)?;
 
         // Registration start
-        let reg_start = opaque_client::client_registration_start(&stretched)?;
+        let reg_start = opaque_client::client_registration_start(stretched)?;
         let pake_req = PakeRequest {
             authorization: Some(auth_code.to_string()),
             purpose: None,
@@ -115,7 +145,7 @@ impl AccessMechanismClient {
         let client_id_bytes = self.kid.as_bytes();
         let server_id_bytes = self.opaque_server_identifier.as_bytes();
         let reg_finish = opaque_client::client_registration_finish(
-            &stretched,
+            stretched,
             &reg_start.client_registration,
             &opaque_bytes,
             Some(client_id_bytes),
@@ -150,8 +180,8 @@ impl AccessMechanismClient {
     /// Used by producer-throughput tests that fire KE1 in a tight loop
     /// without awaiting the worker's KE2 response.
     pub fn build_login_start_jws(&self, pin: &str) -> Result<String> {
-        let stretched = pin_stretch::stretch_pin(pin, &self.pin_stretch_d)?;
-        let login_start = opaque_client::client_login_start(&stretched)?;
+        let stretched = self.stretched(pin)?;
+        let login_start = opaque_client::client_login_start(stretched)?;
         let pake_req = PakeRequest {
             authorization: None,
             purpose: None,
@@ -170,10 +200,10 @@ impl AccessMechanismClient {
     /// Create a session (two-round OPAQUE login).
     /// Returns (session_key, session_id).
     pub async fn create_session(&self, pin: &str, client_id: &str) -> Result<(Vec<u8>, String)> {
-        let stretched = pin_stretch::stretch_pin(pin, &self.pin_stretch_d)?;
+        let stretched = self.stretched(pin)?;
 
         // Login start
-        let login_start = opaque_client::client_login_start(&stretched)?;
+        let login_start = opaque_client::client_login_start(stretched)?;
         let pake_req = PakeRequest {
             authorization: None,
             purpose: None,
@@ -209,7 +239,7 @@ impl AccessMechanismClient {
         let login_finish = opaque_client::client_login_finish(
             &opaque_bytes,
             &login_start.client_login_state,
-            &stretched,
+            stretched,
             ctx,
             client_id_bytes,
             server_id_bytes,
