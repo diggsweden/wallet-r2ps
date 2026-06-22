@@ -170,10 +170,17 @@ impl WorkerRequestKafkaReceiver {
 
         let (tx, rx) = bounded::<Item>(queue_depth);
 
-        // Per-pod throughput counter — incremented by every worker after
-        // each request completes (success or error). Lets the stats
-        // reporter below derive r/s without needing to parse worker logs.
+        // Per-pod throughput counters. `processed` counts completed requests
+        // (success + error). `execute_sum_us` accumulates the time each
+        // request spent inside `uc.execute(...)` — i.e. the HSM
+        // unwrap+sign+destroy chain. Mean execute latency =
+        // execute_sum_us_delta / processed_delta over each 5 s reporter
+        // window: rising mean while r/s stays flat is the signature of
+        // SoftHSM-internal lock contention. `execute_max_us` tracks the
+        // worst per-request latency seen in each reporter window.
         let processed = Arc::new(AtomicU64::new(0));
+        let execute_sum_us = Arc::new(AtomicU64::new(0));
+        let execute_max_us = Arc::new(AtomicU64::new(0));
 
         let mut handles: Vec<JoinHandle<()>> = Vec::with_capacity(num_consumers + num_workers + 1);
 
@@ -181,6 +188,8 @@ impl WorkerRequestKafkaReceiver {
             let rx = rx.clone();
             let uc = use_case.clone();
             let processed = processed.clone();
+            let execute_sum_us = execute_sum_us.clone();
+            let execute_max_us = execute_max_us.clone();
             handles.push(spawn(move || {
                 debug!("hsm-requests worker {} started", worker_id);
                 while let Ok(item) = rx.recv() {
@@ -248,6 +257,9 @@ impl WorkerRequestKafkaReceiver {
                         }
                     }
                     processed.fetch_add(1, Ordering::Relaxed);
+                    let exec_us_u64 = execute_us as u64;
+                    execute_sum_us.fetch_add(exec_us_u64, Ordering::Relaxed);
+                    execute_max_us.fetch_max(exec_us_u64, Ordering::Relaxed);
                 }
                 debug!("hsm-requests worker {} channel closed; exiting", worker_id);
             }));
@@ -258,29 +270,41 @@ impl WorkerRequestKafkaReceiver {
         // open until shutdown signals the running flag false.
         {
             let processed = processed.clone();
+            let execute_sum_us = execute_sum_us.clone();
+            let execute_max_us = execute_max_us.clone();
             let running = running.clone();
             let rx = rx.clone();
             handles.push(spawn(move || {
                 let mut last_count: u64 = 0;
+                let mut last_sum_us: u64 = 0;
                 let mut last_t = Instant::now();
                 while running.load(Ordering::Relaxed) {
                     std::thread::sleep(Duration::from_secs(5));
                     let now_count = processed.load(Ordering::Relaxed);
+                    let now_sum_us = execute_sum_us.load(Ordering::Relaxed);
+                    // `swap(0)` resets the per-window max so each window's
+                    // value reflects only requests completed in that window.
+                    let window_max_us = execute_max_us.swap(0, Ordering::Relaxed);
                     let delta = now_count.saturating_sub(last_count);
+                    let sum_us_delta = now_sum_us.saturating_sub(last_sum_us);
                     let elapsed = last_t.elapsed().as_secs_f64();
                     let rate = if elapsed > 0.0 {
                         delta as f64 / elapsed
                     } else {
                         0.0
                     };
+                    let mean_execute_us = if delta > 0 { sum_us_delta / delta } else { 0 };
                     info!(
                         requests_processed_total = now_count,
                         requests_processed_delta = delta,
                         requests_per_sec = rate,
+                        mean_execute_us,
+                        max_execute_us = window_max_us,
                         channel_depth = rx.len(),
                         "hsm_worker_throughput"
                     );
                     last_count = now_count;
+                    last_sum_us = now_sum_us;
                     last_t = Instant::now();
                 }
             }));
