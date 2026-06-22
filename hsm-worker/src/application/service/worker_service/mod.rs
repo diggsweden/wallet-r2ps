@@ -64,6 +64,21 @@ impl WorkerService {
     }
 }
 
+/// Wall-clock breakdown of one request through `process_request`. Each
+/// field measures the elapsed wall time of one phase in microseconds so
+/// the worker-side log line says exactly where the 91–353 ms `execute_us`
+/// from the per-pod stats actually went.
+#[derive(Debug, Default)]
+struct PhaseTimings {
+    decode_outer_us: u128,
+    state_read_us: u128,
+    decode_inner_us: u128,
+    dispatch_us: u128,
+    apply_transition_us: u128,
+    ttl_us: u128,
+    encode_us: u128,
+}
+
 impl WorkerRequestUseCase for WorkerService {
     /// The entry point for processing a single request from Kafka.
     /// It handles the end-to-end execution and all error reporting back to the sender.
@@ -75,15 +90,15 @@ impl WorkerRequestUseCase for WorkerService {
         let request_id = hsm_worker_request.request_id.clone();
         let response_topic = hsm_worker_request.response_topic.clone();
 
-        let response = match self.process_request(hsm_worker_request) {
-            Ok(res) => res,
+        let (response, phase_timings) = match self.process_request(hsm_worker_request) {
+            Ok((res, ts)) => (res, ts),
             Err(process_err) => {
                 error!("Request {} failed: {:?}", request_id, process_err.error);
                 match self
                     .response_builder
                     .build_error_response(&request_id, process_err)
                 {
-                    Ok(response) => response,
+                    Ok(response) => (response, PhaseTimings::default()),
                     Err(build_err) => {
                         error!(
                             "Request {} failed to build error response: {:?}",
@@ -95,14 +110,24 @@ impl WorkerRequestUseCase for WorkerService {
             }
         };
 
+        let t_send = Instant::now();
         self.worker_response_spi_port
             .send(response, &response_topic)
             .map_err(|_| WorkerRequestError::ConnectionError)?;
+        let send_us = t_send.elapsed().as_micros();
 
         info!(
-            "Processed request id {} (took {} ms)",
-            request_id,
-            start.elapsed().as_millis(),
+            request_id = %request_id,
+            total_ms = start.elapsed().as_millis() as u64,
+            decode_outer_us = phase_timings.decode_outer_us as u64,
+            state_read_us = phase_timings.state_read_us as u64,
+            decode_inner_us = phase_timings.decode_inner_us as u64,
+            dispatch_us = phase_timings.dispatch_us as u64,
+            apply_transition_us = phase_timings.apply_transition_us as u64,
+            ttl_us = phase_timings.ttl_us as u64,
+            encode_us = phase_timings.encode_us as u64,
+            send_us = send_us as u64,
+            "request_phases"
         );
 
         Ok(request_id)
@@ -114,8 +139,11 @@ impl WorkerService {
     fn process_request(
         &self,
         request: HsmWorkerRequest,
-    ) -> Result<HsmWorkerResponse, ProcessError> {
+    ) -> Result<(HsmWorkerResponse, PhaseTimings), ProcessError> {
+        let mut ts = PhaseTimings::default();
+
         // Phase 1: Decode outer (pure — no side effects)
+        let t = Instant::now();
         let partial = self
             .request_decoder
             .decode_outer(request)
@@ -123,13 +151,16 @@ impl WorkerService {
                 error,
                 context: None,
             })?;
+        ts.decode_outer_us = t.elapsed().as_micros();
 
         let session_id = partial.outer_request.session_id.clone();
 
         // Phase 2: Read session state from cache
+        let t = Instant::now();
         let session_state = session_id
             .as_ref()
             .and_then(|id| self.session_state_port.get(id));
+        ts.state_read_us = t.elapsed().as_micros();
 
         let session_key_for_response = match &session_state {
             Some(SessionState::Active(data)) => Some(data.session_key.clone()),
@@ -137,6 +168,7 @@ impl WorkerService {
         };
 
         // Phase 3: Decode inner (pure — no side effects)
+        let t = Instant::now();
         let WorkerInput {
             mut operation_context,
             response_context,
@@ -151,6 +183,7 @@ impl WorkerService {
                 error,
                 context: None,
             })?;
+        ts.decode_inner_us = t.elapsed().as_micros();
 
         operation_context.session_state = session_state;
         let response_context = ResponseContext {
@@ -159,6 +192,7 @@ impl WorkerService {
         };
 
         // Phase 4: Dispatch (pure — no side effects)
+        let t = Instant::now();
         let operation_result = self
             .operation_dispatcher
             .dispatch(operation_context)
@@ -166,8 +200,10 @@ impl WorkerService {
                 error: WorkerError::Inner(err),
                 context: Some(Box::new(response_context.clone())),
             })?;
+        ts.dispatch_us = t.elapsed().as_micros();
 
         // Phase 5: Apply session state transition
+        let t = Instant::now();
         self.session_state_port
             .apply_transition(
                 operation_result.session_id.as_ref(),
@@ -177,11 +213,14 @@ impl WorkerService {
                 error: WorkerError::Inner(crate::domain::ServiceRequestError::InternalServerError),
                 context: Some(Box::new(response_context.clone())),
             })?;
+        ts.apply_transition_us = t.elapsed().as_micros();
 
         // Phase 6: Compute TTL from post-transition state
+        let t = Instant::now();
         let ttl = self
             .session_state_port
             .get_remaining_ttl(operation_result.session_id.as_ref());
+        ts.ttl_us = t.elapsed().as_micros();
 
         // Phase 7: Encode response (pure — no side effects)
         let full_response_context = ResponseContext {
@@ -189,12 +228,17 @@ impl WorkerService {
             ..response_context
         };
 
-        self.response_builder
+        let t = Instant::now();
+        let response = self
+            .response_builder
             .encode_response(operation_result, &full_response_context)
             .map_err(|error| ProcessError {
                 error,
                 context: Some(Box::new(full_response_context)),
-            })
+            })?;
+        ts.encode_us = t.elapsed().as_micros();
+
+        Ok((response, ts))
     }
 }
 
