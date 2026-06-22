@@ -437,8 +437,11 @@ async fn test_bff_kafka_round_trip() {
         Duration::from_secs(60),
     ));
 
-    // Register the pending entry before sending the request
-    let rx = response_service.register_pending(request_id, "device-rt", 300);
+    // Register the pending entry before sending the request, then drop the
+    // receiver to simulate the original HTTP handler's sync wait timing out.
+    // This forces response_ready() onto the cache-for-polling path, which is
+    // what GET /hsm/v1/requests/{id} relies on via wait_for_response().
+    drop(response_service.register_pending(request_id, "device-rt", 300));
 
     let request_sender = KafkaRequestSender::new(&bootstrap, "v4", response_topic.clone());
     let request = HsmWorkerRequest {
@@ -510,11 +513,17 @@ async fn test_bff_kafka_round_trip() {
             .expect("produce failed");
     });
 
-    // Wait for the oneshot receiver to fire
-    let cached = tokio::time::timeout(Duration::from_secs(30), rx)
-        .await
-        .expect("timeout waiting for round-trip response")
-        .expect("channel closed");
+    // The sync waiter already gave up (its receiver was dropped above), so
+    // response_ready() must have parked the response in the cache instead of
+    // delivering it through the channel. Simulate the client polling
+    // GET /hsm/v1/requests/{id} later and fetching it from there.
+    let cached = tokio::time::timeout(
+        Duration::from_secs(30),
+        response_service.wait_for_response(request_id, 30_000),
+    )
+    .await
+    .expect("timeout waiting for round-trip response")
+    .expect("response never appeared in the poll cache");
 
     assert_eq!(cached.request_id, request_id);
     assert_eq!(cached.status, Status::Ok);

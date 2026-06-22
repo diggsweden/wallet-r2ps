@@ -66,12 +66,7 @@ fn build_problem_response(
 #[derive(OpenApi)]
 #[openapi(
     info(title = "wallet-bff", version = "0.1.0"),
-    paths(
-        handlers::task_response,
-        handlers::service,
-        handlers::legacy_service,
-        handlers::create_state,
-    ),
+    paths(handlers::task_response, handlers::service, handlers::create_state,),
     components(schemas(
         crate::domain::BffRequest,
         crate::domain::NewStateRequestDto,
@@ -92,7 +87,6 @@ pub fn router(state: Arc<AppState>, rp_state: Arc<ReplayProtectionState>) -> Rou
             get(handlers::task_response),
         )
         .route("/hsm/v1/requests", post(handlers::service))
-        .route("/hsm/v1/operations", post(handlers::legacy_service))
         .route("/hsm/v1/device-states", post(handlers::create_state))
         .layer(middleware::from_fn_with_state(
             rp_state,
