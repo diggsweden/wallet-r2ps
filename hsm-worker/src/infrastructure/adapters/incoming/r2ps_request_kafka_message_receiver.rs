@@ -12,7 +12,7 @@ use rdkafka::{ClientConfig, ClientContext, Message, Statistics};
 use serde_json::from_slice;
 use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::thread::{JoinHandle, spawn};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tracing::{debug, error, info, warn};
@@ -170,11 +170,17 @@ impl WorkerRequestKafkaReceiver {
 
         let (tx, rx) = bounded::<Item>(queue_depth);
 
-        let mut handles: Vec<JoinHandle<()>> = Vec::with_capacity(num_consumers + num_workers);
+        // Per-pod throughput counter — incremented by every worker after
+        // each request completes (success or error). Lets the stats
+        // reporter below derive r/s without needing to parse worker logs.
+        let processed = Arc::new(AtomicU64::new(0));
+
+        let mut handles: Vec<JoinHandle<()>> = Vec::with_capacity(num_consumers + num_workers + 1);
 
         for worker_id in 0..num_workers {
             let rx = rx.clone();
             let uc = use_case.clone();
+            let processed = processed.clone();
             handles.push(spawn(move || {
                 debug!("hsm-requests worker {} started", worker_id);
                 while let Ok(item) = rx.recv() {
@@ -241,13 +247,49 @@ impl WorkerRequestKafkaReceiver {
                             error!("panic in hsm-requests worker {} — continuing", worker_id);
                         }
                     }
+                    processed.fetch_add(1, Ordering::Relaxed);
                 }
                 debug!("hsm-requests worker {} channel closed; exiting", worker_id);
             }));
         }
-        // Drop the original rx; cloned receivers held by the workers keep
-        // the channel alive. The channel closes once all consumer threads
-        // drop their `tx`, signalling all workers to exit.
+        // Stats reporter: prints per-pod processed-rate + channel depth
+        // every 5 s. The rx clone is read-only (only `.len()` is called)
+        // and intentionally outlives the workers so the channel stays
+        // open until shutdown signals the running flag false.
+        {
+            let processed = processed.clone();
+            let running = running.clone();
+            let rx = rx.clone();
+            handles.push(spawn(move || {
+                let mut last_count: u64 = 0;
+                let mut last_t = Instant::now();
+                while running.load(Ordering::Relaxed) {
+                    std::thread::sleep(Duration::from_secs(5));
+                    let now_count = processed.load(Ordering::Relaxed);
+                    let delta = now_count.saturating_sub(last_count);
+                    let elapsed = last_t.elapsed().as_secs_f64();
+                    let rate = if elapsed > 0.0 {
+                        delta as f64 / elapsed
+                    } else {
+                        0.0
+                    };
+                    info!(
+                        requests_processed_total = now_count,
+                        requests_processed_delta = delta,
+                        requests_per_sec = rate,
+                        channel_depth = rx.len(),
+                        "hsm_worker_throughput"
+                    );
+                    last_count = now_count;
+                    last_t = Instant::now();
+                }
+            }));
+        }
+
+        // Drop the original rx; cloned receivers held by the workers (and
+        // the read-only one held by the stats thread) keep the channel
+        // alive. The channel closes once all consumer threads drop their
+        // `tx`, signalling all workers to exit.
         drop(rx);
 
         // Spawn N independent BaseConsumer poll loops. Each joins the same
