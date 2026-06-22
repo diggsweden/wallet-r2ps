@@ -41,6 +41,7 @@ ctrlc = { version = "3.4", features = ["termination"] }
 dotenvy = "0.15.7"
 config = "0.15.19"
 moka = { version = "0.12", features = ["sync"] }
+dashmap = "5"
 strum_macros = "0.28.0"
 cryptoki = "0.12.0"
 opaque-ke = { version = "4.0.1", features = ["std"] }
