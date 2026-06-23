@@ -6,6 +6,7 @@ pub mod adapters;
 
 pub mod bootstrap;
 pub mod config;
+pub mod telemetry;
 
 pub use adapters::*;
 pub use config::app_config::*;
