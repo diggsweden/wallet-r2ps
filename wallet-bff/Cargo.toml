@@ -28,6 +28,7 @@ tracing-opentelemetry = "0.28"
 opentelemetry = "0.27"
 opentelemetry_sdk = { version = "0.27", features = ["rt-tokio"] }
 opentelemetry-otlp = { version = "0.27", features = ["grpc-tonic"] }
+opentelemetry-http = "0.27"
 dotenvy = "0.15.7"
 config = "0.15.19"
 uuid = { version = "1.18.1", features = ["v4", "serde"] }

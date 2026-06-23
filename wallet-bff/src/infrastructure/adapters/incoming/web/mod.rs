@@ -11,8 +11,11 @@ use axum::http::{StatusCode, header};
 use axum::middleware;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
+use opentelemetry::global;
+use opentelemetry_http::HeaderExtractor;
 use std::sync::Arc;
 use tower_http::trace::TraceLayer;
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
@@ -95,10 +98,27 @@ pub fn router(state: Arc<AppState>, rp_state: Arc<ReplayProtectionState>) -> Rou
         ))
         // Outermost layer — emits a tracing span per request that the
         // OpenTelemetry layer (registered in infrastructure::telemetry)
-        // exports as an OTLP span. Captures method, URI, status, latency
-        // for every endpoint without per-handler annotations. Note: the
-        // span is created fresh, not linked to the incoming envoy parent
-        // (no W3C tracecontext extraction yet — a follow-up).
-        .layer(TraceLayer::new_for_http())
+        // exports as an OTLP span. Captures method, URI for every
+        // endpoint without per-handler annotations.
+        //
+        // make_span_with extracts the W3C tracecontext from incoming
+        // headers (set by the istio-proxy sidecar) and sets it as the
+        // parent of the app span. Result: app span and envoy span share
+        // the same trace_id, so Tempo / Kiali render the full request
+        // path as one trace.
+        .layer(TraceLayer::new_for_http().make_span_with(
+            |request: &axum::http::Request<_>| {
+                let parent_cx = global::get_text_map_propagator(|propagator| {
+                    propagator.extract(&HeaderExtractor(request.headers()))
+                });
+                let span = tracing::info_span!(
+                    "http_request",
+                    method = %request.method(),
+                    uri = %request.uri(),
+                );
+                span.set_parent(parent_cx);
+                span
+            },
+        ))
         .with_state(state)
 }
