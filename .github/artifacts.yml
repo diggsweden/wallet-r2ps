@@ -23,6 +23,9 @@ artifacts:
   - name: wallet-bff
     project-type: cargo
     working-directory: ./wallet-bff
+  - name: integration-load-tests
+    project-type: cargo
+    working-directory: ./integration-load-tests
 
 containers:
   - name: hsm-worker
@@ -49,6 +52,18 @@ containers:
         target: export-binary
         names: [wallet-bff]
 
+  - name: integration-load-tests
+    from: [integration-load-tests]
+    container-file: integration-load-tests/Containerfile
+    context: .
+    target: runtime
+    platforms: linux/amd64,linux/arm64
+    registry: ghcr.io
+    extract:
+      binary:
+        target: export-binary
+        names: [integration-load-tests]
+
 publishers:
   - type: github-packages
-    artifacts: [hsm-worker, wallet-bff]
+    artifacts: [hsm-worker, wallet-bff, integration-load-tests]
