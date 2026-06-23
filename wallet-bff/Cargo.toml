@@ -35,6 +35,7 @@ iso8601-duration = { version = "0.2.0", features = ["serde"] }
 async-trait = "0.1"
 utoipa = { version = "5", features = ["uuid"] }
 utoipa-swagger-ui = { version = "9", features = ["axum"] }
+tower-http = { version = "0.6", features = ["trace"] }
 
 [dev-dependencies]
 uuid = { version = "=1.23.3", features = ["v4"] }

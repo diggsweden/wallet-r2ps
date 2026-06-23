@@ -12,6 +12,7 @@ use axum::middleware;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use std::sync::Arc;
+use tower_http::trace::TraceLayer;
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
@@ -92,5 +93,12 @@ pub fn router(state: Arc<AppState>, rp_state: Arc<ReplayProtectionState>) -> Rou
             rp_state,
             replay_protection::replay_protection,
         ))
+        // Outermost layer — emits a tracing span per request that the
+        // OpenTelemetry layer (registered in infrastructure::telemetry)
+        // exports as an OTLP span. Captures method, URI, status, latency
+        // for every endpoint without per-handler annotations. Note: the
+        // span is created fresh, not linked to the incoming envoy parent
+        // (no W3C tracecontext extraction yet — a follow-up).
+        .layer(TraceLayer::new_for_http())
         .with_state(state)
 }

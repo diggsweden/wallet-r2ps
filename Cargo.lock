@@ -4289,6 +4289,7 @@ dependencies = [
  "tower 0.5.3",
  "tower-layer",
  "tower-service",
+ "tracing",
  "url",
 ]
 
@@ -4633,6 +4634,7 @@ dependencies = [
  "testcontainers-modules",
  "tokio",
  "tower 0.5.3",
+ "tower-http",
  "tracing",
  "tracing-opentelemetry",
  "tracing-subscriber",
