@@ -2,13 +2,26 @@
 //
 // SPDX-License-Identifier: EUPL-1.2
 
+use opentelemetry::global;
 use rdkafka::ClientConfig;
 use rdkafka::producer::{FutureProducer, FutureRecord};
 use std::time::Duration;
-use tracing::error;
+use tracing::{Span, error};
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use crate::application::port::outgoing::{RequestSenderPort, StateInitSenderPort};
 use crate::domain::{HsmWorkerRequest, StateInitRequest};
+use crate::infrastructure::kafka_propagation::KafkaHeaderInjector;
+
+/// Build OwnedHeaders carrying the current span's W3C tracecontext so the
+/// downstream consumer can stitch its span as a child of this trace.
+fn tracecontext_headers() -> rdkafka::message::OwnedHeaders {
+    let mut injector = KafkaHeaderInjector::default();
+    global::get_text_map_propagator(|propagator| {
+        propagator.inject_context(&Span::current().context(), &mut injector);
+    });
+    injector.into_owned_headers()
+}
 
 const HSM_REQUESTS_TOPIC: &str = "hsm-requests";
 const STATE_INIT_REQUESTS_TOPIC: &str = "state-init-requests";
@@ -49,6 +62,7 @@ impl RequestSenderPort for KafkaRequestSender {
             .send(
                 FutureRecord::to(HSM_REQUESTS_TOPIC)
                     .key(device_id)
+                    .headers(tracecontext_headers())
                     .payload(&payload),
                 Duration::from_secs(5),
             )
@@ -97,6 +111,7 @@ impl StateInitSenderPort for KafkaStateInitSender {
             .send(
                 FutureRecord::to(STATE_INIT_REQUESTS_TOPIC)
                     .key(device_id)
+                    .headers(tracecontext_headers())
                     .payload(&payload),
                 Duration::from_secs(5),
             )

@@ -7,6 +7,7 @@ use opentelemetry::global;
 use opentelemetry::trace::TracerProvider as _;
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::Resource;
+use opentelemetry_sdk::propagation::TraceContextPropagator;
 use opentelemetry_sdk::runtime;
 use opentelemetry_sdk::trace::TracerProvider;
 use tracing_opentelemetry::OpenTelemetryLayer;
@@ -29,6 +30,11 @@ impl Drop for TelemetryGuard {
 pub fn init(service_name: &'static str) -> Result<TelemetryGuard, Box<dyn std::error::Error>> {
     let endpoint = std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT")
         .unwrap_or_else(|_| DEFAULT_OTLP_ENDPOINT.to_string());
+
+    // W3C tracecontext propagator so we can extract `traceparent` from
+    // incoming Kafka message headers (set by wallet-bff's producer) and
+    // make our consumer spans children of the bff request span.
+    global::set_text_map_propagator(TraceContextPropagator::new());
 
     let exporter = opentelemetry_otlp::SpanExporter::builder()
         .with_tonic()

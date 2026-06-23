@@ -5,14 +5,18 @@
 use crate::application::WorkerRequestUseCase;
 use crate::domain::HsmWorkerRequest;
 use crate::infrastructure::KafkaConfig;
+use crate::infrastructure::kafka_propagation::KafkaHeaderExtractor;
+use opentelemetry::global;
 use rdkafka::consumer::{BaseConsumer, Consumer};
+use rdkafka::message::BorrowedMessage;
 use rdkafka::{ClientConfig, Message};
 use serde_json::from_slice;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::{JoinHandle, spawn};
 use std::time::Duration;
-use tracing::{debug, error, warn};
+use tracing::{Span, debug, error, instrument, warn};
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 pub struct WorkerRequestKafkaReceiver {
     worker_use_case: Arc<dyn WorkerRequestUseCase + Send + Sync>,
@@ -65,41 +69,7 @@ impl WorkerRequestKafkaReceiver {
 
             while running.load(Ordering::Relaxed) {
                 match consumer.poll(Duration::from_millis(100)) {
-                    Some(Ok(msg)) => {
-                        // Extract message payload
-                        let payload = match msg.payload() {
-                            Some(bytes) => bytes,
-                            None => {
-                                warn!("Empty message payload");
-                                continue;
-                            }
-                        };
-
-                        let hsm_worker_request: HsmWorkerRequest = match from_slice(payload) {
-                            Ok(msg) => msg,
-                            Err(e) => {
-                                error!("Failed to deserialize JSON: {:?}", e);
-                                error!("Payload: {:?}", String::from_utf8_lossy(payload));
-                                continue;
-                            }
-                        };
-
-                        // Extract key (optional)
-                        let key = msg.key_view::<str>().unwrap();
-
-                        debug!("Received message: key={:?}", key);
-
-                        // Process the message (example: convert to uppercase)
-                        match worker_use_case.execute(hsm_worker_request) {
-                            Ok(request_id) => {
-                                // Serialize output message to JSON
-                                debug!("HsmWorkerRequest {} processed successfully", request_id);
-                            }
-                            Err(err) => {
-                                error!("Error processing message: {:?}", err);
-                            }
-                        }
-                    }
+                    Some(Ok(msg)) => process_message(&msg, worker_use_case.as_ref()),
                     Some(Err(e)) => {
                         error!("Kafka error: {}", e);
                     }
@@ -113,5 +83,47 @@ impl WorkerRequestKafkaReceiver {
             drop(consumer);
             debug!("Consumer shutdown complete");
         })
+    }
+}
+
+/// Per-message handler. `#[instrument]` creates an OTel span via the
+/// tracing-opentelemetry layer (see `infrastructure::telemetry`). We
+/// extract the W3C tracecontext from the message's headers (injected
+/// by the bff producer) and set it as the span's parent so the
+/// consumer span becomes a child of the bff request trace.
+#[instrument(skip_all, name = "process_request_kafka")]
+fn process_message(msg: &BorrowedMessage<'_>, worker_use_case: &(dyn WorkerRequestUseCase + Send + Sync)) {
+    let parent_ctx = global::get_text_map_propagator(|propagator| {
+        propagator.extract(&KafkaHeaderExtractor(msg.headers()))
+    });
+    Span::current().set_parent(parent_ctx);
+
+    let payload = match msg.payload() {
+        Some(bytes) => bytes,
+        None => {
+            warn!("Empty message payload");
+            return;
+        }
+    };
+
+    let hsm_worker_request: HsmWorkerRequest = match from_slice(payload) {
+        Ok(req) => req,
+        Err(e) => {
+            error!("Failed to deserialize JSON: {:?}", e);
+            error!("Payload: {:?}", String::from_utf8_lossy(payload));
+            return;
+        }
+    };
+
+    let key = msg.key_view::<str>().unwrap();
+    debug!("Received message: key={:?}", key);
+
+    match worker_use_case.execute(hsm_worker_request) {
+        Ok(request_id) => {
+            debug!("HsmWorkerRequest {} processed successfully", request_id);
+        }
+        Err(err) => {
+            error!("Error processing message: {:?}", err);
+        }
     }
 }

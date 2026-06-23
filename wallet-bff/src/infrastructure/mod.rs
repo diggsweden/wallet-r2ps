@@ -5,4 +5,5 @@
 pub mod adapters;
 pub mod bootstrap;
 pub mod config;
+pub mod kafka_propagation;
 pub mod telemetry;
