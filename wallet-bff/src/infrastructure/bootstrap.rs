@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 
 use redis::Client;
+use redis::sentinel::{SentinelClient, SentinelNodeConnectionInfo, SentinelServerType};
 use std::sync::Arc;
 use std::time::Duration;
 use tracing::info;
@@ -34,7 +35,7 @@ pub async fn run() {
     );
 
     // Redis — device state only
-    let redis_client = Client::open(config.redis_url()).expect("Failed to create Redis client");
+    let redis_client = resolve_master_client(&config).await;
     let conn_mgr = redis::aio::ConnectionManager::new(redis_client)
         .await
         .expect("Failed to connect to Redis");
@@ -109,4 +110,46 @@ pub async fn run() {
     info!("Listening on {}", bind_addr);
 
     axum::serve(listener, router).await.expect("Server error");
+}
+
+/// Returns a [`Client`] pointing at the current Redis primary. If
+/// `REDIS_SENTINEL_HOSTS` + `REDIS_SENTINEL_MASTER` are set the master is
+/// resolved via Sentinel (Bitnami valkey HA topology); otherwise the
+/// connection is direct.
+async fn resolve_master_client(config: &AppConfig) -> Client {
+    let hosts = config.redis_sentinel_hosts.trim();
+    let master = config.redis_sentinel_master.trim();
+    if hosts.is_empty() || master.is_empty() {
+        return Client::open(config.redis_url()).expect("Failed to create Redis client");
+    }
+
+    let nodes: Vec<String> = hosts
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|hp| format!("redis://{hp}"))
+        .collect();
+
+    let node_info = SentinelNodeConnectionInfo::default().set_redis_connection_info(
+        redis::RedisConnectionInfo::default()
+            .set_db(config.redis_database as i64)
+            .set_username(&config.redis_username)
+            .set_password(&config.redis_password),
+    );
+
+    let mut sc = SentinelClient::build(
+        nodes,
+        master.to_string(),
+        Some(node_info),
+        SentinelServerType::Master,
+    )
+    .expect("Failed to build SentinelClient");
+
+    info!(
+        "Resolving Redis primary via Sentinel (hosts={}, master={})",
+        hosts, master
+    );
+    sc.async_get_client()
+        .await
+        .expect("Failed to resolve Redis master via Sentinel")
 }

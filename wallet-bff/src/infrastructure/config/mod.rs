@@ -25,6 +25,13 @@ pub struct AppConfig {
     pub redis_password: String,
     /// Redis database index
     pub redis_database: u8,
+    /// Comma-separated `host:port` sentinel nodes. When set together with
+    /// [`redis_sentinel_master`], the BFF resolves the current master via
+    /// Sentinel instead of connecting directly to [`redis_host`].
+    pub redis_sentinel_hosts: String,
+    /// Sentinel-managed master (service) name. Required when
+    /// [`redis_sentinel_hosts`] is set.
+    pub redis_sentinel_master: String,
 
     /// HTTP server bind host
     pub server_host: String,
@@ -69,6 +76,8 @@ impl AppConfig {
             .set_default("redis_username", "default")?
             .set_default("redis_password", "secret")?
             .set_default("redis_database", 0)?
+            .set_default("redis_sentinel_hosts", "")?
+            .set_default("redis_sentinel_master", "")?
             .set_default("server_host", "0.0.0.0")?
             .set_default("server_port", 8088)?
             .set_default("serve_sync", true)?
