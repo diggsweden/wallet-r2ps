@@ -88,9 +88,10 @@ fn decrypt_rejects_jwe_encrypted_to_signing_key(jose: JoseFixture) {
 }
 
 #[rstest]
-fn rejects_identical_signing_and_encryption_keys() {
+fn accepts_identical_signing_and_encryption_keys_with_warning() {
+    // Backward compat: identical keys are accepted (with a log warning).
     let key = SecretKey::random(&mut OsRng);
-    assert!(JoseAdapter::new(key.clone(), key).is_err());
+    assert!(JoseAdapter::new(key.clone(), key).is_ok());
 }
 
 #[rstest]

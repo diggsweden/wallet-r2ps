@@ -7,7 +7,7 @@ use crate::application::port::outgoing::hsm_spi_port::HsmSpiPort;
 use crate::application::port::outgoing::jose_port::JosePort;
 use crate::domain::{DeviceHsmState, DeviceKeyEntry, StateInitRequest, StateInitResponse};
 use std::sync::Arc;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 pub struct StateInitService {
@@ -51,21 +51,33 @@ impl StateInitService {
 
         // 1. Validate client JWK keys (EC P-256)
         validate_ec_public_jwk(&request.client_jws_public_key)?;
-        validate_ec_public_jwk(&request.client_jwe_public_key)?;
 
-        // Key separation: the same EC key must not be used for both ECDSA (JWS)
-        // and ECDH-ES (JWE). Compare coordinates — kid is client-supplied and
-        // could differ even for identical key material.
-        if request.client_jws_public_key.x == request.client_jwe_public_key.x
-            && request.client_jws_public_key.y == request.client_jwe_public_key.y
-        {
-            error!("Client JWS and JWE public keys must be distinct keys");
-            return Err(StateInitError::InvalidJwk);
-        }
+        // Resolve JWE key: fall back to JWS key for legacy clients that supply only one key.
+        let client_jwe_public_key = match request.client_jwe_public_key {
+            Some(ref k) => {
+                validate_ec_public_jwk(k)?;
+                if k.x == request.client_jws_public_key.x && k.y == request.client_jws_public_key.y
+                {
+                    error!(
+                        kid = %request.client_jws_public_key.kid,
+                        "Client supplied two keys with identical coordinates — key separation violated"
+                    );
+                    return Err(StateInitError::InvalidJwk);
+                }
+                k.clone()
+            }
+            None => {
+                warn!(
+                    kid = %request.client_jws_public_key.kid,
+                    "client_jwe_public_key absent (legacy client); falling back to jws key — key separation not enforced"
+                );
+                request.client_jws_public_key.clone()
+            }
+        };
 
         info!(
             "Initializing state for JWS public key with kid: {} (JWE kid: {})",
-            request.client_jws_public_key.kid, request.client_jwe_public_key.kid
+            request.client_jws_public_key.kid, client_jwe_public_key.kid
         );
 
         // 2. Generate dev_authorization_code
@@ -94,7 +106,7 @@ impl StateInitService {
             version: 1,
             device_keys: vec![DeviceKeyEntry {
                 jws_public_key: request.client_jws_public_key,
-                jwe_public_key: request.client_jwe_public_key,
+                jwe_public_key: Some(client_jwe_public_key),
                 password_files: vec![],
                 dev_authorization_code: Some(dev_auth_code.clone()),
             }],
