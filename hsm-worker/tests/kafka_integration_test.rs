@@ -378,7 +378,7 @@ async fn test_state_init_consumer_receives_and_processes() {
     let request = StateInitRequest {
         request_id: "req-401".to_string(),
         client_jws_public_key: client_jwk,
-        client_jwe_public_key: client_jwe_jwk,
+        client_jwe_public_key: Some(client_jwe_jwk),
         response_topic: "test-state-init-response-topic".to_string(),
         initial_key_curve: Curve::P256,
     };
@@ -566,7 +566,7 @@ async fn test_worker_kafka_round_trip() {
         version: 1,
         device_keys: vec![hsm_worker::domain::DeviceKeyEntry {
             jws_public_key: device_jwk.clone(),
-            jwe_public_key: device_jwk.clone(),
+            jwe_public_key: Some(device_jwk.clone()),
             password_files: vec![],
             dev_authorization_code: None,
         }],

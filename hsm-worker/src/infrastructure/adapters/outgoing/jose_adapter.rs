@@ -12,7 +12,7 @@ use josekit::jwt;
 use p256::SecretKey;
 use p256::pkcs8::EncodePrivateKey;
 use p256::pkcs8::EncodePublicKey;
-use tracing::{debug, error};
+use tracing::{debug, error, warn};
 
 use crate::application::port::outgoing::jose_port::{
     JoseError, JosePort, JweDecryptionKey, JweEncryptionKey,
@@ -37,8 +37,9 @@ impl JoseAdapter {
         let jws_public_key = jose_utils::ec_public_key_from_secret(&signing_key);
         let jwe_public_key = jose_utils::ec_public_key_from_secret(&encryption_key);
         if jws_public_key.kid == jwe_public_key.kid {
-            error!("JWS signing key and JWE encryption key must be distinct keys");
-            return Err(JoseError::InvalidKey);
+            warn!(
+                "JWS signing key and JWE encryption key are identical — key separation not enforced; provide a distinct SERVER_ENCRYPTION_KEY/JWE_DOMAIN_SEPARATOR"
+            );
         }
 
         let signing_pem = signing_key.to_pkcs8_pem(Default::default()).map_err(|e| {

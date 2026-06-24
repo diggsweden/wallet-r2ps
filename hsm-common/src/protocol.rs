@@ -265,10 +265,14 @@ pub struct HsmWorkerResponse {
 #[serde(rename_all = "camelCase")]
 pub struct StateInitRequest {
     pub request_id: String,
-    /// Client JWS public key; the worker verifies device request signatures with this key
+    /// Client JWS public key; the worker verifies device request signatures with this key.
+    /// Accepts legacy `publicKey` field for backward compatibility with old clients.
+    #[serde(alias = "publicKey")]
     pub client_jws_public_key: EcPublicJwk,
-    /// Client JWE public key; the worker encrypts pre-session responses to this key (ECDH-ES)
-    pub client_jwe_public_key: EcPublicJwk,
+    /// Client JWE public key; the worker encrypts pre-session responses to this key (ECDH-ES).
+    /// Absent for legacy clients; service falls back to jws key with a warning.
+    #[serde(default)]
+    pub client_jwe_public_key: Option<EcPublicJwk>,
     /// Kafka topic the hsm-worker should send its response to
     pub response_topic: String,
     /// Curve used to generate the initial HSM key during state initialization.

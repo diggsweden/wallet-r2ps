@@ -398,7 +398,7 @@ fn make_fixture_with_hsm_keys(
         version: 1,
         device_keys: vec![DeviceKeyEntry {
             jws_public_key: device_pub_jwk,
-            jwe_public_key: device_jwe_pub_jwk,
+            jwe_public_key: Some(device_jwe_pub_jwk),
             password_files: vec![PasswordFileEntry {
                 password_file: PasswordFile(vec![1, 2, 3]),
                 opaque_domain_separator: "cloud-wallet.digg.se".to_string(),

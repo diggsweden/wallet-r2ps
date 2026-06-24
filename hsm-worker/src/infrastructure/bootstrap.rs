@@ -18,7 +18,7 @@ use crate::infrastructure::state_init_response_kafka_sender::StateInitResponseKa
 use p256::SecretKey;
 use p256::pkcs8::DecodePrivateKey;
 use std::sync::Arc;
-use tracing::info;
+use tracing::{info, warn};
 
 pub fn build_services(
     app_config: &AppConfig,
@@ -41,9 +41,6 @@ pub fn build_services(
             let jws_sep = app_config.jws_domain_separator.as_deref().expect(
                 "JWS_DOMAIN_SEPARATOR required in HSM mode (e.g. \"rk-202501_jws-202501\")",
             );
-            let jwe_sep = app_config.jwe_domain_separator.as_deref().expect(
-                "JWE_DOMAIN_SEPARATOR required in HSM mode (e.g. \"rk-202501_jwe-202501\")",
-            );
             let opaque_sep = app_config.opaque_domain_separator.as_deref().expect(
                 "OPAQUE_DOMAIN_SEPARATOR required in HSM mode (e.g. \"rk-202501_opaque-202501\")",
             );
@@ -51,17 +48,27 @@ pub fn build_services(
                 jws_sep, opaque_sep,
                 "JWS_DOMAIN_SEPARATOR and OPAQUE_DOMAIN_SEPARATOR must differ"
             );
-            assert_ne!(
-                jws_sep, jwe_sep,
-                "JWS_DOMAIN_SEPARATOR and JWE_DOMAIN_SEPARATOR must differ"
-            );
-            assert_ne!(
-                jwe_sep, opaque_sep,
-                "JWE_DOMAIN_SEPARATOR and OPAQUE_DOMAIN_SEPARATOR must differ"
-            );
             info!("Using HSM key derivation (root key: {})", root_label);
             let jose_secret = derive_key_from_hsm(hsm.as_ref(), root_label, jws_sep);
-            let jwe_secret = derive_key_from_hsm(hsm.as_ref(), root_label, jwe_sep);
+            let jwe_secret = match app_config.jwe_domain_separator.as_deref() {
+                Some(jwe_sep) => {
+                    assert_ne!(
+                        jws_sep, jwe_sep,
+                        "JWS_DOMAIN_SEPARATOR and JWE_DOMAIN_SEPARATOR must differ"
+                    );
+                    assert_ne!(
+                        jwe_sep, opaque_sep,
+                        "JWE_DOMAIN_SEPARATOR and OPAQUE_DOMAIN_SEPARATOR must differ"
+                    );
+                    derive_key_from_hsm(hsm.as_ref(), root_label, jwe_sep)
+                }
+                None => {
+                    warn!(
+                        "JWE_DOMAIN_SEPARATOR not set; using JWS key for JWE — key separation not enforced; set JWE_DOMAIN_SEPARATOR to fix"
+                    );
+                    jose_secret.clone()
+                }
+            };
             let opaque_secret = derive_key_from_hsm(hsm.as_ref(), root_label, opaque_sep);
             let opaque_server_id = jose_utils::ec_kid_from_secret(&opaque_secret);
             ModeConfig {
@@ -86,14 +93,20 @@ pub fn build_services(
             .expect("Failed to load SERVER_PRIVATE_KEY");
             let secret = SecretKey::from_pkcs8_pem(&pem::encode(&pem))
                 .expect("Failed to parse server private key as P-256 PKCS8");
-            let enc_pem = load_pem_from_base64(
-                app_config.server_encryption_key.as_deref().expect(
-                    "SERVER_ENCRYPTION_KEY required (JWE decryption key, distinct from SERVER_PRIVATE_KEY)",
-                ),
-            )
-            .expect("Failed to load SERVER_ENCRYPTION_KEY");
-            let jwe_secret = SecretKey::from_pkcs8_pem(&pem::encode(&enc_pem))
-                .expect("Failed to parse server encryption key as P-256 PKCS8");
+            let jwe_secret = match app_config.server_encryption_key.as_deref() {
+                Some(enc_b64) => {
+                    let enc_pem = load_pem_from_base64(enc_b64)
+                        .expect("Failed to load SERVER_ENCRYPTION_KEY");
+                    SecretKey::from_pkcs8_pem(&pem::encode(&enc_pem))
+                        .expect("Failed to parse server encryption key as P-256 PKCS8")
+                }
+                None => {
+                    warn!(
+                        "SERVER_ENCRYPTION_KEY not set; using SERVER_PRIVATE_KEY for JWE — key separation not enforced; set SERVER_ENCRYPTION_KEY to fix"
+                    );
+                    secret.clone()
+                }
+            };
             // Legacy mode: same key for JWS and OPAQUE — preserves backwards compat
             // with existing client registrations.
             let id = app_config.opaque_server_identifier.clone();

@@ -11,7 +11,7 @@ use crate::application::service::worker_service::error::{UpstreamError, WorkerEr
 use crate::domain::OuterRequest;
 use crate::domain::{DeviceHsmState, EcPublicJwk, HsmWorkerRequest, SessionId};
 use std::sync::Arc;
-use tracing::info;
+use tracing::{info, warn};
 
 /// Intermediate result after decoding the outer JWS, before inner JWE decryption.
 pub struct PartialRequest {
@@ -62,7 +62,13 @@ impl RequestDecoder {
             .find_device_key(&device_kid)
             .ok_or(UpstreamError::UnknownDevice)?;
         let device_jws_public_key = device_key_entry.jws_public_key.clone();
-        let device_jwe_public_key = device_key_entry.jwe_public_key.clone();
+        let device_jwe_public_key = device_key_entry.jwe_public_key.clone().unwrap_or_else(|| {
+            warn!(
+                kid = %device_key_entry.jws_public_key.kid,
+                "Legacy device state: jwe_public_key absent, falling back to jws_public_key — key separation not enforced"
+            );
+            device_key_entry.jws_public_key.clone()
+        });
 
         let outer_request = OuterRequest::from_jws(
             outer_request_jws.as_str(),
