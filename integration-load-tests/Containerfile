@@ -32,8 +32,13 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 RUN useradd -m appuser
+
+# Place the binary in /usr/local/bin so both `docker run <image>` (via
+# ENTRYPOINT) and `docker run <image> bash -c "integration-load-tests ..."`
+# (used by the wallet-test cluster load-test Job, which overrides the
+# container command) resolve it the same way.
+COPY --from=builder /app/target/release/integration-load-tests /usr/local/bin/integration-load-tests
+
 USER appuser
 
-COPY --from=builder /app/target/release/integration-load-tests /integration-load-tests
-
-ENTRYPOINT ["/integration-load-tests"]
+ENTRYPOINT ["integration-load-tests"]
