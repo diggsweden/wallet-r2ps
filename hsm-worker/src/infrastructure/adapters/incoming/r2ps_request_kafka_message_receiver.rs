@@ -7,16 +7,31 @@ use crate::domain::HsmWorkerRequest;
 use crate::infrastructure::KafkaConfig;
 use crate::infrastructure::kafka_propagation::KafkaHeaderExtractor;
 use opentelemetry::global;
+use opentelemetry::metrics::Counter;
 use rdkafka::consumer::{BaseConsumer, Consumer};
 use rdkafka::message::BorrowedMessage;
 use rdkafka::{ClientConfig, Message};
 use serde_json::from_slice;
 use std::sync::Arc;
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::{JoinHandle, spawn};
 use std::time::Duration;
 use tracing::{Span, debug, error, instrument, warn};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
+
+/// Lazy-init counter so the global meter provider (set by
+/// `infrastructure::telemetry::init`) is in place before we build it.
+/// Bumped once per Kafka request message processed.
+fn requests_counter() -> &'static Counter<u64> {
+    static C: OnceLock<Counter<u64>> = OnceLock::new();
+    C.get_or_init(|| {
+        global::meter("hsm-worker")
+            .u64_counter("r2ps.kafka.requests")
+            .with_description("HSM request messages received by hsm-worker")
+            .build()
+    })
+}
 
 pub struct WorkerRequestKafkaReceiver {
     worker_use_case: Arc<dyn WorkerRequestUseCase + Send + Sync>,
@@ -93,6 +108,7 @@ impl WorkerRequestKafkaReceiver {
 /// consumer span becomes a child of the bff request trace.
 #[instrument(skip_all, name = "process_request_kafka")]
 fn process_message(msg: &BorrowedMessage<'_>, worker_use_case: &(dyn WorkerRequestUseCase + Send + Sync)) {
+    requests_counter().add(1, &[]);
     let parent_ctx = global::get_text_map_propagator(|propagator| {
         propagator.extract(&KafkaHeaderExtractor(msg.headers()))
     });
