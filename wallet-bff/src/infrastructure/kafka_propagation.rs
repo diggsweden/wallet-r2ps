@@ -2,28 +2,15 @@
 //
 // SPDX-License-Identifier: EUPL-1.2
 
-//! W3C tracecontext propagation over rdkafka message headers — producer side.
+//! W3C tracecontext propagation over rdkafka message headers.
 //!
-//! Adapter implementing `opentelemetry::propagation::Injector` so we can
-//! attach `traceparent` (and any other propagator-emitted) headers to a
-//! Kafka message. Combined with a registered `TraceContextPropagator`
-//! (see `telemetry::init`), this lets a downstream consumer pick up the
-//! current span's context and continue the trace.
-//!
-//! Usage:
-//! ```ignore
-//! let mut injector = KafkaHeaderInjector::default();
-//! opentelemetry::global::get_text_map_propagator(|propagator| {
-//!     propagator.inject_context(
-//!         &tracing::Span::current().context(),
-//!         &mut injector,
-//!     );
-//! });
-//! let record = FutureRecord::to(topic).headers(injector.into_owned_headers());
-//! ```
+//! Combined with a registered `TraceContextPropagator` (see
+//! `telemetry::init`), the injector lets a producer attach the current
+//! span's context onto outgoing messages, and the extractor lets a
+//! consumer adopt the parent span from incoming `traceparent` headers.
 
-use opentelemetry::propagation::Injector;
-use rdkafka::message::{Header, OwnedHeaders};
+use opentelemetry::propagation::{Extractor, Injector};
+use rdkafka::message::{BorrowedHeaders, Header, Headers, OwnedHeaders};
 
 #[derive(Default)]
 pub struct KafkaHeaderInjector {
@@ -46,5 +33,27 @@ impl KafkaHeaderInjector {
             });
         }
         headers
+    }
+}
+
+pub struct KafkaHeaderExtractor<'a>(pub Option<&'a BorrowedHeaders>);
+
+impl<'a> Extractor for KafkaHeaderExtractor<'a> {
+    fn get(&self, key: &str) -> Option<&str> {
+        let hdrs = self.0?;
+        for i in 0..hdrs.count() {
+            let h = hdrs.get(i);
+            if h.key == key {
+                return h.value.and_then(|v| std::str::from_utf8(v).ok());
+            }
+        }
+        None
+    }
+
+    fn keys(&self) -> Vec<&str> {
+        match self.0 {
+            Some(hdrs) => (0..hdrs.count()).map(|i| hdrs.get(i).key).collect(),
+            None => Vec::new(),
+        }
     }
 }
