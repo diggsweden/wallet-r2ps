@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 
 use redis::Client;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 use tracing::info;
 
@@ -60,9 +60,14 @@ pub async fn run() {
         Duration::from_secs(config.response_ttl_seconds),
     ));
 
+    // Shared server JWE public key — populated from first Kafka state-init response
+    let server_jwe_public_key: Arc<OnceLock<_>> = Arc::new(OnceLock::new());
+
     // State-init in-memory correlation
-    let state_init_correlation =
-        Arc::new(StateInitCorrelationService::new(device_state_port.clone()));
+    let state_init_correlation = Arc::new(StateInitCorrelationService::new(
+        device_state_port.clone(),
+        server_jwe_public_key.clone(),
+    ));
 
     // Start Kafka consumers
     r2ps_response_consumer::start(
@@ -87,6 +92,7 @@ pub async fn run() {
         state_init_sender_port,
         response_use_case: response_service,
         state_init_correlation,
+        server_jwe_public_key,
         serve_sync: config.serve_sync,
         sync_timeout_ms: config.sync_timeout_ms,
         state_init_timeout_ms: config.state_init_timeout_ms,

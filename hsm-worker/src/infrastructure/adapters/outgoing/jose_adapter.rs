@@ -30,8 +30,8 @@ pub struct JoseAdapter {
 
 impl JoseAdapter {
     /// `signing_key` backs JWS signing/verification (ES256); `encryption_key` backs
-    /// JWE ECDH-ES decryption. The keys must be distinct: reusing one EC key for both
-    /// ECDSA and ECDH violates key separation, so equal keys are rejected.
+    /// JWE ECDH-ES decryption. Distinct keys are strongly recommended; equal keys are
+    /// accepted with a warning for backward compatibility (dev/legacy deployments).
     pub fn new(signing_key: SecretKey, encryption_key: SecretKey) -> Result<Self, JoseError> {
         let jws_public_key = jose_utils::ec_public_key_from_secret(&signing_key);
         let jwe_public_key = jose_utils::ec_public_key_from_secret(&encryption_key);

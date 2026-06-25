@@ -54,8 +54,8 @@ impl StateInitService {
 
         // Resolve JWE key: fall back to JWS key for legacy clients that supply only one key.
         let client_jwe_public_key = match request.client_jwe_public_key {
-            Some(ref k) => {
-                validate_ec_public_jwk(k)?;
+            Some(k) => {
+                validate_ec_public_jwk(&k)?;
                 if k.x == request.client_jws_public_key.x && k.y == request.client_jws_public_key.y
                 {
                     error!(
@@ -64,7 +64,7 @@ impl StateInitService {
                     );
                     return Err(StateInitError::InvalidJwk);
                 }
-                k.clone()
+                k
             }
             None => {
                 warn!(

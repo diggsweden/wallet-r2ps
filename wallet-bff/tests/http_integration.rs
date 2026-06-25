@@ -172,6 +172,7 @@ fn make_test_app(cfg: TestAppConfig) -> TestContext {
         state_init_correlation: Arc::new(MockStateInitCorrelationPort {
             response: cfg.state_init_response,
         }),
+        server_jwe_public_key: Arc::new(std::sync::OnceLock::new()),
         serve_sync: cfg.serve_sync,
         sync_timeout_ms: cfg.sync_timeout_ms,
         state_init_timeout_ms: cfg.state_init_timeout_ms,
