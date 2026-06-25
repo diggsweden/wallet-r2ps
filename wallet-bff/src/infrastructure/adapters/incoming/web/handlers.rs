@@ -18,8 +18,8 @@ use crate::application::port::outgoing::{
 };
 use crate::domain::{
     AsyncResponseDto, AsyncResponseStatus, BffRequest, CachedResponse, Curve, DEFAULT_TTL_SECONDS,
-    HsmWorkerRequest, NewStateRequestDto, NewStateResponseDto, ProblemDetail, StateInitRequest,
-    TypedJws,
+    EcPublicJwk, HsmWorkerRequest, NewStateRequestDto, NewStateResponseDto, ProblemDetail,
+    StateInitRequest, TypedJws,
 };
 
 pub const PROBLEM_CONTENT_TYPE: &str = "application/problem+json";
@@ -37,6 +37,9 @@ pub struct AppState {
     pub state_init_sender_port: Arc<dyn StateInitSenderPort>,
     pub response_use_case: Arc<dyn ResponseUseCase>,
     pub state_init_correlation: Arc<dyn StateInitCorrelationPort>,
+    /// Server JWE public key — populated from the first successful state-init Kafka response.
+    /// Returned on overwrite=false re-registration so the client can set up key separation.
+    pub server_jwe_public_key: Arc<OnceLock<EcPublicJwk>>,
     pub serve_sync: bool,
     pub sync_timeout_ms: u64,
     pub state_init_timeout_ms: u64,
@@ -260,7 +263,7 @@ pub async fn create_state(
             client_id,
             dev_authorization_code: None,
             server_jws_public_key: None,
-            server_jwe_public_key: None,
+            server_jwe_public_key: state.server_jwe_public_key.get().cloned(),
             opaque_server_id: None,
             state_jws: Some(existing_state),
         };

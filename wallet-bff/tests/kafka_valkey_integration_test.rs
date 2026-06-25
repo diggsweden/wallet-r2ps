@@ -362,7 +362,10 @@ async fn test_state_init_consumer_receives_and_notifies_correlation_service() {
 
     let device_state_port: Arc<dyn DeviceStatePort> =
         Arc::new(DeviceStateRedisAdapter::new(conn.clone()));
-    let correlation = Arc::new(StateInitCorrelationService::new(device_state_port.clone()));
+    let correlation = Arc::new(StateInitCorrelationService::new(
+        device_state_port.clone(),
+        Arc::new(std::sync::OnceLock::new()),
+    ));
 
     let request_id = "req-400";
     let topic = format!("test-state-init-responses-{}", uuid::Uuid::new_v4());

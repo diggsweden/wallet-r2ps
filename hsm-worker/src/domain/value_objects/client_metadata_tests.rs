@@ -401,3 +401,17 @@ fn serialize_empty_state() {
     assert!(restored.device_keys.is_empty());
     assert!(restored.hsm_keys.is_empty());
 }
+
+#[test]
+fn device_key_entry_deserializes_legacy_public_key_field() {
+    // Old state blobs used "public_key" before the jws/jwe split.
+    // The #[serde(alias = "public_key")] must survive refactors.
+    let json = r#"{
+        "public_key": {"kty":"EC","crv":"P-256","x":"xval","y":"yval","kid":"k1"},
+        "password_files": [],
+        "dev_authorization_code": null
+    }"#;
+    let entry: DeviceKeyEntry = serde_json::from_str(json).expect("legacy field alias broken");
+    assert_eq!(entry.jws_public_key.kid, "k1");
+    assert!(entry.jwe_public_key.is_none());
+}

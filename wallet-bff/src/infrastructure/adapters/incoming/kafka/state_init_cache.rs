@@ -3,12 +3,12 @@
 // SPDX-License-Identifier: EUPL-1.2
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use tokio::sync::oneshot;
 use tracing::warn;
 
 use crate::application::port::outgoing::{DeviceStatePort, StateInitCorrelationPort};
-use crate::domain::StateInitResponse;
+use crate::domain::{EcPublicJwk, StateInitResponse};
 
 struct StateInitPending {
     state_key: String,
@@ -22,13 +22,19 @@ struct StateInitPending {
 pub struct StateInitCorrelationService {
     pending: Mutex<HashMap<String, StateInitPending>>,
     device_state_port: Arc<dyn DeviceStatePort>,
+    /// Shared with AppState — populated from the first Kafka response that carries a JWE key.
+    server_jwe_public_key: Arc<OnceLock<EcPublicJwk>>,
 }
 
 impl StateInitCorrelationService {
-    pub fn new(device_state_port: Arc<dyn DeviceStatePort>) -> Self {
+    pub fn new(
+        device_state_port: Arc<dyn DeviceStatePort>,
+        server_jwe_public_key: Arc<OnceLock<EcPublicJwk>>,
+    ) -> Self {
         Self {
             pending: Mutex::new(HashMap::new()),
             device_state_port,
+            server_jwe_public_key,
         }
     }
 }
@@ -54,6 +60,10 @@ impl StateInitCorrelationPort for StateInitCorrelationService {
     }
 
     async fn response_received(&self, response: StateInitResponse) {
+        if let Some(ref key) = response.server_jwe_public_key {
+            let _ = self.server_jwe_public_key.set(key.clone());
+        }
+
         let entry = self.pending.lock().unwrap().remove(&response.request_id);
 
         let Some(e) = entry else {
