@@ -62,13 +62,13 @@ impl RequestDecoder {
             .find_device_key(&device_kid)
             .ok_or(UpstreamError::UnknownDevice)?;
         let device_jws_public_key = device_key_entry.jws_public_key.clone();
-        let device_jwe_public_key = device_key_entry.jwe_public_key.clone().unwrap_or_else(|| {
+        if device_key_entry.jwe_public_key.is_none() {
             warn!(
                 kid = %device_key_entry.jws_public_key.kid,
                 "Legacy device state: jwe_public_key absent, falling back to jws_public_key — key separation not enforced"
             );
-            device_key_entry.jws_public_key.clone()
-        });
+        }
+        let device_jwe_public_key = device_key_entry.effective_jwe_public_key().clone();
 
         let outer_request = OuterRequest::from_jws(
             outer_request_jws.as_str(),

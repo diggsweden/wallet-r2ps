@@ -92,8 +92,12 @@ impl AccessMechanismClient {
             .context("No authorization code in device-states response")?;
 
         if let Some(server_jwe_jwk) = resp.server_jwe_public_key {
-            let jwk = ec_public_jwk_to_josekit(&server_jwe_jwk)?;
-            let _ = self.server_jwe_key.set(jwk);
+            let jwk = Jwk::try_from(&server_jwe_jwk).context("Failed to build server JWE JWK")?;
+            if self.server_jwe_key.set(jwk).is_err() {
+                tracing::warn!(
+                    "server_jwe_key already set; ignoring duplicate init_state response"
+                );
+            }
         }
 
         Ok((client_id, auth_code))
@@ -315,17 +319,6 @@ impl AccessMechanismClient {
 
         Ok(result_jws)
     }
-}
-
-fn ec_public_jwk_to_josekit(jwk: &EcPublicJwk) -> Result<Jwk> {
-    let json = serde_json::json!({
-        "kty": jwk.kty,
-        "crv": jwk.crv,
-        "x": jwk.x,
-        "y": jwk.y,
-        "kid": jwk.kid,
-    });
-    Jwk::from_bytes(serde_json::to_vec(&json)?).context("Failed to build server JWE JWK")
 }
 
 /// Load a server public key from a PEM file and return it as a josekit Jwk.

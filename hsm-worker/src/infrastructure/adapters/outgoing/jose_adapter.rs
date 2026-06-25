@@ -25,7 +25,6 @@ pub struct JoseAdapter {
     verifier: EcdsaJwsVerifier,
     decrypter: EcdhEsJweDecrypter,
     jws_public_key: EcPublicJwk,
-    jws_kid: String,
     jwe_public_key: EcPublicJwk,
 }
 
@@ -81,14 +80,11 @@ impl JoseAdapter {
                 JoseError::InvalidKey
             })?;
 
-        let jws_kid = jws_public_key.kid.clone();
-
         Ok(Self {
             signer,
             verifier,
             decrypter,
             jws_public_key,
-            jws_kid,
             jwe_public_key,
         })
     }
@@ -106,7 +102,7 @@ impl JosePort for JoseAdapter {
             JoseError::SignError
         })?;
         let mut header = josekit::jws::JwsHeader::new();
-        header.set_key_id(&self.jws_kid);
+        header.set_key_id(self.jws_kid());
         jwt::encode_with_signer(&payload, &header, &self.signer).map_err(|e| {
             error!("Failed to encode JWS: {:?}", e);
             JoseError::SignError
@@ -191,7 +187,7 @@ impl JosePort for JoseAdapter {
     }
 
     fn jws_kid(&self) -> &str {
-        &self.jws_kid
+        &self.jws_public_key.kid
     }
 
     fn jwe_public_key(&self) -> &EcPublicJwk {
