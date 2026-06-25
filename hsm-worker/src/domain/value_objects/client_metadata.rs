@@ -63,6 +63,12 @@ impl DeviceKeyEntry {
     pub fn kid(&self) -> &str {
         &self.jws_public_key.kid
     }
+
+    /// Returns the JWE public key to use for encrypting responses to this device.
+    /// Falls back to the JWS key for legacy state that predates key separation.
+    pub fn effective_jwe_public_key(&self) -> &EcPublicJwk {
+        self.jwe_public_key.as_ref().unwrap_or(&self.jws_public_key)
+    }
 }
 
 /// The complete persisted state for a device, encoded as a JWS and passed
