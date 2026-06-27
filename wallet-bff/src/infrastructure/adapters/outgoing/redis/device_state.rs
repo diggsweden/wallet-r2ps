@@ -7,6 +7,7 @@ use redis::aio::ConnectionManager;
 use tracing::error;
 
 use crate::application::port::outgoing::DeviceStatePort;
+use crate::infrastructure::adapters::outgoing::redis::with_redis_retry;
 
 pub struct DeviceStateRedisAdapter {
     conn: ConnectionManager,
@@ -21,15 +22,23 @@ impl DeviceStateRedisAdapter {
 #[async_trait::async_trait]
 impl DeviceStatePort for DeviceStateRedisAdapter {
     async fn save(&self, key: &str, state: &str, ttl_seconds: u64) {
-        let mut conn = self.conn.clone();
-        if let Err(e) = conn.set_ex::<_, _, ()>(key, state, ttl_seconds).await {
+        let result = with_redis_retry("device_state.save", key, || {
+            let mut conn = self.conn.clone();
+            async move { conn.set_ex::<_, _, ()>(key, state, ttl_seconds).await }
+        })
+        .await;
+        if let Err(e) = result {
             error!("Failed to save device state for key {}: {}", key, e);
         }
     }
 
     async fn load(&self, key: &str) -> Option<String> {
-        let mut conn = self.conn.clone();
-        match conn.get::<_, Option<String>>(key).await {
+        let result = with_redis_retry("device_state.load", key, || {
+            let mut conn = self.conn.clone();
+            async move { conn.get::<_, Option<String>>(key).await }
+        })
+        .await;
+        match result {
             Ok(v) => v,
             Err(e) => {
                 error!("Failed to load device state for key {}: {}", key, e);
