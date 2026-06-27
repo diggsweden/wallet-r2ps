@@ -2,8 +2,8 @@
 //
 // SPDX-License-Identifier: EUPL-1.2
 
-use redis::Client;
-use redis::sentinel::{SentinelClient, SentinelNodeConnectionInfo, SentinelServerType};
+use redis::sentinel::{SentinelClientBuilder, SentinelServerType};
+use redis::{Client, ConnectionAddr, IntoConnectionInfo};
 use std::sync::Arc;
 use std::time::Duration;
 use tracing::info;
@@ -34,9 +34,16 @@ pub async fn run() {
         config.state_init_response_topic,
     );
 
-    // Redis — device state only
+    // Redis — device state only. Connection manager carries TCP keepalive so
+    // Istio's idle-kill (default 1h) cannot silently destroy the socket, plus
+    // bounded reconnect backoff and per-command timeouts.
     let redis_client = resolve_master_client(&config).await;
-    let conn_mgr = redis::aio::ConnectionManager::new(redis_client)
+    let cm_cfg = redis::aio::ConnectionManagerConfig::new()
+        .set_number_of_retries(3)
+        .set_max_delay(Duration::from_secs(2))
+        .set_connection_timeout(Some(Duration::from_millis(500)))
+        .set_response_timeout(Some(Duration::from_secs(2)));
+    let conn_mgr = redis::aio::ConnectionManager::new_with_config(redis_client, cm_cfg)
         .await
         .expect("Failed to connect to Redis");
 
@@ -112,6 +119,24 @@ pub async fn run() {
     axum::serve(listener, router).await.expect("Server error");
 }
 
+/// TCP keepalive + (Linux) TCP_USER_TIMEOUT for the Valkey client socket.
+/// The probe schedule (30s idle, 10s interval, 3 retries) keeps the connection
+/// "active" so Istio's sidecar idle timer cannot kill it, and detects a dead
+/// peer within ~60s. TCP_USER_TIMEOUT bounds how long an in-flight write hangs
+/// on a half-closed socket before erroring.
+fn redis_tcp_settings() -> redis::io::tcp::TcpSettings {
+    use redis::io::tcp::TcpSettings;
+    use redis::io::tcp::socket2::TcpKeepalive;
+    let ka = TcpKeepalive::new()
+        .with_time(Duration::from_secs(30))
+        .with_interval(Duration::from_secs(10))
+        .with_retries(3);
+    let s = TcpSettings::default().set_keepalive(ka);
+    #[cfg(target_os = "linux")]
+    let s = s.set_user_timeout(Duration::from_secs(20));
+    s
+}
+
 /// Returns a [`Client`] pointing at the current Redis primary. If
 /// `REDIS_SENTINEL_HOSTS` + `REDIS_SENTINEL_MASTER` are set the master is
 /// resolved via Sentinel (Bitnami valkey HA topology); otherwise the
@@ -120,30 +145,38 @@ async fn resolve_master_client(config: &AppConfig) -> Client {
     let hosts = config.redis_sentinel_hosts.trim();
     let master = config.redis_sentinel_master.trim();
     if hosts.is_empty() || master.is_empty() {
-        return Client::open(config.redis_url()).expect("Failed to create Redis client");
+        let info = config
+            .redis_url()
+            .into_connection_info()
+            .expect("Failed to parse Redis URL")
+            .set_tcp_settings(redis_tcp_settings());
+        return Client::open(info).expect("Failed to create Redis client");
     }
 
-    let nodes: Vec<String> = hosts
+    let addrs: Vec<ConnectionAddr> = hosts
         .split(',')
         .map(str::trim)
         .filter(|s| !s.is_empty())
-        .map(|hp| format!("redis://{hp}"))
+        .map(|hp| {
+            let (h, p) = hp
+                .rsplit_once(':')
+                .expect("REDIS_SENTINEL_HOSTS entries must be host:port");
+            ConnectionAddr::Tcp(
+                h.to_string(),
+                p.parse().expect("invalid sentinel port"),
+            )
+        })
         .collect();
 
-    let node_info = SentinelNodeConnectionInfo::default().set_redis_connection_info(
-        redis::RedisConnectionInfo::default()
-            .set_db(config.redis_database as i64)
-            .set_username(&config.redis_username)
-            .set_password(&config.redis_password),
-    );
-
-    let mut sc = SentinelClient::build(
-        nodes,
-        master.to_string(),
-        Some(node_info),
-        SentinelServerType::Master,
-    )
-    .expect("Failed to build SentinelClient");
+    let mut sc = SentinelClientBuilder::new(addrs, master, SentinelServerType::Master)
+        .expect("Failed to build SentinelClientBuilder")
+        .set_client_to_redis_db(i64::from(config.redis_database))
+        .set_client_to_redis_username(config.redis_username.clone())
+        .set_client_to_redis_password(config.redis_password.clone())
+        .set_client_to_redis_tcp_settings(redis_tcp_settings())
+        .set_client_to_sentinel_tcp_settings(redis_tcp_settings())
+        .build()
+        .expect("Failed to build SentinelClient");
 
     info!(
         "Resolving Redis primary via Sentinel (hosts={}, master={})",
