@@ -80,45 +80,69 @@ pub fn build_services(
                 legacy_key_mode: false,
             }
         }
-        // Legacy mode: server_private_key is used to derive the JWS and OPAQUE secrets;
-        // server_encryption_key provides the distinct JWE decryption key.
-        None => {
-            info!("Using legacy PEM key config");
-            let pem = load_pem_from_base64(
-                app_config
-                    .server_private_key
-                    .as_deref()
-                    .expect("SERVER_PRIVATE_KEY required"),
-            )
-            .expect("Failed to load SERVER_PRIVATE_KEY");
-            let secret = SecretKey::from_pkcs8_pem(&pem::encode(&pem))
-                .expect("Failed to parse server private key as P-256 PKCS8");
-            let jwe_secret = match app_config.server_encryption_key.as_deref() {
-                Some(enc_b64) => {
-                    let enc_pem = load_pem_from_base64(enc_b64)
-                        .expect("Failed to load SERVER_ENCRYPTION_KEY");
-                    SecretKey::from_pkcs8_pem(&pem::encode(&enc_pem))
-                        .expect("Failed to parse server encryption key as P-256 PKCS8")
+        None => match app_config.server_jws_private_key.as_deref() {
+            // Two-key PEM mode: explicit SERVER_JWS_PRIVATE_KEY + SERVER_JWE_PRIVATE_KEY.
+            Some(jws_b64) => {
+                info!("Using two-key PEM config (SERVER_JWS_PRIVATE_KEY + SERVER_JWE_PRIVATE_KEY)");
+                let jws_pem =
+                    load_pem_from_base64(jws_b64).expect("Failed to load SERVER_JWS_PRIVATE_KEY");
+                let jose_secret = SecretKey::from_pkcs8_pem(&pem::encode(&jws_pem))
+                    .expect("Failed to parse SERVER_JWS_PRIVATE_KEY as P-256 PKCS8");
+                let jwe_pem =
+                    load_pem_from_base64(app_config.server_jwe_private_key.as_deref().expect(
+                        "SERVER_JWE_PRIVATE_KEY required when SERVER_JWS_PRIVATE_KEY is set",
+                    ))
+                    .expect("Failed to load SERVER_JWE_PRIVATE_KEY");
+                let jwe_secret = SecretKey::from_pkcs8_pem(&pem::encode(&jwe_pem))
+                    .expect("Failed to parse SERVER_JWE_PRIVATE_KEY as P-256 PKCS8");
+                let id = app_config.opaque_server_identifier.clone();
+                ModeConfig {
+                    jose_secret: jose_secret.clone(),
+                    jwe_secret,
+                    opaque_secret: jose_secret,
+                    opaque_server_id: id.clone(),
+                    opaque_domain_separator: id,
+                    legacy_key_mode: false,
                 }
-                None => {
-                    warn!(
-                        "SERVER_ENCRYPTION_KEY not set; using SERVER_PRIVATE_KEY for JWE — key separation not enforced; set SERVER_ENCRYPTION_KEY to fix"
-                    );
-                    secret.clone()
-                }
-            };
-            // Legacy mode: same key for JWS and OPAQUE — preserves backwards compat
-            // with existing client registrations.
-            let id = app_config.opaque_server_identifier.clone();
-            ModeConfig {
-                jose_secret: secret.clone(),
-                jwe_secret,
-                opaque_secret: secret,
-                opaque_server_id: id.clone(),
-                opaque_domain_separator: id,
-                legacy_key_mode: true,
             }
-        }
+            // Legacy single-key PEM mode: SERVER_PRIVATE_KEY used for JWS and OPAQUE;
+            // SERVER_ENCRYPTION_KEY optionally provides a distinct JWE key.
+            None => {
+                info!("Using legacy single-key PEM config (SERVER_PRIVATE_KEY)");
+                let pem = load_pem_from_base64(
+                    app_config
+                        .server_private_key
+                        .as_deref()
+                        .expect("one of SERVER_JWS_PRIVATE_KEY or SERVER_PRIVATE_KEY is required"),
+                )
+                .expect("Failed to load SERVER_PRIVATE_KEY");
+                let secret = SecretKey::from_pkcs8_pem(&pem::encode(&pem))
+                    .expect("Failed to parse server private key as P-256 PKCS8");
+                let jwe_secret = match app_config.server_encryption_key.as_deref() {
+                    Some(enc_b64) => {
+                        let enc_pem = load_pem_from_base64(enc_b64)
+                            .expect("Failed to load SERVER_ENCRYPTION_KEY");
+                        SecretKey::from_pkcs8_pem(&pem::encode(&enc_pem))
+                            .expect("Failed to parse server encryption key as P-256 PKCS8")
+                    }
+                    None => {
+                        warn!(
+                            "SERVER_ENCRYPTION_KEY not set; using SERVER_PRIVATE_KEY for JWE — key separation not enforced; use SERVER_JWS_PRIVATE_KEY + SERVER_JWE_PRIVATE_KEY for new deployments"
+                        );
+                        secret.clone()
+                    }
+                };
+                let id = app_config.opaque_server_identifier.clone();
+                ModeConfig {
+                    jose_secret: secret.clone(),
+                    jwe_secret,
+                    opaque_secret: secret,
+                    opaque_server_id: id.clone(),
+                    opaque_domain_separator: id,
+                    legacy_key_mode: true,
+                }
+            }
+        },
     };
 
     let jose = Arc::new(
