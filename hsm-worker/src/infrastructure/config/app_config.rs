@@ -9,9 +9,13 @@ use serde::Deserialize;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct AppConfig {
-    // Legacy: direct PEM key config (used when hsm_root_key_label is absent)
+    // Two-key PEM config: explicit separate JWS and JWE keys.
+    // Takes precedence over SERVER_PRIVATE_KEY when set.
+    pub server_jws_private_key: Option<String>,
+    pub server_jwe_private_key: Option<String>,
+    // Legacy single-key PEM config (used when server_jws_private_key is absent).
     pub server_private_key: Option<String>,
-    /// PEM EC P-256 key for JWE ECDH-ES decryption; must differ from server_private_key.
+    /// Legacy separate JWE key; prefer SERVER_JWE_PRIVATE_KEY in new deployments.
     pub server_encryption_key: Option<String>,
     pub opaque_server_setup: Option<String>,
     pub opaque_server_identifier: String,
