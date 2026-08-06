@@ -5,10 +5,21 @@
 use crate::application::{WorkerResponseError, WorkerResponseSpiPort};
 use crate::domain::HsmWorkerResponse;
 use crate::infrastructure::KafkaConfig;
+use crate::infrastructure::kafka_propagation::KafkaHeaderInjector;
+use opentelemetry::global;
 use rdkafka::ClientConfig;
 use rdkafka::producer::{BaseProducer, BaseRecord};
 use std::time::Duration;
-use tracing::{debug, error};
+use tracing::{Span, debug, error};
+use tracing_opentelemetry::OpenTelemetrySpanExt;
+
+fn tracecontext_headers() -> rdkafka::message::OwnedHeaders {
+    let mut injector = KafkaHeaderInjector::default();
+    global::get_text_map_propagator(|propagator| {
+        propagator.inject_context(&Span::current().context(), &mut injector);
+    });
+    injector.into_owned_headers()
+}
 
 pub struct WorkerResponseKafkaSender {
     producer: BaseProducer,
@@ -37,8 +48,10 @@ impl WorkerResponseSpiPort for WorkerResponseKafkaSender {
             Ok(output_json) => {
                 let key = &worker_response.request_id;
                 let request_id = &worker_response.request_id;
+                let headers = tracecontext_headers();
                 let record = BaseRecord::to(response_topic)
                     .key(key)
+                    .headers(headers)
                     .payload(&output_json);
 
                 match self.producer.send(record) {

@@ -2,30 +2,25 @@
 //
 // SPDX-License-Identifier: EUPL-1.2
 
+use hsm_worker::infrastructure::telemetry;
 use hsm_worker::run;
 use tracing::instrument;
-use tracing_subscriber::layer::SubscriberExt;
-use tracing_subscriber::util::SubscriberInitExt;
-use tracing_subscriber::{EnvFilter, fmt};
 
 #[instrument(name = "main", skip_all)]
 fn main() {
     dotenvy::dotenv().ok();
 
-    // init tracing
-    tracing_subscriber::registry()
-        .with(
-            fmt::layer()
-                .with_thread_ids(true) // Include thread IDs
-                .with_thread_names(true) // Include thread names
-                .with_target(false) // Hide target (module path)
-                .with_level(true), // Show log levels
-        )
-        .with(
-            // Filter based on RUST_LOG env var, default to info
-            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
-        )
-        .init();
+    // Tokio runtime is required by the OTLP batch span exporter (grpc-tonic).
+    // hsm-worker itself is sync, so we only need the runtime context to be
+    // active for the duration of the program.
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .worker_threads(2)
+        .build()
+        .expect("failed to build tokio runtime");
+    let _runtime_guard = runtime.enter();
+
+    let _telemetry = telemetry::init("hsm-worker").expect("failed to init telemetry");
 
     run();
 }
