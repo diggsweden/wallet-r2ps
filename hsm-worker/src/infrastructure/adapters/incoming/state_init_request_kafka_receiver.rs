@@ -5,14 +5,18 @@
 use crate::application::service::state_init_service::StateInitService;
 use crate::domain::StateInitRequest;
 use crate::infrastructure::KafkaConfig;
+use crate::infrastructure::kafka_propagation::KafkaHeaderExtractor;
+use opentelemetry::global;
 use rdkafka::consumer::{BaseConsumer, Consumer};
+use rdkafka::message::BorrowedMessage;
 use rdkafka::{ClientConfig, Message};
 use serde_json::from_slice;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::{JoinHandle, spawn};
 use std::time::Duration;
-use tracing::{debug, error, warn};
+use tracing::{Span, debug, error, instrument, warn};
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 pub struct StateInitRequestKafkaReceiver {
     state_init_service: Arc<StateInitService>,
@@ -61,39 +65,7 @@ impl StateInitRequestKafkaReceiver {
 
             while running.load(Ordering::Relaxed) {
                 match consumer.poll(Duration::from_millis(100)) {
-                    Some(Ok(msg)) => {
-                        // Extract message payload
-                        let payload = match msg.payload() {
-                            Some(bytes) => bytes,
-                            None => {
-                                warn!("Empty state init request payload");
-                                continue;
-                            }
-                        };
-
-                        let state_init_request: StateInitRequest = match from_slice(payload) {
-                            Ok(req) => req,
-                            Err(e) => {
-                                error!("Failed to deserialize state init request: {:?}", e);
-                                error!("Payload: {:?}", String::from_utf8_lossy(payload));
-                                continue;
-                            }
-                        };
-
-                        // Extract key (optional)
-                        let key = msg.key_view::<str>().unwrap();
-                        debug!("Received state init request: key='{:?}'", key);
-
-                        // Process the request
-                        match state_init_service.initialize(state_init_request) {
-                            Ok(request_id) => {
-                                debug!("State init request {} processed successfully", request_id);
-                            }
-                            Err(err) => {
-                                error!("Error processing state init request: {:?}", err);
-                            }
-                        }
-                    }
+                    Some(Ok(msg)) => process_message(&msg, state_init_service.as_ref()),
                     Some(Err(e)) => {
                         error!("Kafka error on state-init-requests: {}", e);
                     }
@@ -108,5 +80,45 @@ impl StateInitRequestKafkaReceiver {
             drop(consumer);
             debug!("State init consumer shutdown complete");
         })
+    }
+}
+
+/// Per-message handler mirroring r2ps_request_kafka_message_receiver:
+/// extract W3C tracecontext from headers so the consumer span becomes a
+/// child of the bff producer's trace.
+#[instrument(skip_all, name = "process_state_init_kafka")]
+fn process_message(msg: &BorrowedMessage<'_>, state_init_service: &StateInitService) {
+    let parent_ctx = global::get_text_map_propagator(|propagator| {
+        propagator.extract(&KafkaHeaderExtractor(msg.headers()))
+    });
+    Span::current().set_parent(parent_ctx);
+
+    let payload = match msg.payload() {
+        Some(bytes) => bytes,
+        None => {
+            warn!("Empty state init request payload");
+            return;
+        }
+    };
+
+    let state_init_request: StateInitRequest = match from_slice(payload) {
+        Ok(req) => req,
+        Err(e) => {
+            error!("Failed to deserialize state init request: {:?}", e);
+            error!("Payload: {:?}", String::from_utf8_lossy(payload));
+            return;
+        }
+    };
+
+    let key = msg.key_view::<str>().unwrap();
+    debug!("Received state init request: key='{:?}'", key);
+
+    match state_init_service.initialize(state_init_request) {
+        Ok(request_id) => {
+            debug!("State init request {} processed successfully", request_id);
+        }
+        Err(err) => {
+            error!("Error processing state init request: {:?}", err);
+        }
     }
 }

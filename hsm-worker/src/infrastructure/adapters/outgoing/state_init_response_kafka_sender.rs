@@ -7,10 +7,21 @@ use crate::application::port::outgoing::state_init_response_spi_port::{
 };
 use crate::domain::StateInitResponse;
 use crate::infrastructure::KafkaConfig;
+use crate::infrastructure::kafka_propagation::KafkaHeaderInjector;
+use opentelemetry::global;
 use rdkafka::ClientConfig;
 use rdkafka::producer::{BaseProducer, BaseRecord};
 use std::time::Duration;
-use tracing::{debug, error};
+use tracing::{Span, debug, error};
+use tracing_opentelemetry::OpenTelemetrySpanExt;
+
+fn tracecontext_headers() -> rdkafka::message::OwnedHeaders {
+    let mut injector = KafkaHeaderInjector::default();
+    global::get_text_map_propagator(|propagator| {
+        propagator.inject_context(&Span::current().context(), &mut injector);
+    });
+    injector.into_owned_headers()
+}
 
 pub struct StateInitResponseKafkaMessageSender {
     producer: BaseProducer,
@@ -43,8 +54,10 @@ impl StateInitResponseSpiPort for StateInitResponseKafkaMessageSender {
         let key = &response.request_id;
         let request_id = &response.request_id;
 
+        let headers = tracecontext_headers();
         let record = BaseRecord::to(response_topic)
             .key(key)
+            .headers(headers)
             .payload(&output_json);
 
         match self.producer.send(record) {

@@ -30,8 +30,8 @@ jobs:
       project-type: cargo
       # artifacts-config opts into the multi-container dev release path:
       # one job per container in the same dev run, parallel matrix.
-      # Both hsm-worker and wallet-bff are built each time this workflow
-      # is dispatched.
+      # hsm-worker, wallet-bff, and integration-load-tests are built each
+      # time this workflow is dispatched.
       artifacts-config: .github/artifacts.yml
       # SBOM coverage covered by wallet-backend-reference's dev runs.
       # Keep r2ps on the default `none` for faster dev feedback.

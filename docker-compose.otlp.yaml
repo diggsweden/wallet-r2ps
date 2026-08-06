@@ -1,0 +1,44 @@
+# SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
+#
+# SPDX-License-Identifier: EUPL-1.2
+
+# Compose overlay that wires the dev release images at
+# 0.0.0-dev-feat-otlp-69a1a00 into the local stack and points their OTLP
+# exporters at a local jaeger-all-in-one collector. Use it to verify the
+# trace context propagates HTTP -> BFF -> Kafka -> hsm-worker -> Kafka ->
+# BFF -> HTTP response.
+#
+# Bring up (--no-build so the base file's `build:` is ignored in favour of
+# the `image:` set here):
+#   docker compose -f docker-compose.yaml -f docker-compose.otlp.yaml up -d --no-build
+# Jaeger UI: http://localhost:16686
+
+name: r2ps-dev
+
+services:
+  jaeger:
+    image: jaegertracing/all-in-one:1.76.0
+    ports:
+      - "16686:16686" # Jaeger UI / HTTP API
+      - "4317:4317" # OTLP gRPC receiver (in-cluster: jaeger:4317)
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    networks:
+      - wallet-network
+
+  wallet-bff-1:
+    image: ghcr.io/diggsweden/wallet-r2ps/wallet-bff:0.0.0-dev-feat-otlp-69a1a00
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://jaeger:4317"
+      OTEL_SERVICE_NAME: "wallet-bff-1"
+
+  wallet-bff-2:
+    image: ghcr.io/diggsweden/wallet-r2ps/wallet-bff:0.0.0-dev-feat-otlp-69a1a00
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://jaeger:4317"
+      OTEL_SERVICE_NAME: "wallet-bff-2"
+
+  hsm-worker:
+    image: ghcr.io/diggsweden/wallet-r2ps/hsm-worker:0.0.0-dev-feat-otlp-69a1a00
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://jaeger:4317"

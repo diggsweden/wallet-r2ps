@@ -2,14 +2,18 @@
 //
 // SPDX-License-Identifier: EUPL-1.2
 
+use opentelemetry::global;
 use rdkafka::ClientConfig;
 use rdkafka::Message;
 use rdkafka::consumer::{Consumer, StreamConsumer};
+use rdkafka::message::BorrowedMessage;
 use std::sync::Arc;
-use tracing::{error, info};
+use tracing::{Span, error, info, instrument};
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use crate::application::port::incoming::ResponseUseCase;
 use crate::domain::HsmWorkerResponse;
+use crate::infrastructure::kafka_propagation::KafkaHeaderExtractor;
 
 /// Starts a background task that consumes from the per-instance response topic
 /// and calls the response use case.
@@ -40,31 +44,47 @@ pub fn start(
     tokio::spawn(async move {
         loop {
             match consumer.recv().await {
-                Ok(msg) => {
-                    let Some(payload) = msg.payload() else {
-                        continue;
-                    };
-                    match serde_json::from_slice::<HsmWorkerResponse>(payload) {
-                        Ok(response) => {
-                            info!(
-                                "Received worker response for requestId: {} on topic: {}",
-                                response.request_id, topic
-                            );
-                            response_use_case.response_ready(response);
-                        }
-                        Err(e) => {
-                            error!(
-                                "Failed to deserialize HsmWorkerResponse: {} - payload: {}",
-                                e,
-                                String::from_utf8_lossy(payload)
-                            );
-                        }
-                    }
-                }
+                Ok(msg) => process_message(&msg, &topic, response_use_case.as_ref()),
                 Err(e) => {
                     error!("Kafka consumer error on hsm-worker response topic: {}", e);
                 }
             }
         }
     });
+}
+
+/// Per-message handler. Extracts the W3C tracecontext header (set by
+/// hsm-worker's response producer) and sets it as the parent of the
+/// app span — so the bff response-handling span sits in the same trace
+/// as the upstream bff request that originally produced the work.
+#[instrument(skip_all, name = "consume_hsm_response")]
+fn process_message(
+    msg: &BorrowedMessage<'_>,
+    topic: &str,
+    response_use_case: &dyn ResponseUseCase,
+) {
+    let parent_ctx = global::get_text_map_propagator(|propagator| {
+        propagator.extract(&KafkaHeaderExtractor(msg.headers()))
+    });
+    Span::current().set_parent(parent_ctx);
+
+    let Some(payload) = msg.payload() else {
+        return;
+    };
+    match serde_json::from_slice::<HsmWorkerResponse>(payload) {
+        Ok(response) => {
+            info!(
+                "Received worker response for requestId: {} on topic: {}",
+                response.request_id, topic
+            );
+            response_use_case.response_ready(response);
+        }
+        Err(e) => {
+            error!(
+                "Failed to deserialize HsmWorkerResponse: {} - payload: {}",
+                e,
+                String::from_utf8_lossy(payload)
+            );
+        }
+    }
 }

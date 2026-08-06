@@ -11,9 +11,29 @@ use axum::http::{StatusCode, header};
 use axum::middleware;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
+use opentelemetry::KeyValue;
+use opentelemetry::global;
+use opentelemetry::metrics::Counter;
+use opentelemetry_http::HeaderExtractor;
 use std::sync::Arc;
+use std::sync::OnceLock;
+use tower_http::trace::TraceLayer;
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
+
+/// Lazy-init counter so the global meter provider (set by
+/// `infrastructure::telemetry::init`) is in place before we build the
+/// Counter. Bumped per HTTP request in the TraceLayer below.
+fn http_requests_counter() -> &'static Counter<u64> {
+    static C: OnceLock<Counter<u64>> = OnceLock::new();
+    C.get_or_init(|| {
+        global::meter("wallet-bff")
+            .u64_counter("http.server.requests")
+            .with_description("HTTP requests received by wallet-bff")
+            .build()
+    })
+}
 
 use crate::domain::ProblemDetail;
 
@@ -92,5 +112,33 @@ pub fn router(state: Arc<AppState>, rp_state: Arc<ReplayProtectionState>) -> Rou
             rp_state,
             replay_protection::replay_protection,
         ))
+        // Outermost layer — emits a tracing span per request that the
+        // OpenTelemetry layer (registered in infrastructure::telemetry)
+        // exports as an OTLP span. Captures method, URI for every
+        // endpoint without per-handler annotations.
+        //
+        // make_span_with extracts the W3C tracecontext from incoming
+        // headers (set by the istio-proxy sidecar) and sets it as the
+        // parent of the app span. Result: app span and envoy span share
+        // the same trace_id, so Tempo / Kiali render the full request
+        // path as one trace.
+        .layer(
+            TraceLayer::new_for_http().make_span_with(|request: &axum::http::Request<_>| {
+                let parent_cx = global::get_text_map_propagator(|propagator| {
+                    propagator.extract(&HeaderExtractor(request.headers()))
+                });
+                http_requests_counter().add(
+                    1,
+                    &[KeyValue::new("http.method", request.method().to_string())],
+                );
+                let span = tracing::info_span!(
+                    "http_request",
+                    method = %request.method(),
+                    uri = %request.uri(),
+                );
+                span.set_parent(parent_cx);
+                span
+            }),
+        )
         .with_state(state)
 }

@@ -2,14 +2,11 @@
 //
 // SPDX-License-Identifier: EUPL-1.2
 
+use wallet_bff::infrastructure::telemetry;
+
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "wallet_bff=info,rdkafka=warn,redis=warn".into()),
-        )
-        .init();
+    let _telemetry = telemetry::init("wallet-bff").expect("failed to init telemetry");
 
     wallet_bff::run().await;
 }
