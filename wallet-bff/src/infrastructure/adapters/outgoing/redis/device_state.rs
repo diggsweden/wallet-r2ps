@@ -2,19 +2,20 @@
 //
 // SPDX-License-Identifier: EUPL-1.2
 
+use std::sync::Arc;
+
 use redis::AsyncCommands;
-use redis::aio::ConnectionManager;
 use tracing::error;
 
 use crate::application::port::outgoing::DeviceStatePort;
-use crate::infrastructure::adapters::outgoing::redis::with_redis_retry;
+use crate::infrastructure::adapters::outgoing::redis::{SharedConnection, with_redis_retry};
 
 pub struct DeviceStateRedisAdapter {
-    conn: ConnectionManager,
+    conn: Arc<SharedConnection>,
 }
 
 impl DeviceStateRedisAdapter {
-    pub fn new(conn: ConnectionManager) -> Self {
+    pub fn new(conn: Arc<SharedConnection>) -> Self {
         Self { conn }
     }
 }
@@ -22,10 +23,12 @@ impl DeviceStateRedisAdapter {
 #[async_trait::async_trait]
 impl DeviceStatePort for DeviceStateRedisAdapter {
     async fn save(&self, key: &str, state: &str, ttl_seconds: u64) {
-        let result = with_redis_retry("device_state.save", key, || {
-            let mut conn = self.conn.clone();
-            async move { conn.set_ex::<_, _, ()>(key, state, ttl_seconds).await }
-        })
+        let result = with_redis_retry(
+            &self.conn,
+            "device_state.save",
+            key,
+            |mut conn| async move { conn.set_ex::<_, _, ()>(key, state, ttl_seconds).await },
+        )
         .await;
         if let Err(e) = result {
             error!("Failed to save device state for key {}: {}", key, e);
@@ -33,10 +36,12 @@ impl DeviceStatePort for DeviceStateRedisAdapter {
     }
 
     async fn load(&self, key: &str) -> Option<String> {
-        let result = with_redis_retry("device_state.load", key, || {
-            let mut conn = self.conn.clone();
-            async move { conn.get::<_, Option<String>>(key).await }
-        })
+        let result = with_redis_retry(
+            &self.conn,
+            "device_state.load",
+            key,
+            |mut conn| async move { conn.get::<_, Option<String>>(key).await },
+        )
         .await;
         match result {
             Ok(v) => v,

@@ -31,6 +31,7 @@ use wallet_bff::infrastructure::adapters::incoming::kafka::{
 use wallet_bff::infrastructure::adapters::outgoing::kafka::request_sender::{
     KafkaRequestSender, KafkaStateInitSender,
 };
+use wallet_bff::infrastructure::adapters::outgoing::redis::SharedConnection;
 use wallet_bff::infrastructure::adapters::outgoing::redis::device_state::DeviceStateRedisAdapter;
 use wallet_bff::infrastructure::adapters::outgoing::redis::nonce::NonceRedisAdapter;
 
@@ -53,11 +54,12 @@ async fn start_valkey() -> (ContainerAsync<Valkey>, String) {
     (container, url)
 }
 
-async fn valkey_connection_manager(url: &str) -> ConnectionManager {
+async fn valkey_connection_manager(url: &str) -> Arc<SharedConnection> {
     let client = redis::Client::open(url).expect("Failed to create Valkey client");
-    ConnectionManager::new(client)
+    let cm = ConnectionManager::new(client)
         .await
-        .expect("Failed to create ConnectionManager")
+        .expect("Failed to create ConnectionManager");
+    Arc::new(SharedConnection::from_manager(cm))
 }
 
 // ── Valkey adapter tests ─────────────────────────────────────────────────────
