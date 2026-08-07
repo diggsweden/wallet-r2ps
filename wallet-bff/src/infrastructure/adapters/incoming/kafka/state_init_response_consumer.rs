@@ -8,7 +8,7 @@ use rdkafka::Message;
 use rdkafka::consumer::{Consumer, StreamConsumer};
 use rdkafka::message::BorrowedMessage;
 use std::sync::Arc;
-use tracing::{Span, error, info, instrument};
+use tracing::{Instrument, error, info};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use crate::application::port::outgoing::StateInitCorrelationPort;
@@ -56,7 +56,6 @@ pub fn start(
 /// Per-message handler. Extracts the W3C tracecontext header set by the
 /// hsm-worker state-init response producer so the bff response-handling
 /// span sits in the same trace as the upstream bff create-state request.
-#[instrument(skip_all, name = "consume_state_init_response")]
 async fn process_message(
     msg: &BorrowedMessage<'_>,
     topic: &str,
@@ -65,27 +64,35 @@ async fn process_message(
     let parent_ctx = global::get_text_map_propagator(|propagator| {
         propagator.extract(&KafkaHeaderExtractor(msg.headers()))
     });
-    Span::current().set_parent(parent_ctx);
 
-    let Some(payload) = msg.payload() else {
-        return;
-    };
-    let response: StateInitResponse = match serde_json::from_slice(payload) {
-        Ok(r) => r,
-        Err(e) => {
-            error!(
-                "Failed to deserialize StateInitResponse: {} - payload: {}",
-                e,
-                String::from_utf8_lossy(payload)
-            );
+    let span = tracing::info_span!("consume_state_init_response");
+    if let Err(err) = span.set_parent(parent_ctx) {
+        tracing::warn!(?err, "Failed to set parent_ctx");
+    }
+
+    async move {
+        let Some(payload) = msg.payload() else {
             return;
-        }
-    };
+        };
+        let response: StateInitResponse = match serde_json::from_slice(payload) {
+            Ok(r) => r,
+            Err(e) => {
+                error!(
+                    "Failed to deserialize StateInitResponse: {} - payload: {}",
+                    e,
+                    String::from_utf8_lossy(payload)
+                );
+                return;
+            }
+        };
 
-    info!(
-        "Received state-init response for requestId: {} on topic: {}",
-        response.request_id, topic
-    );
+        info!(
+            "Received state-init response for requestId: {} on topic: {}",
+            response.request_id, topic
+        );
 
-    correlation_port.response_received(response).await;
+        correlation_port.response_received(response).await;
+    }
+    .instrument(span)
+    .await
 }

@@ -2,15 +2,13 @@
 //
 // SPDX-License-Identifier: EUPL-1.2
 
-use opentelemetry::KeyValue;
 use opentelemetry::global;
 use opentelemetry::trace::TracerProvider as _;
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::metrics::{PeriodicReader, SdkMeterProvider};
 use opentelemetry_sdk::propagation::TraceContextPropagator;
-use opentelemetry_sdk::runtime;
-use opentelemetry_sdk::trace::TracerProvider;
+use opentelemetry_sdk::trace::SdkTracerProvider;
 use tracing_opentelemetry::OpenTelemetryLayer;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
@@ -19,13 +17,15 @@ use tracing_subscriber::{EnvFilter, fmt};
 pub const DEFAULT_OTLP_ENDPOINT: &str = "http://gateway-collector.observability.svc:4317";
 
 pub struct TelemetryGuard {
-    _tracer_provider: TracerProvider,
+    tracer_provider: SdkTracerProvider,
     _meter_provider: SdkMeterProvider,
 }
 
 impl Drop for TelemetryGuard {
     fn drop(&mut self) {
-        opentelemetry::global::shutdown_tracer_provider();
+        if let Err(err) = self.tracer_provider.shutdown() {
+            tracing::warn!(?err, "Failed to shut down tracer provider");
+        }
         // SdkMeterProvider flushes via its own Drop on the held field.
     }
 }
@@ -40,7 +40,7 @@ pub fn init(service_name: &'static str) -> Result<TelemetryGuard, Box<dyn std::e
     // span starts a new trace, disjoint from the envoy parent.
     global::set_text_map_propagator(TraceContextPropagator::new());
 
-    let resource = Resource::new(vec![KeyValue::new("service.name", service_name)]);
+    let resource = Resource::builder().with_service_name(service_name).build();
 
     // Traces: OTLP/gRPC → gateway-collector → TempoStack.
     let span_exporter = opentelemetry_otlp::SpanExporter::builder()
@@ -48,8 +48,8 @@ pub fn init(service_name: &'static str) -> Result<TelemetryGuard, Box<dyn std::e
         .with_endpoint(&endpoint)
         .build()?;
 
-    let tracer_provider = TracerProvider::builder()
-        .with_batch_exporter(span_exporter, runtime::Tokio)
+    let tracer_provider = SdkTracerProvider::builder()
+        .with_batch_exporter(span_exporter)
         .with_resource(resource.clone())
         .build();
 
@@ -65,7 +65,7 @@ pub fn init(service_name: &'static str) -> Result<TelemetryGuard, Box<dyn std::e
         .with_endpoint(&endpoint)
         .build()?;
 
-    let reader = PeriodicReader::builder(metric_exporter, runtime::Tokio).build();
+    let reader = PeriodicReader::builder(metric_exporter).build();
 
     let meter_provider = SdkMeterProvider::builder()
         .with_reader(reader)
@@ -84,7 +84,7 @@ pub fn init(service_name: &'static str) -> Result<TelemetryGuard, Box<dyn std::e
         .init();
 
     Ok(TelemetryGuard {
-        _tracer_provider: tracer_provider,
+        tracer_provider,
         _meter_provider: meter_provider,
     })
 }

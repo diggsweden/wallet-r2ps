@@ -136,7 +136,10 @@ pub fn router(state: Arc<AppState>, rp_state: Arc<ReplayProtectionState>) -> Rou
                     method = %request.method(),
                     uri = %request.uri(),
                 );
-                span.set_parent(parent_cx);
+
+                if let Err(err) = span.set_parent(parent_cx) {
+                    tracing::warn!(?err, "Failed to set parent_ctx");
+                }
                 span
             }),
         )
