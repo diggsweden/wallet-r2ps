@@ -30,16 +30,22 @@ impl Drop for TelemetryGuard {
     }
 }
 
-pub fn init(service_name: &'static str) -> Result<TelemetryGuard, Box<dyn std::error::Error>> {
+pub fn init(
+    default_service_name: &'static str,
+) -> Result<TelemetryGuard, Box<dyn std::error::Error>> {
     let endpoint = std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT")
         .unwrap_or_else(|_| DEFAULT_OTLP_ENDPOINT.to_string());
+    let service_name =
+        std::env::var("OTEL_SERVICE_NAME").unwrap_or_else(|_| default_service_name.to_string());
 
     // W3C tracecontext propagator so we can extract `traceparent` from
     // incoming Kafka message headers (set by wallet-bff's producer) and
     // make our consumer spans children of the bff request span.
     global::set_text_map_propagator(TraceContextPropagator::new());
 
-    let resource = Resource::builder().with_service_name(service_name).build();
+    let resource = Resource::builder()
+        .with_service_name(service_name.clone())
+        .build();
 
     // Traces: OTLP/gRPC → gateway-collector → TempoStack.
     let span_exporter = opentelemetry_otlp::SpanExporter::builder()
