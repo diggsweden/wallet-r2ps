@@ -2,7 +2,6 @@
 //
 // SPDX-License-Identifier: EUPL-1.2
 
-use redis::Client;
 use std::sync::Arc;
 use std::time::Duration;
 use tracing::info;
@@ -18,12 +17,12 @@ use crate::infrastructure::adapters::outgoing::kafka::request_sender::{
     KafkaRequestSender, KafkaStateInitSender,
 };
 use crate::infrastructure::adapters::outgoing::redis::{
-    device_state::DeviceStateRedisAdapter, nonce::NonceRedisAdapter,
+    SharedConnection, device_state::DeviceStateRedisAdapter, nonce::NonceRedisAdapter,
 };
 use crate::infrastructure::config::AppConfig;
 
 pub async fn run() {
-    let config = AppConfig::new().expect("Failed to load configuration");
+    let config = Arc::new(AppConfig::new().expect("Failed to load configuration"));
 
     info!(
         "Starting wallet-bff on {}:{} (hsm-response: {}, state-init-response: {})",
@@ -33,14 +32,14 @@ pub async fn run() {
         config.state_init_response_topic,
     );
 
-    // Redis — device state only
-    let redis_client = Client::open(config.redis_url()).expect("Failed to create Redis client");
-    let conn_mgr = redis::aio::ConnectionManager::new(redis_client)
-        .await
-        .expect("Failed to connect to Redis");
+    // Redis primary (Sentinel-resolved when configured). SharedConnection
+    // lets `with_redis_retry` hot-swap the underlying ConnectionManager when
+    // Sentinel promotes a new master, so a failover does not require a pod
+    // restart to recover.
+    let redis_conn = Arc::new(SharedConnection::connect(config.clone()).await);
 
-    let device_state_port = Arc::new(DeviceStateRedisAdapter::new(conn_mgr.clone()));
-    let nonce_port = Arc::new(NonceRedisAdapter::new(conn_mgr));
+    let device_state_port = Arc::new(DeviceStateRedisAdapter::new(redis_conn.clone()));
+    let nonce_port = Arc::new(NonceRedisAdapter::new(redis_conn));
 
     // Kafka producers (inject per-instance response topics)
     let request_sender_port = Arc::new(KafkaRequestSender::new(

@@ -3113,9 +3113,11 @@ dependencies = [
  "futures-channel",
  "futures-util",
  "itoa",
+ "log",
  "num-bigint",
  "percent-encoding",
  "pin-project-lite",
+ "rand 0.10.2",
  "ryu",
  "sha1_smol",
  "socket2 0.6.5",
@@ -4634,6 +4636,7 @@ dependencies = [
 name = "wallet-bff"
 version = "0.1.0"
 dependencies = [
+ "arc-swap",
  "async-trait",
  "axum 0.8.9",
  "base64",
