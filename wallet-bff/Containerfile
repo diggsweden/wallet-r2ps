@@ -27,7 +27,7 @@ RUN cargo build --release -p wallet-bff
 FROM scratch AS export-binary
 COPY --from=builder /app/target/release/wallet-bff /wallet-bff
 
-FROM debian:bookworm-slim@sha256:96e378d7e6531ac9a15ad505478fcc2e69f371b10f5cdf87857c4b8188404716 AS runtime
+FROM debian:bookworm-slim@sha256:abd67ffcfa541b485a3dff59865ab629aa048a6c613e639d36e7456b0b229241 AS runtime
 
 RUN apt-get update && apt-get install -y \
     zlib1g \
