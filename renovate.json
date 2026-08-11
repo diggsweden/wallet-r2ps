@@ -45,6 +45,12 @@
       "matchManagers": ["cargo"],
       "matchPackageNames": ["rand_core"],
       "allowedVersions": "<0.7"
+    },
+    {
+      "description": "p256 and elliptic-curve are capped below 0.14 — elliptic-curve 0.14 split the hash2curve/oprf modules out into standalone crates with a new OprfParameters trait, but opaque-ke 4.x (including the 4.1.0-pre.2 prerelease) still depends on the voprf crate 0.5.0, which requires the old elliptic_curve::voprf::VoprfParameters trait from 0.13. NistP256 in p256 0.14 no longer implements that trait, so opaque_ke::CipherSuite fails to resolve. Update in the same PR as the opaque-ke upgrade, once a release compatible with elliptic-curve 0.14 exists.",
+      "matchManagers": ["cargo"],
+      "matchPackageNames": ["p256", "elliptic-curve"],
+      "allowedVersions": "<0.14"
     }
   ]
 }

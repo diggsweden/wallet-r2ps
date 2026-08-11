@@ -19,8 +19,8 @@ hsm-common = { path = "../hsm-common" }
 
 # OPAQUE protocol (must match hsm-worker + opaque-ke-wasm)
 opaque-ke = { version = "4.0.1", features = ["std"] }
-p256 = { version = "0.14", features = ["hash2curve", "voprf", "ecdh", "jwk", "ecdsa", "pem"] }
-elliptic-curve = { version = "0.14", features = ["sec1", "jwk"] }
+p256 = { version = "0.13", features = ["hash2curve", "voprf", "ecdh", "jwk", "ecdsa", "pem"] }
+elliptic-curve = { version = "0.13", features = ["sec1", "jwk"] }
 voprf = "0.5.0"
 sha2 = "0.10"
 hkdf = "0.12"
