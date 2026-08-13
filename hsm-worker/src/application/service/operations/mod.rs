@@ -104,7 +104,7 @@ impl OperationDispatcher {
     /// Creates a new OperationDispatcher with all operation handlers initialized
     pub fn from_dependencies(
         pake_port: Arc<dyn PakePort>,
-        hsm_spi_port: Arc<dyn HsmSpiPort + Send + Sync>,
+        hsm_spi_port: Arc<dyn HsmSpiPort>,
         hsm_key_label: String,
     ) -> Self {
         Self {

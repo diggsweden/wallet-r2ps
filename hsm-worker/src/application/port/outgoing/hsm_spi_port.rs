@@ -27,7 +27,7 @@ define_byte_vector!(
 );
 
 #[cfg_attr(test, mockall::automock)]
-pub trait HsmSpiPort {
+pub trait HsmSpiPort: Send + Sync {
     fn generate_key(
         &self,
         label: &str,

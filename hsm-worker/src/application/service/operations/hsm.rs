@@ -15,11 +15,11 @@ use std::sync::Arc;
 use tracing::debug;
 
 pub struct HsmSignOperation {
-    hsm_spi_port: Arc<dyn HsmSpiPort + Send + Sync>,
+    hsm_spi_port: Arc<dyn HsmSpiPort>,
 }
 
 impl HsmSignOperation {
-    pub fn new(hsm_spi_port: Arc<dyn HsmSpiPort + Send + Sync>) -> Self {
+    pub fn new(hsm_spi_port: Arc<dyn HsmSpiPort>) -> Self {
         Self { hsm_spi_port }
     }
 }
@@ -67,12 +67,12 @@ impl ServiceOperation for HsmSignOperation {
 }
 
 pub struct HsmGenerateKeyOperation {
-    hsm_spi_port: Arc<dyn HsmSpiPort + Send + Sync>,
+    hsm_spi_port: Arc<dyn HsmSpiPort>,
     hsm_key_label: String,
 }
 
 impl HsmGenerateKeyOperation {
-    pub fn new(hsm_spi_port: Arc<dyn HsmSpiPort + Send + Sync>, hsm_key_label: String) -> Self {
+    pub fn new(hsm_spi_port: Arc<dyn HsmSpiPort>, hsm_key_label: String) -> Self {
         Self {
             hsm_spi_port,
             hsm_key_label,
