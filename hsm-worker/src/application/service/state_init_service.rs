@@ -13,7 +13,7 @@ use uuid::Uuid;
 pub struct StateInitService {
     response_spi_port: Arc<dyn StateInitResponseSpiPort + Send + Sync>,
     jose: Arc<dyn JosePort>,
-    hsm_spi_port: Arc<dyn HsmSpiPort + Send + Sync>,
+    hsm_spi_port: Arc<dyn HsmSpiPort>,
     hsm_key_label: String,
     opaque_server_id: String,
 }
@@ -31,7 +31,7 @@ impl StateInitService {
     pub fn new(
         response_spi_port: Arc<dyn StateInitResponseSpiPort + Send + Sync>,
         jose: Arc<dyn JosePort>,
-        hsm_spi_port: Arc<dyn HsmSpiPort + Send + Sync>,
+        hsm_spi_port: Arc<dyn HsmSpiPort>,
         hsm_key_label: String,
         opaque_server_id: String,
     ) -> Self {
