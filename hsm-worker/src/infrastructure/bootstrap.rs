@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 
 use crate::application::port::outgoing::hsm_spi_port::HsmSpiPort;
+use crate::application::port::outgoing::jose_port::JoseError;
 use crate::application::service::StateInitService;
 use crate::application::{WorkerPorts, WorkerService};
 use crate::infrastructure::KafkaConfig;
@@ -20,11 +21,38 @@ use p256::pkcs8::DecodePrivateKey;
 use std::sync::Arc;
 use tracing::{info, warn};
 
+/// A start-up check that failed. One variant per implicit check that `build_services`
+/// performs, so a failure can be named and audited instead of only panicking.
+#[derive(Debug)]
+pub enum BootstrapError {
+    /// Could not reach or open the HSM token.
+    HsmConnect(String),
+    /// Reached the token but could not authenticate to it.
+    HsmLogin(String),
+    /// Authenticated, but the AES wrapping key is not usable.
+    WrapKeyMissing(String),
+    /// A required configuration variable is missing or self-contradictory.
+    Config(String),
+    /// Deriving a service key from the HSM root key failed.
+    KeyDerivation { separator: String, cause: String },
+    /// The JOSE adapter rejected the derived key.
+    JoseInit(JoseError),
+    /// The OPAQUE server setup could not be loaded or created.
+    OpaqueInit(String),
+}
+
+/// Everything `build_services` produces. A struct rather than a tuple so later steps
+/// can add fields without changing the signature again.
+pub struct Services {
+    pub worker: WorkerService,
+    pub state_init: StateInitService,
+}
+
 pub fn build_services(
     app_config: &AppConfig,
     kafka_config: Arc<KafkaConfig>,
-) -> (WorkerService, StateInitService) {
-    let hsm = Arc::new(HsmWrapper::new(app_config.clone().into()).unwrap());
+) -> Result<Services, BootstrapError> {
+    let hsm = Arc::new(HsmWrapper::new(app_config.clone().into())?);
 
     struct ModeConfig {
         jose_secret: SecretKey,
@@ -38,29 +66,43 @@ pub fn build_services(
     let mode = match &app_config.hsm_root_key_label {
         // Key derivation mode: HSM key derivation is used to derive the JWS, JWE and OPAQUE secrets.
         Some(root_label) => {
-            let jws_sep = app_config.jws_domain_separator.as_deref().expect(
-                "JWS_DOMAIN_SEPARATOR required in HSM mode (e.g. \"rk-202501_jws-202501\")",
-            );
-            let opaque_sep = app_config.opaque_domain_separator.as_deref().expect(
-                "OPAQUE_DOMAIN_SEPARATOR required in HSM mode (e.g. \"rk-202501_opaque-202501\")",
-            );
-            assert_ne!(
-                jws_sep, opaque_sep,
-                "JWS_DOMAIN_SEPARATOR and OPAQUE_DOMAIN_SEPARATOR must differ"
-            );
+            let jws_sep = app_config.jws_domain_separator.as_deref().ok_or_else(|| {
+                BootstrapError::Config(
+                    "JWS_DOMAIN_SEPARATOR required in HSM mode (e.g. \"rk-202501_jws-202501\")"
+                        .to_owned(),
+                )
+            })?;
+            let opaque_sep = app_config
+                .opaque_domain_separator
+                .as_deref()
+                .ok_or_else(|| {
+                    BootstrapError::Config(
+                        "OPAQUE_DOMAIN_SEPARATOR required in HSM mode \
+                     (e.g. \"rk-202501_opaque-202501\")"
+                            .to_owned(),
+                    )
+                })?;
+            if jws_sep == opaque_sep {
+                return Err(BootstrapError::Config(
+                    "JWS_DOMAIN_SEPARATOR and OPAQUE_DOMAIN_SEPARATOR must differ".to_owned(),
+                ));
+            }
             info!("Using HSM key derivation (root key: {})", root_label);
-            let jose_secret = derive_key_from_hsm(hsm.as_ref(), root_label, jws_sep);
+            let jose_secret = derive_key_from_hsm(hsm.as_ref(), root_label, jws_sep)?;
             let jwe_secret = match app_config.jwe_domain_separator.as_deref() {
                 Some(jwe_sep) => {
-                    assert_ne!(
-                        jws_sep, jwe_sep,
-                        "JWS_DOMAIN_SEPARATOR and JWE_DOMAIN_SEPARATOR must differ"
-                    );
-                    assert_ne!(
-                        jwe_sep, opaque_sep,
-                        "JWE_DOMAIN_SEPARATOR and OPAQUE_DOMAIN_SEPARATOR must differ"
-                    );
-                    derive_key_from_hsm(hsm.as_ref(), root_label, jwe_sep)
+                    if jws_sep == jwe_sep {
+                        return Err(BootstrapError::Config(
+                            "JWS_DOMAIN_SEPARATOR and JWE_DOMAIN_SEPARATOR must differ".to_owned(),
+                        ));
+                    }
+                    if jwe_sep == opaque_sep {
+                        return Err(BootstrapError::Config(
+                            "JWE_DOMAIN_SEPARATOR and OPAQUE_DOMAIN_SEPARATOR must differ"
+                                .to_owned(),
+                        ));
+                    }
+                    derive_key_from_hsm(hsm.as_ref(), root_label, jwe_sep)?
                 }
                 None => {
                     warn!(
@@ -69,7 +111,7 @@ pub fn build_services(
                     jose_secret.clone()
                 }
             };
-            let opaque_secret = derive_key_from_hsm(hsm.as_ref(), root_label, opaque_sep);
+            let opaque_secret = derive_key_from_hsm(hsm.as_ref(), root_label, opaque_sep)?;
             let opaque_server_id = jose_utils::ec_kid_from_secret(&opaque_secret);
             ModeConfig {
                 jose_secret,
@@ -84,17 +126,32 @@ pub fn build_services(
             // Two-key PEM mode: explicit SERVER_JWS_PRIVATE_KEY + SERVER_JWE_PRIVATE_KEY.
             Some(jws_b64) => {
                 info!("Using two-key PEM config (SERVER_JWS_PRIVATE_KEY + SERVER_JWE_PRIVATE_KEY)");
-                let jws_pem =
-                    load_pem_from_base64(jws_b64).expect("Failed to load SERVER_JWS_PRIVATE_KEY");
-                let jose_secret = SecretKey::from_pkcs8_pem(&pem::encode(&jws_pem))
-                    .expect("Failed to parse SERVER_JWS_PRIVATE_KEY as P-256 PKCS8");
-                let jwe_pem =
-                    load_pem_from_base64(app_config.server_jwe_private_key.as_deref().expect(
-                        "SERVER_JWE_PRIVATE_KEY required when SERVER_JWS_PRIVATE_KEY is set",
-                    ))
-                    .expect("Failed to load SERVER_JWE_PRIVATE_KEY");
-                let jwe_secret = SecretKey::from_pkcs8_pem(&pem::encode(&jwe_pem))
-                    .expect("Failed to parse SERVER_JWE_PRIVATE_KEY as P-256 PKCS8");
+                let jws_pem = load_pem_from_base64(jws_b64).map_err(|e| {
+                    BootstrapError::Config(format!("SERVER_JWS_PRIVATE_KEY: {e:?}"))
+                })?;
+                let jose_secret = SecretKey::from_pkcs8_pem(&pem::encode(&jws_pem)).map_err(
+                    |_| {
+                        BootstrapError::Config(
+                            "SERVER_JWS_PRIVATE_KEY is not a P-256 PKCS#8 key".to_owned(),
+                        )
+                    },
+                )?;
+                let jwe_b64 = app_config.server_jwe_private_key.as_deref().ok_or_else(|| {
+                    BootstrapError::Config(
+                        "SERVER_JWE_PRIVATE_KEY required when SERVER_JWS_PRIVATE_KEY is set"
+                            .to_owned(),
+                    )
+                })?;
+                let jwe_pem = load_pem_from_base64(jwe_b64).map_err(|e| {
+                    BootstrapError::Config(format!("SERVER_JWE_PRIVATE_KEY: {e:?}"))
+                })?;
+                let jwe_secret = SecretKey::from_pkcs8_pem(&pem::encode(&jwe_pem)).map_err(
+                    |_| {
+                        BootstrapError::Config(
+                            "SERVER_JWE_PRIVATE_KEY is not a P-256 PKCS#8 key".to_owned(),
+                        )
+                    },
+                )?;
                 let id = app_config.opaque_server_identifier.clone();
                 ModeConfig {
                     jose_secret: jose_secret.clone(),
@@ -109,21 +166,31 @@ pub fn build_services(
             // SERVER_ENCRYPTION_KEY optionally provides a distinct JWE key.
             None => {
                 info!("Using legacy single-key PEM config (SERVER_PRIVATE_KEY)");
-                let pem = load_pem_from_base64(
-                    app_config
-                        .server_private_key
-                        .as_deref()
-                        .expect("one of SERVER_JWS_PRIVATE_KEY or SERVER_PRIVATE_KEY is required"),
-                )
-                .expect("Failed to load SERVER_PRIVATE_KEY");
-                let secret = SecretKey::from_pkcs8_pem(&pem::encode(&pem))
-                    .expect("Failed to parse server private key as P-256 PKCS8");
+                let encoded = app_config.server_private_key.as_deref().ok_or_else(|| {
+                    BootstrapError::Config(
+                        "one of SERVER_JWS_PRIVATE_KEY or SERVER_PRIVATE_KEY is required"
+                            .to_owned(),
+                    )
+                })?;
+                let pem = load_pem_from_base64(encoded)
+                    .map_err(|e| BootstrapError::Config(format!("SERVER_PRIVATE_KEY: {e:?}")))?;
+                // The pkcs8 error is discarded rather than formatted: it comes from a parser
+                // that has seen key bytes, and this string reaches a log line.
+                let secret = SecretKey::from_pkcs8_pem(&pem::encode(&pem)).map_err(|_| {
+                    BootstrapError::Config(
+                        "SERVER_PRIVATE_KEY is not a P-256 PKCS#8 key".to_owned(),
+                    )
+                })?;
                 let jwe_secret = match app_config.server_encryption_key.as_deref() {
                     Some(enc_b64) => {
-                        let enc_pem = load_pem_from_base64(enc_b64)
-                            .expect("Failed to load SERVER_ENCRYPTION_KEY");
-                        SecretKey::from_pkcs8_pem(&pem::encode(&enc_pem))
-                            .expect("Failed to parse server encryption key as P-256 PKCS8")
+                        let enc_pem = load_pem_from_base64(enc_b64).map_err(|e| {
+                            BootstrapError::Config(format!("SERVER_ENCRYPTION_KEY: {e:?}"))
+                        })?;
+                        SecretKey::from_pkcs8_pem(&pem::encode(&enc_pem)).map_err(|_| {
+                            BootstrapError::Config(
+                                "SERVER_ENCRYPTION_KEY is not a P-256 PKCS#8 key".to_owned(),
+                            )
+                        })?
                     }
                     None => {
                         warn!(
@@ -132,6 +199,8 @@ pub fn build_services(
                         secret.clone()
                     }
                 };
+                // Legacy mode: same key for JWS and OPAQUE — preserves backwards compat
+                // with existing client registrations.
                 let id = app_config.opaque_server_identifier.clone();
                 ModeConfig {
                     jose_secret: secret.clone(),
@@ -146,8 +215,7 @@ pub fn build_services(
     };
 
     let jose = Arc::new(
-        JoseAdapter::new(mode.jose_secret, mode.jwe_secret)
-            .expect("Failed to initialize JoseAdapter (signing and encryption keys must differ)"),
+        JoseAdapter::new(mode.jose_secret, mode.jwe_secret).map_err(BootstrapError::JoseInit)?,
     );
 
     let pake = Arc::new(
@@ -158,7 +226,7 @@ pub fn build_services(
             mode.opaque_server_id.clone(),
             app_config.opaque_context.clone(),
         )
-        .expect("Failed to build OPAQUE adapter"),
+        .map_err(BootstrapError::OpaqueInit)?,
     );
 
     let ports = WorkerPorts {
@@ -185,14 +253,27 @@ pub fn build_services(
         mode.opaque_server_id,
     );
 
-    (worker_service, state_init_service)
+    Ok(Services {
+        worker: worker_service,
+        state_init: state_init_service,
+    })
 }
 
-fn derive_key_from_hsm(hsm: &HsmWrapper, root_label: &str, domain_sep: &str) -> SecretKey {
-    let hmac_output = hsm.derive_key(root_label, domain_sep).unwrap_or_else(|e| {
-        panic!("HSM key derivation failed (root={root_label}, domain={domain_sep}): {e:?}")
-    });
-    key_derivation::derive_scalar(hmac_output.as_ref(), domain_sep).unwrap_or_else(|e| {
-        panic!("Key scalar derivation failed (root={root_label}, domain={domain_sep}): {e:?}")
+fn derive_key_from_hsm(
+    hsm: &HsmWrapper,
+    root_label: &str,
+    domain_sep: &str,
+) -> Result<SecretKey, BootstrapError> {
+    let hmac_output =
+        hsm.derive_key(root_label, domain_sep)
+            .map_err(|e| BootstrapError::KeyDerivation {
+                separator: domain_sep.to_owned(),
+                cause: format!("HSM HMAC with root key {root_label:?} failed: {e}"),
+            })?;
+    key_derivation::derive_scalar(hmac_output.as_ref(), domain_sep).map_err(|e| {
+        BootstrapError::KeyDerivation {
+            separator: domain_sep.to_owned(),
+            cause: e.to_string(),
+        }
     })
 }

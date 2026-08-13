@@ -1,10 +1,11 @@
-// SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
+// SPDX-File opyrightText: 2026 Digg - Agency for Digital Government
 //
 // SPDX-License-Identifier: EUPL-1.2
 
 use crate::application::hsm_spi_port::HsmSpiPort;
 use crate::application::port::outgoing::hsm_spi_port::DerivedSecret;
 use crate::domain::{Curve, EcPublicJwk, HsmKey, WrappedPrivateKey};
+use crate::infrastructure::bootstrap::BootstrapError;
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use cryptoki::context::{CInitializeArgs, CInitializeFlags, Pkcs11};
@@ -37,62 +38,71 @@ pub struct Pkcs11Config {
     pub wrap_key_alias: String,
 }
 
+fn hsm_connect_err(e: Error) -> BootstrapError {
+    BootstrapError::HsmConnect(e.to_string())
+}
+
 impl HsmWrapper {
-    pub fn new(config: Pkcs11Config) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn new(config: Pkcs11Config) -> Result<Self, BootstrapError> {
         debug!(
             "Creating HSM wrapper with config lib_path={} slot_token_label={} wrap_key_alias={}",
             config.lib_path, config.slot_token_label, config.wrap_key_alias
         );
         // 1. Initialize the PKCS#11 context
-        let pkcs11 = Arc::new(Pkcs11::new(config.lib_path)?);
+        let pkcs11 = Arc::new(Pkcs11::new(config.lib_path).map_err(hsm_connect_err)?);
 
-        pkcs11.initialize(CInitializeArgs::new(CInitializeFlags::OS_LOCKING_OK))?;
+        pkcs11
+            .initialize(CInitializeArgs::new(CInitializeFlags::OS_LOCKING_OK))
+            .map_err(hsm_connect_err)?;
         // 2. Find the target slot ID
-        let slots = pkcs11.get_slots_with_token()?;
+        let slots = pkcs11.get_slots_with_token().map_err(hsm_connect_err)?;
 
-        let slot = slots
+        let slot = *slots
             .iter()
-            .find(|slot| match pkcs11.get_token_info(**slot) {
-                Ok(token_info) => {
-                    if token_info.label().trim() == config.slot_token_label {
-                        info!(
-                            "Found slot with token label: {} id:{}",
-                            config.slot_token_label,
-                            slot.id()
-                        );
-                        true
-                    } else {
-                        false
-                    }
-                }
-                Err(_) => false,
+            .find(|slot| {
+                pkcs11
+                    .get_token_info(**slot)
+                    .is_ok_and(|token_info| token_info.label().trim() == config.slot_token_label)
             })
-            .unwrap_or_else(|| {
+            .ok_or_else(|| {
                 error!("Invalid slot_token_label: {}", config.slot_token_label);
-                panic!("Invalid slot_token_label");
-            });
+                BootstrapError::HsmConnect(format!(
+                    "no slot has a token labelled {:?}",
+                    config.slot_token_label
+                ))
+            })?;
+        info!(
+            "Found slot with token label: {} id:{}",
+            config.slot_token_label,
+            slot.id()
+        );
 
         // initialize a test token
         let user_pin = config
             .user_pin
-            .map(|pin| AuthPin::new(pin.into_boxed_str()));
+            .map(|pin| AuthPin::new(pin.into_boxed_str()))
+            .ok_or_else(|| BootstrapError::HsmLogin("PKCS11_USER_PIN is not set".to_owned()))?;
 
         let wrap_key_alias = config.wrap_key_alias.as_bytes().to_vec();
 
-        let session = pkcs11.open_rw_session(*slot)?;
+        let session = pkcs11.open_rw_session(slot).map_err(hsm_connect_err)?;
 
-        session.login(UserType::User, Some(&user_pin.clone().unwrap()))?;
+        session
+            .login(UserType::User, Some(&user_pin))
+            .map_err(|e| BootstrapError::HsmLogin(e.to_string()))?;
 
         let result = HsmWrapper {
             pkcs11,
-            slot: *slot,
+            slot,
             wrap_key_alias,
-            user_pin,
+            user_pin: Some(user_pin),
         };
 
         // verify that wrapping key is present — the keytool is responsible for creating it
         if !result.wrap_key_alias.is_empty() {
-            result.aes_wrapping_key(&session)?;
+            result.aes_wrapping_key(&session).map_err(|e| {
+                BootstrapError::WrapKeyMissing(format!("{:?}: {e}", config.wrap_key_alias))
+            })?;
         }
 
         Ok(result)
