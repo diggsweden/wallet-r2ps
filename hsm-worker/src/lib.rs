@@ -43,7 +43,7 @@ pub fn run() {
     let state_init_receiver =
         StateInitRequestKafkaReceiver::new(state_init_service, running.clone());
     let state_init_handle = state_init_receiver.start_worker_thread(kafka_config.clone());
-    
+
     info!("HSM worker started");
 
     // wait until both worker threads finish
