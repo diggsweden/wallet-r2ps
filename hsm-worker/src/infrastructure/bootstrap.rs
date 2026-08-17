@@ -4,6 +4,9 @@
 
 use crate::application::port::outgoing::hsm_spi_port::HsmSpiPort;
 use crate::application::port::outgoing::jose_port::JoseError;
+use crate::application::port::outgoing::self_test_spi_port::{
+    CheckResult, Outcome, SelfTestError, TsfClaim,
+};
 use crate::application::service::StateInitService;
 use crate::application::{WorkerPorts, WorkerService};
 use crate::infrastructure::KafkaConfig;
@@ -39,6 +42,45 @@ pub enum BootstrapError {
     JoseInit(JoseError),
     /// The OPAQUE server setup could not be loaded or created.
     OpaqueInit(String),
+}
+
+impl From<BootstrapError> for CheckResult {
+    fn from(value: BootstrapError) -> Self {
+        let (name, claim, detail) = match value {
+            BootstrapError::HsmConnect(detail) => {
+                ("hsm_connect", TsfClaim::WscdHsmConnectivity, detail)
+            }
+            BootstrapError::HsmLogin(detail) => {
+                ("hsm_login", TsfClaim::WscdHsmConnectivity, detail)
+            }
+
+            BootstrapError::WrapKeyMissing(detail) => (
+                "hsm_wrap_key_missing",
+                TsfClaim::WscdHsmConnectivity,
+                detail,
+            ),
+            BootstrapError::Config(detail) => ("config", TsfClaim::WscdHsmConnectivity, detail),
+            BootstrapError::KeyDerivation { separator, cause } => (
+                "hsm_key_derivation",
+                TsfClaim::WscdHsmConnectivity,
+                format!("{separator}: {cause}"),
+            ),
+            BootstrapError::JoseInit(err) => (
+                "jose_init",
+                TsfClaim::CryptographicLibraries,
+                format!("{err:?}"),
+            ),
+            BootstrapError::OpaqueInit(detail) => {
+                ("opaque_init", TsfClaim::CryptographicLibraries, detail)
+            }
+        };
+
+        CheckResult {
+            name,
+            claim,
+            outcome: Outcome::Fail(SelfTestError { detail }),
+        }
+    }
 }
 
 /// Everything `build_services` produces. A struct rather than a tuple so later steps
