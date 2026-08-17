@@ -347,10 +347,7 @@ fn make_fixture(pake: Arc<dyn PakePort>) -> TestFixture {
 }
 
 /// Build a `TestFixture` using the provided pake and hsm mocks.
-fn make_fixture_with_hsm(
-    pake: Arc<dyn PakePort>,
-    hsm: Arc<dyn HsmSpiPort + Send + Sync>,
-) -> TestFixture {
+fn make_fixture_with_hsm(pake: Arc<dyn PakePort>, hsm: Arc<dyn HsmSpiPort>) -> TestFixture {
     make_fixture_with_hsm_keys(pake, hsm, vec![])
 }
 
@@ -358,7 +355,7 @@ fn make_fixture_with_hsm(
 /// The default state has a password file entry and dev_authorization_code="test-code".
 fn make_fixture_with_hsm_keys(
     pake: Arc<dyn PakePort>,
-    hsm: Arc<dyn HsmSpiPort + Send + Sync>,
+    hsm: Arc<dyn HsmSpiPort>,
     hsm_keys: Vec<HsmKey>,
 ) -> TestFixture {
     let (server_jose, server_verifier, server_pub_pem) = setup_server_crypto();
