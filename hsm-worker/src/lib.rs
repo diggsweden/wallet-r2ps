@@ -3,6 +3,8 @@
 // SPDX-License-Identifier: EUPL-1.2
 
 use crate::application::WorkerRequestUseCase;
+use crate::application::self_test_spi_port::{CheckResult, Outcome, Trigger};
+use crate::application::service::SelfTestService;
 use crate::infrastructure::bootstrap::build_services;
 use crate::infrastructure::config::app_config::AppConfig;
 use crate::infrastructure::{
@@ -10,7 +12,7 @@ use crate::infrastructure::{
 };
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use tracing::{debug, info};
+use tracing::{debug, error, info};
 
 pub mod application;
 pub mod domain;
@@ -31,9 +33,34 @@ pub fn run() {
     })
     .expect("Error setting Ctrl-C handler");
 
-    let services = build_services(&app_config, kafka_config.clone()).unwrap();
+    let services = match build_services(&app_config, kafka_config.clone()) {
+        Ok(services) => services,
+        Err(e) => {
+            log_check_result(&e.into());
+            std::process::exit(1);
+        }
+    };
+
     let worker_use_case: Arc<dyn WorkerRequestUseCase + Send + Sync> = Arc::new(services.worker);
     let state_init_service = Arc::new(services.state_init);
+
+    let self_test_service = SelfTestService::new(vec![]);
+    let trigger = Trigger::Startup;
+    let test_results = self_test_service.run_suite(trigger);
+    let mut failed: Vec<&str> = Vec::new();
+
+    for result in &test_results {
+        log_check_result(result);
+        if let Outcome::Fail(_) = &result.outcome {
+            failed.push(result.name);
+        }
+    }
+
+    if failed.is_empty() {
+        info!(trigger = ?trigger, total = test_results.len(), "self-test suite passed");
+    } else {
+        error!(trigger = ?trigger, total = test_results.len(), failed = ?failed, "self-test suite failed");
+    }
 
     // start request worker
     let worker_kafka_receiver = WorkerRequestKafkaReceiver::new(worker_use_case, running.clone());
@@ -49,4 +76,15 @@ pub fn run() {
     // wait until both worker threads finish
     let _ = join_handle.join();
     let _ = state_init_handle.join();
+}
+
+fn log_check_result(result: &CheckResult) {
+    match &result.outcome {
+        Outcome::Pass => {
+            info!(check = result.name, claim = ?result.claim, "self-test check passed")
+        }
+        Outcome::Fail(e) => {
+            error!(check = result.name, claim = ?result.claim, detail = %e.detail, "self-test check failed");
+        }
+    }
 }

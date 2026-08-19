@@ -34,8 +34,10 @@ pub enum BootstrapError {
     HsmLogin(String),
     /// Authenticated, but the AES wrapping key is not usable.
     WrapKeyMissing(String),
-    /// A required configuration variable is missing or self-contradictory.
-    Config(String),
+    /// A static PEM server key (legacy single-key SERVER_PRIVATE_KEY, or the two-key
+    /// SERVER_JWS_PRIVATE_KEY/SERVER_JWE_PRIVATE_KEY/SERVER_ENCRYPTION_KEY set — used when
+    /// no HSM root key is configured) is missing or not a valid P-256 PKCS#8 key.
+    LegacyKeyConfig(String),
     /// Deriving a service key from the HSM root key failed.
     KeyDerivation { separator: String, cause: String },
     /// The JOSE adapter rejected the derived key.
@@ -59,7 +61,11 @@ impl From<BootstrapError> for CheckResult {
                 TsfClaim::WscdHsmConnectivity,
                 detail,
             ),
-            BootstrapError::Config(detail) => ("config", TsfClaim::WscdHsmConnectivity, detail),
+            BootstrapError::LegacyKeyConfig(detail) => (
+                "legacy_key_config",
+                TsfClaim::CryptographicLibraries,
+                detail,
+            ),
             BootstrapError::KeyDerivation { separator, cause } => (
                 "hsm_key_derivation",
                 TsfClaim::WscdHsmConnectivity,
@@ -109,40 +115,39 @@ pub fn build_services(
         // Key derivation mode: HSM key derivation is used to derive the JWS, JWE and OPAQUE secrets.
         Some(root_label) => {
             let jws_sep = app_config.jws_domain_separator.as_deref().ok_or_else(|| {
-                BootstrapError::Config(
-                    "JWS_DOMAIN_SEPARATOR required in HSM mode (e.g. \"rk-202501_jws-202501\")"
-                        .to_owned(),
-                )
+                BootstrapError::KeyDerivation {
+                    separator: "JWS_DOMAIN_SEPARATOR".to_owned(),
+                    cause: "required in HSM mode (e.g. \"rk-202501_jws-202501\")".to_owned(),
+                }
             })?;
             let opaque_sep = app_config
                 .opaque_domain_separator
                 .as_deref()
-                .ok_or_else(|| {
-                    BootstrapError::Config(
-                        "OPAQUE_DOMAIN_SEPARATOR required in HSM mode \
-                     (e.g. \"rk-202501_opaque-202501\")"
-                            .to_owned(),
-                    )
+                .ok_or_else(|| BootstrapError::KeyDerivation {
+                    separator: "OPAQUE_DOMAIN_SEPARATOR".to_owned(),
+                    cause: "required in HSM mode (e.g. \"rk-202501_opaque-202501\")".to_owned(),
                 })?;
             if jws_sep == opaque_sep {
-                return Err(BootstrapError::Config(
-                    "JWS_DOMAIN_SEPARATOR and OPAQUE_DOMAIN_SEPARATOR must differ".to_owned(),
-                ));
+                return Err(BootstrapError::KeyDerivation {
+                    separator: "JWS_DOMAIN_SEPARATOR/OPAQUE_DOMAIN_SEPARATOR".to_owned(),
+                    cause: "must be different values".to_owned(),
+                });
             }
             info!("Using HSM key derivation (root key: {})", root_label);
             let jose_secret = derive_key_from_hsm(hsm.as_ref(), root_label, jws_sep)?;
             let jwe_secret = match app_config.jwe_domain_separator.as_deref() {
                 Some(jwe_sep) => {
                     if jws_sep == jwe_sep {
-                        return Err(BootstrapError::Config(
-                            "JWS_DOMAIN_SEPARATOR and JWE_DOMAIN_SEPARATOR must differ".to_owned(),
-                        ));
+                        return Err(BootstrapError::KeyDerivation {
+                            separator: "JWS_DOMAIN_SEPARATOR/JWE_DOMAIN_SEPARATOR".to_owned(),
+                            cause: "must be different values".to_owned(),
+                        });
                     }
                     if jwe_sep == opaque_sep {
-                        return Err(BootstrapError::Config(
-                            "JWE_DOMAIN_SEPARATOR and OPAQUE_DOMAIN_SEPARATOR must differ"
-                                .to_owned(),
-                        ));
+                        return Err(BootstrapError::KeyDerivation {
+                            separator: "JWE_DOMAIN_SEPARATOR/OPAQUE_DOMAIN_SEPARATOR".to_owned(),
+                            cause: "must be different values".to_owned(),
+                        });
                     }
                     derive_key_from_hsm(hsm.as_ref(), root_label, jwe_sep)?
                 }
@@ -169,27 +174,27 @@ pub fn build_services(
             Some(jws_b64) => {
                 info!("Using two-key PEM config (SERVER_JWS_PRIVATE_KEY + SERVER_JWE_PRIVATE_KEY)");
                 let jws_pem = load_pem_from_base64(jws_b64).map_err(|e| {
-                    BootstrapError::Config(format!("SERVER_JWS_PRIVATE_KEY: {e:?}"))
+                    BootstrapError::LegacyKeyConfig(format!("SERVER_JWS_PRIVATE_KEY: {e:?}"))
                 })?;
                 let jose_secret = SecretKey::from_pkcs8_pem(&pem::encode(&jws_pem)).map_err(
                     |_| {
-                        BootstrapError::Config(
+                        BootstrapError::LegacyKeyConfig(
                             "SERVER_JWS_PRIVATE_KEY is not a P-256 PKCS#8 key".to_owned(),
                         )
                     },
                 )?;
                 let jwe_b64 = app_config.server_jwe_private_key.as_deref().ok_or_else(|| {
-                    BootstrapError::Config(
+                    BootstrapError::LegacyKeyConfig(
                         "SERVER_JWE_PRIVATE_KEY required when SERVER_JWS_PRIVATE_KEY is set"
                             .to_owned(),
                     )
                 })?;
                 let jwe_pem = load_pem_from_base64(jwe_b64).map_err(|e| {
-                    BootstrapError::Config(format!("SERVER_JWE_PRIVATE_KEY: {e:?}"))
+                    BootstrapError::LegacyKeyConfig(format!("SERVER_JWE_PRIVATE_KEY: {e:?}"))
                 })?;
                 let jwe_secret = SecretKey::from_pkcs8_pem(&pem::encode(&jwe_pem)).map_err(
                     |_| {
-                        BootstrapError::Config(
+                        BootstrapError::LegacyKeyConfig(
                             "SERVER_JWE_PRIVATE_KEY is not a P-256 PKCS#8 key".to_owned(),
                         )
                     },
@@ -209,27 +214,30 @@ pub fn build_services(
             None => {
                 info!("Using legacy single-key PEM config (SERVER_PRIVATE_KEY)");
                 let encoded = app_config.server_private_key.as_deref().ok_or_else(|| {
-                    BootstrapError::Config(
+                    BootstrapError::LegacyKeyConfig(
                         "one of SERVER_JWS_PRIVATE_KEY or SERVER_PRIVATE_KEY is required"
                             .to_owned(),
                     )
                 })?;
-                let pem = load_pem_from_base64(encoded)
-                    .map_err(|e| BootstrapError::Config(format!("SERVER_PRIVATE_KEY: {e:?}")))?;
+                let pem = load_pem_from_base64(encoded).map_err(|e| {
+                    BootstrapError::LegacyKeyConfig(format!("SERVER_PRIVATE_KEY: {e:?}"))
+                })?;
                 // The pkcs8 error is discarded rather than formatted: it comes from a parser
                 // that has seen key bytes, and this string reaches a log line.
                 let secret = SecretKey::from_pkcs8_pem(&pem::encode(&pem)).map_err(|_| {
-                    BootstrapError::Config(
+                    BootstrapError::LegacyKeyConfig(
                         "SERVER_PRIVATE_KEY is not a P-256 PKCS#8 key".to_owned(),
                     )
                 })?;
                 let jwe_secret = match app_config.server_encryption_key.as_deref() {
                     Some(enc_b64) => {
                         let enc_pem = load_pem_from_base64(enc_b64).map_err(|e| {
-                            BootstrapError::Config(format!("SERVER_ENCRYPTION_KEY: {e:?}"))
+                            BootstrapError::LegacyKeyConfig(format!(
+                                "SERVER_ENCRYPTION_KEY: {e:?}"
+                            ))
                         })?;
                         SecretKey::from_pkcs8_pem(&pem::encode(&enc_pem)).map_err(|_| {
-                            BootstrapError::Config(
+                            BootstrapError::LegacyKeyConfig(
                                 "SERVER_ENCRYPTION_KEY is not a P-256 PKCS#8 key".to_owned(),
                             )
                         })?
