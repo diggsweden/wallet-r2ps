@@ -7,6 +7,7 @@ use crate::application::self_test_spi_port::{CheckResult, Outcome, Trigger};
 use crate::application::service::SelfTestService;
 use crate::infrastructure::bootstrap::build_services;
 use crate::infrastructure::config::app_config::AppConfig;
+use crate::infrastructure::self_test_probes::crypto_es256_kat::CryptoEs256KatProbe;
 use crate::infrastructure::{
     KafkaConfig, StateInitRequestKafkaReceiver, WorkerRequestKafkaReceiver,
 };
@@ -44,7 +45,7 @@ pub fn run() {
     let worker_use_case: Arc<dyn WorkerRequestUseCase + Send + Sync> = Arc::new(services.worker);
     let state_init_service = Arc::new(services.state_init);
 
-    let self_test_service = SelfTestService::new(vec![]);
+    let self_test_service = SelfTestService::new(vec![Box::new(CryptoEs256KatProbe)]);
     let trigger = Trigger::Startup;
     let test_results = self_test_service.run_suite(trigger);
     let mut failed: Vec<&str> = Vec::new();
