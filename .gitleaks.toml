@@ -1,0 +1,21 @@
+# SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
+#
+# SPDX-License-Identifier: EUPL-1.2
+
+title = "wallet-r2ps gitleaks config"
+
+[extend]
+useDefault = true
+
+# RFC 7515 §A.3 example JWS, reused as the ES256 self-test's known-answer-test
+# (KAT) vector in
+# hsm-worker/src/infrastructure/adapters/outgoing/self_test_probes/crypto_es256_kat.rs.
+# It's a published spec example, not a live secret. Allowlisted by exact value
+# (not by commit/line) so rebasing or squashing this branch never invalidates
+# the allowlist entry.
+[allowlist]
+description = "RFC 7515 example JWS used as an ES256 self-test KAT vector"
+regexTarget = "match"
+regexes = [
+  '''eyJhbGciOiJFUzI1NiJ9\.eyJpc3MiOiJqb2UiLA0KICJleHAiOjEzMDA4MTkzODAsDQogImh0dHA6Ly9leGFtcGxlLmNvbS9pc19yb290Ijp0cnVlfQ\.DtEhU3ljbEg8L38VWAfUAqOyKAM6-Xx-F4GawxaepmXFCgfTjDxw5djxLa8ISlSApmWQxfKTUJqPP3-Kg6NU1[QA]''',
+]
