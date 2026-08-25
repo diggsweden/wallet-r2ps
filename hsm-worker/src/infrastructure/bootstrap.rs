@@ -8,6 +8,7 @@ use crate::application::port::outgoing::self_test_spi_port::{
     CheckResult, Outcome, SelfTestError, TsfClaim,
 };
 use crate::application::service::StateInitService;
+use crate::application::session_state_spi_port::SessionStateSpiPort;
 use crate::application::{WorkerPorts, WorkerService};
 use crate::infrastructure::KafkaConfig;
 use crate::infrastructure::adapters::outgoing::jose_adapter::JoseAdapter;
@@ -95,6 +96,7 @@ pub struct Services {
     pub worker: WorkerService,
     pub state_init: StateInitService,
     pub hsm: Arc<HsmWrapper>,
+    pub session_state: Arc<dyn SessionStateSpiPort>,
 }
 
 pub fn build_services(
@@ -280,10 +282,12 @@ pub fn build_services(
         .map_err(BootstrapError::OpaqueInit)?,
     );
 
+    let session_state = Arc::new(SessionStateMemoryCache::new());
+
     let ports = WorkerPorts {
         jose: jose.clone(),
         worker_response: Arc::new(WorkerResponseKafkaSender::new(&kafka_config)),
-        session_state: Arc::new(SessionStateMemoryCache::new()),
+        session_state: session_state.clone(),
         hsm: hsm.clone(),
         pake,
     };
@@ -308,6 +312,7 @@ pub fn build_services(
         worker: worker_service,
         state_init: state_init_service,
         hsm,
+        session_state,
     })
 }
 

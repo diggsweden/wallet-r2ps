@@ -2,6 +2,7 @@
 //
 // SPDX-License-Identifier: EUPL-1.2
 
+pub mod credential_store_roundtrip;
 pub mod crypto_a256gcm_kat;
 pub mod crypto_es256_kat;
 pub mod hsm_roundtrip;
@@ -11,3 +12,9 @@ mod crypto_es256_kat_tests;
 
 #[cfg(test)]
 mod crypto_a256gcm_kat_tests;
+
+#[cfg(test)]
+mod credential_store_roundtrip_tests;
+
+#[cfg(test)]
+mod test_utils;

@@ -7,6 +7,7 @@ use crate::application::self_test_spi_port::{CheckResult, Outcome, Trigger};
 use crate::application::service::SelfTestService;
 use crate::infrastructure::bootstrap::build_services;
 use crate::infrastructure::config::app_config::AppConfig;
+use crate::infrastructure::self_test_probes::credential_store_roundtrip::CredentialStoreRoundtripProbe;
 use crate::infrastructure::self_test_probes::crypto_a256gcm_kat::CryptoA256GcmKatProbe;
 use crate::infrastructure::self_test_probes::crypto_es256_kat::CryptoEs256KatProbe;
 use crate::infrastructure::self_test_probes::hsm_roundtrip::HsmRoundtripProbe;
@@ -53,10 +54,13 @@ pub fn run() {
         app_config.jws_domain_separator.clone(),
     );
 
+    let credential_store_probe = CredentialStoreRoundtripProbe::new(services.session_state.clone());
+
     let self_test_service = SelfTestService::new(vec![
         Arc::new(CryptoEs256KatProbe),
         Arc::new(CryptoA256GcmKatProbe),
         Arc::new(hsm_roundtrip_probe),
+        Arc::new(credential_store_probe),
     ]);
     let trigger = Trigger::Startup;
     let test_results = self_test_service.run_suite(trigger);
