@@ -94,6 +94,7 @@ impl From<BootstrapError> for CheckResult {
 pub struct Services {
     pub worker: WorkerService,
     pub state_init: StateInitService,
+    pub hsm: Arc<HsmWrapper>,
 }
 
 pub fn build_services(
@@ -298,7 +299,7 @@ pub fn build_services(
     let state_init_service = StateInitService::new(
         state_init_response_sender,
         jose,
-        hsm,
+        hsm.clone(),
         app_config.hsm_key_label.clone(),
         mode.opaque_server_id,
     );
@@ -306,6 +307,7 @@ pub fn build_services(
     Ok(Services {
         worker: worker_service,
         state_init: state_init_service,
+        hsm,
     })
 }
 

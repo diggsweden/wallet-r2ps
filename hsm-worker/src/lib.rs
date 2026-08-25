@@ -9,6 +9,7 @@ use crate::infrastructure::bootstrap::build_services;
 use crate::infrastructure::config::app_config::AppConfig;
 use crate::infrastructure::self_test_probes::crypto_a256gcm_kat::CryptoA256GcmKatProbe;
 use crate::infrastructure::self_test_probes::crypto_es256_kat::CryptoEs256KatProbe;
+use crate::infrastructure::self_test_probes::hsm_roundtrip::HsmRoundtripProbe;
 use crate::infrastructure::{
     KafkaConfig, StateInitRequestKafkaReceiver, WorkerRequestKafkaReceiver,
 };
@@ -46,9 +47,16 @@ pub fn run() {
     let worker_use_case: Arc<dyn WorkerRequestUseCase + Send + Sync> = Arc::new(services.worker);
     let state_init_service = Arc::new(services.state_init);
 
+    let hsm_roundtrip_probe = HsmRoundtripProbe::new(
+        services.hsm.clone(),
+        app_config.hsm_root_key_label.clone(),
+        app_config.jws_domain_separator.clone(),
+    );
+
     let self_test_service = SelfTestService::new(vec![
-        Box::new(CryptoEs256KatProbe),
-        Box::new(CryptoA256GcmKatProbe),
+        Arc::new(CryptoEs256KatProbe),
+        Arc::new(CryptoA256GcmKatProbe),
+        Arc::new(hsm_roundtrip_probe),
     ]);
     let trigger = Trigger::Startup;
     let test_results = self_test_service.run_suite(trigger);

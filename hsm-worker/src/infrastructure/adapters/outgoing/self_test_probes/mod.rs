@@ -4,6 +4,7 @@
 
 pub mod crypto_a256gcm_kat;
 pub mod crypto_es256_kat;
+pub mod hsm_roundtrip;
 
 #[cfg(test)]
 mod crypto_es256_kat_tests;

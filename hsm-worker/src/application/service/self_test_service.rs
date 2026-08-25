@@ -2,14 +2,16 @@
 //
 // SPDX-License-Identifier: EUPL-1.2
 
+use std::sync::Arc;
+
 use crate::application::self_test_spi_port::{CheckResult, Outcome, SelfTestProbe, Trigger};
 
 pub struct SelfTestService {
-    probes: Vec<Box<dyn SelfTestProbe>>,
+    probes: Vec<Arc<dyn SelfTestProbe>>,
 }
 
 impl SelfTestService {
-    pub fn new(probes: Vec<Box<dyn SelfTestProbe>>) -> Self {
+    pub fn new(probes: Vec<Arc<dyn SelfTestProbe>>) -> Self {
         Self { probes }
     }
 

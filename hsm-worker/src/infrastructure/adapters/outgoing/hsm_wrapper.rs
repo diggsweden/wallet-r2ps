@@ -6,6 +6,7 @@ use crate::application::hsm_spi_port::HsmSpiPort;
 use crate::application::port::outgoing::hsm_spi_port::DerivedSecret;
 use crate::domain::{Curve, EcPublicJwk, HsmKey, WrappedPrivateKey};
 use crate::infrastructure::bootstrap::BootstrapError;
+use crate::infrastructure::config::key_derivation;
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use cryptoki::context::{CInitializeArgs, CInitializeFlags, Pkcs11};
@@ -19,6 +20,8 @@ use der::Decode;
 use der::asn1::OctetStringRef;
 use digest::Digest;
 use p256::ecdsa::VerifyingKey;
+use p256::ecdsa::signature::hazmat::PrehashVerifier;
+use p256::ecdsa::signature::{Signer, Verifier};
 use std::sync::Arc;
 use tracing::{debug, error, info};
 
@@ -311,6 +314,41 @@ impl HsmWrapper {
         let mut hasher = sha2::Sha256::new();
         hasher.update(thumbprint.as_bytes());
         URL_SAFE_NO_PAD.encode(hasher.finalize())
+    }
+
+    pub fn check_wrap_sign(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let key = self.generate_key("_status-check", &Curve::P256)?;
+
+        let hash = sha2::Sha256::digest(b"digg-hsm-status-check");
+        let sig_bytes = self.sign(&key, &hash)?;
+
+        let x = URL_SAFE_NO_PAD.decode(&key.public_key_jwk.x)?;
+        let y = URL_SAFE_NO_PAD.decode(&key.public_key_jwk.y)?;
+        let mut point = vec![0x04u8];
+        point.extend_from_slice(&x);
+        point.extend_from_slice(&y);
+        let vk = p256::ecdsa::VerifyingKey::from_sec1_bytes(&point).map_err(|e| e.to_string())?;
+        let sig = p256::ecdsa::Signature::from_slice(&sig_bytes).map_err(|e| e.to_string())?;
+        vk.verify_prehash(&hash, &sig).map_err(|e| e.to_string())?;
+
+        Ok(())
+    }
+
+    pub fn check_derivation(
+        &self,
+        root_key_label: &str,
+        domain_separator: &str,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let hmac_output = self.derive_key(root_key_label, domain_separator)?;
+        let secret = key_derivation::derive_scalar(hmac_output.as_ref(), domain_separator)?;
+        let signing_key = p256::ecdsa::SigningKey::from(&secret);
+        let sig: p256::ecdsa::Signature = signing_key.sign(b"digg-hsm-status-check");
+        signing_key
+            .verifying_key()
+            .verify(b"digg-hsm-status-check", &sig)
+            .map_err(|e| e.to_string())?;
+
+        Ok(())
     }
 }
 
