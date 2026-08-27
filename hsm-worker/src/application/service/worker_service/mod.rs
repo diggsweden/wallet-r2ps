@@ -23,6 +23,7 @@ use crate::application::port::incoming::worker_request_use_case::WorkerRequestEr
 use crate::application::port::outgoing::session_state_spi_port::{
     SessionState, SessionStateSpiPort,
 };
+use crate::application::service::TsfHealth;
 use crate::application::service::operations::OperationDispatcher;
 use crate::application::{
     WorkerPorts, WorkerRequestId, WorkerRequestUseCase, WorkerResponseSpiPort,
@@ -44,10 +45,16 @@ pub struct WorkerService {
     request_decoder: RequestDecoder,
     response_builder: ResponseBuilder,
     session_state_port: Arc<dyn SessionStateSpiPort>,
+    health: TsfHealth,
 }
 
 impl WorkerService {
-    pub fn new(ports: WorkerPorts, hsm_key_label: String, legacy_key_mode: bool) -> Self {
+    pub fn new(
+        ports: WorkerPorts,
+        hsm_key_label: String,
+        legacy_key_mode: bool,
+        health: TsfHealth,
+    ) -> Self {
         let operation_dispatcher =
             OperationDispatcher::from_dependencies(ports.pake, ports.hsm, hsm_key_label);
 
@@ -60,6 +67,7 @@ impl WorkerService {
             request_decoder,
             response_builder,
             session_state_port: ports.session_state,
+            health,
         }
     }
 }
@@ -115,6 +123,13 @@ impl WorkerService {
         &self,
         request: HsmWorkerRequest,
     ) -> Result<HsmWorkerResponse, ProcessError> {
+        if !self.health.is_healthy() {
+            return Err(ProcessError {
+                error: WorkerError::Upstream(UpstreamError::SelfTestQuarantine),
+                context: None,
+            });
+        }
+
         // Phase 1: Decode outer (pure — no side effects)
         let partial = self
             .request_decoder
