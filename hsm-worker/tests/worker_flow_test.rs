@@ -35,6 +35,9 @@ use p256::pkcs8::{EncodePrivateKey, EncodePublicKey};
 use rand_core::OsRng;
 use std::sync::{Arc, Mutex};
 
+mod common;
+use common::healthy;
+
 // ---------------------------------------------------------------------------
 // Local mock for PakePort (cannot use MockPakePort — it's cfg(test)-only in lib)
 // ---------------------------------------------------------------------------
@@ -414,7 +417,7 @@ fn make_fixture_with_hsm_keys(
         worker_response: response_sink.clone(),
         pake,
     };
-    let service = WorkerService::new(ports, "wallet-hsm-key".to_string(), false);
+    let service = WorkerService::new(ports, "wallet-hsm-key".to_string(), false, healthy());
 
     TestFixture {
         service,

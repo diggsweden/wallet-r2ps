@@ -5,11 +5,16 @@
 pub mod operations;
 pub mod self_test_service;
 pub mod state_init_service;
+pub mod tsf_health;
 pub mod worker_service;
 
 #[cfg(test)]
 mod state_init_service_tests;
 
+#[cfg(test)]
+mod tsf_health_tests;
+
 pub use self_test_service::SelfTestService;
 pub use state_init_service::StateInitService;
+pub use tsf_health::TsfHealth;
 pub use worker_service::WorkerService;
