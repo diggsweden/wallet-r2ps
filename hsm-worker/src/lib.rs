@@ -4,7 +4,7 @@
 
 use crate::application::WorkerRequestUseCase;
 use crate::application::self_test_spi_port::{CheckResult, Outcome, Trigger};
-use crate::application::service::SelfTestService;
+use crate::application::service::{SelfTestService, TsfHealth};
 use crate::infrastructure::bootstrap::build_services;
 use crate::infrastructure::config::app_config::AppConfig;
 use crate::infrastructure::self_test_probes::credential_store_roundtrip::CredentialStoreRoundtripProbe;
@@ -36,6 +36,8 @@ pub fn run() {
         r.store(false, Ordering::Relaxed);
     })
     .expect("Error setting Ctrl-C handler");
+
+    let health = TsfHealth::new();
 
     let services = match build_services(&app_config, kafka_config.clone()) {
         Ok(services) => services,
@@ -72,11 +74,14 @@ pub fn run() {
             failed.push(result.name);
         }
     }
+    let healthy = health.apply(&test_results);
 
-    if failed.is_empty() {
-        info!(trigger = ?trigger, total = test_results.len(), "self-test suite passed");
+    if healthy {
+        info!(trigger = ?trigger, total = test_results.len(), healthy ,"self-test suite passed");
+    } else if test_results.is_empty() {
+        error!(trigger = ?trigger, healthy, "self-test suite ran no checks; treating as failure");
     } else {
-        error!(trigger = ?trigger, total = test_results.len(), failed = ?failed, "self-test suite failed");
+        error!(trigger = ?trigger, total = test_results.len(), failed = ?failed, healthy ,"self-test suite failed");
     }
 
     // start request worker
