@@ -30,6 +30,8 @@ use hsm_worker::infrastructure::adapters::outgoing::r2ps_response_kafka_message_
 use hsm_worker::infrastructure::adapters::outgoing::state_init_response_kafka_sender::StateInitResponseKafkaMessageSender;
 use rand_core::OsRng;
 
+mod common;
+use common::healthy;
 // ── Container helper ─────────────────────────────────────────────────────────
 
 async fn start_kafka() -> (ContainerAsync<Kafka>, String) {
@@ -333,6 +335,7 @@ async fn test_state_init_consumer_receives_and_processes() {
         Arc::new(StateInitMockHsm),
         "wallet-hsm-key".to_string(),
         "test-server-id".to_string(),
+        healthy(),
     ));
 
     let running = Arc::new(AtomicBool::new(true));
@@ -528,6 +531,7 @@ async fn test_worker_kafka_round_trip() {
         ports,
         "wallet-hsm-key".to_string(),
         false,
+        healthy(),
     ));
 
     let running = Arc::new(AtomicBool::new(true));

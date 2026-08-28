@@ -6,8 +6,9 @@
 //!
 //! `FPT_TST.1` Application Note 30 (TR 4.3 p. 33) — "Failed self-tests shall result in
 //! refusal to process RAC requests" — and `FPT_FLS.1.1` (p. 32). This flag is the state
-//! that refusal is derived from; the refusal itself is the Kafka subscription gate in the
-//! receivers.
+//! that refusal is derived from; the refusal itself is the guard at the top of
+//! `WorkerService::process_request` / `StateInitService::initialize`, chosen over gating
+//! the Kafka subscription.
 //!
 //! Any failed check makes the TSF unhealthy. The PP describes no tolerated failure: §8.2.3
 //! (p. 40) requires the WSCA-BE to fail closed and leaves availability to HSM redundancy and

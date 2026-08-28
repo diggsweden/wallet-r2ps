@@ -7,7 +7,7 @@ use crate::application::port::outgoing::jose_port::JoseError;
 use crate::application::port::outgoing::self_test_spi_port::{
     CheckResult, Outcome, SelfTestError, TsfClaim,
 };
-use crate::application::service::StateInitService;
+use crate::application::service::{StateInitService, TsfHealth};
 use crate::application::session_state_spi_port::SessionStateSpiPort;
 use crate::application::{WorkerPorts, WorkerService};
 use crate::infrastructure::KafkaConfig;
@@ -102,6 +102,7 @@ pub struct Services {
 pub fn build_services(
     app_config: &AppConfig,
     kafka_config: Arc<KafkaConfig>,
+    health: TsfHealth,
 ) -> Result<Services, BootstrapError> {
     let hsm = Arc::new(HsmWrapper::new(app_config.clone().into())?);
 
@@ -296,6 +297,7 @@ pub fn build_services(
         ports,
         app_config.hsm_key_label.clone(),
         mode.legacy_key_mode,
+        health.clone(),
     );
 
     let state_init_response_sender =
@@ -306,6 +308,7 @@ pub fn build_services(
         hsm.clone(),
         app_config.hsm_key_label.clone(),
         mode.opaque_server_id,
+        health,
     );
 
     Ok(Services {

@@ -8,20 +8,32 @@ use crate::application::hsm_spi_port::MockHsmSpiPort;
 use crate::application::port::incoming::worker_request_use_case::WorkerRequestError;
 use crate::application::port::outgoing::pake_port::MockPakePort;
 use crate::application::port::outgoing::session_state_spi_port::PendingLoginState;
+use crate::application::self_test_spi_port::CheckResult;
+use crate::application::self_test_spi_port::Outcome::Pass;
+use crate::application::self_test_spi_port::TsfClaim::CredentialStoreIntegrity;
+use crate::application::service::TsfHealth;
 use crate::application::service::worker_service::WorkerService;
 use crate::application::service::worker_service::test_utils::*;
 use crate::application::session_state_spi_port::SessionKey;
+use crate::application::test_utils::healthy;
 use crate::domain::{HsmWorkerRequest, InnerRequest, SessionId, TypedJws};
 use crate::domain::{OperationId, PakePayloadVector, Status};
 use std::sync::Arc;
 
 fn setup_worker_service() -> (WorkerService, Arc<MockWorkerResponseSpi>) {
+    setup_worker_service_with_health(healthy())
+}
+
+fn setup_worker_service_with_health(
+    health: TsfHealth,
+) -> (WorkerService, Arc<MockWorkerResponseSpi>) {
     let (jose, _) = super::setup_crypto();
     let worker_response_spi = MockWorkerResponseSpi::new();
     let service = WorkerService::new(
         make_ports(jose, worker_response_spi.clone()),
         "wallet-hsm-key".to_string(),
         true,
+        health,
     );
     (service, worker_response_spi)
 }
@@ -68,6 +80,7 @@ fn test_execute_returns_connection_error_when_response_send_fails() {
         make_ports(jose, Arc::new(FailingWorkerResponseSpi)),
         "wallet-hsm-key".to_string(),
         true,
+        healthy(),
     );
 
     let request = HsmWorkerRequest {
@@ -96,6 +109,7 @@ fn test_execute_returns_response_build_error_when_error_response_signing_fails()
         make_ports(jose, mock_response_port.clone()),
         "wallet-hsm-key".to_string(),
         true,
+        healthy(),
     );
 
     let result = service.execute(make_request("response-build-fails"));
@@ -149,7 +163,7 @@ fn test_execute_returns_internal_server_error_response_when_transition_fails() {
             Arc::new(mock)
         },
     };
-    let service = WorkerService::new(ports, "wallet-hsm-key".to_string(), true);
+    let service = WorkerService::new(ports, "wallet-hsm-key".to_string(), true, healthy());
 
     let result = service.execute(make_request("transition-fails"));
 
@@ -166,4 +180,66 @@ fn test_execute_returns_internal_server_error_response_when_transition_fails() {
     let inner_payload = String::from_utf8(encrypted_payloads[0].clone()).unwrap();
     assert!(inner_payload.contains("InternalServerError"));
     assert!(inner_payload.contains("transition-fails"));
+}
+
+#[test]
+fn a_request_is_rejected_with_an_upstream_error_when_the_tsf_is_unhealthy() {
+    // Health starts false (TsfHealth::new()) until a suite result applies it — see
+    // TsfHealth::new(). Health check runs before decode, so nothing about the payload matters here.
+    let (service, mock_response_port) = setup_worker_service_with_health(TsfHealth::new());
+
+    let result = service.execute(make_request("requestId"));
+
+    // execute returns Ok(request_id) but the error message should be sent to the client.
+    assert_eq!(result.unwrap(), "requestId");
+
+    let sent_responses = mock_response_port.responses.lock().unwrap();
+    assert_eq!(sent_responses.len(), 1);
+    assert_eq!(sent_responses[0].status, Status::Error);
+    assert!(
+        sent_responses[0]
+            .error_message
+            .as_ref()
+            .is_some_and(|msg| msg.contains("SelfTestQuarantine"))
+    );
+}
+
+#[test]
+fn funtion_is_restored_when_self_test_turns_healthy() {
+    let health = TsfHealth::new(); // unhealthy
+    let (service, mock_response_port) = setup_worker_service_with_health(health.clone());
+
+    // first request (unhealthy state)
+    service.execute(make_request("requestId")).unwrap();
+
+    health.apply(&[CheckResult {
+        name: "a",
+        claim: CredentialStoreIntegrity,
+        outcome: Pass,
+    }]);
+
+    // second request (healthy state)
+    service.execute(make_request("requestId2")).unwrap();
+
+    // get the responses
+    let sent_responses = mock_response_port.responses.lock().unwrap();
+    assert_eq!(sent_responses.len(), 2);
+
+    // first response. Expected to be quarantined by the self-test.
+    assert_eq!(sent_responses[0].status, Status::Error);
+    assert!(
+        sent_responses[0]
+            .error_message
+            .as_ref()
+            .is_some_and(|msg| msg.contains("SelfTestQuarantine"))
+    );
+
+    // second response. Still an error since the request is minimal, but not a self-test error.
+    assert_eq!(sent_responses[1].status, Status::Error);
+    assert!(
+        sent_responses[1]
+            .error_message
+            .as_ref()
+            .is_some_and(|msg| msg.contains("InvalidStateJws"))
+    );
 }

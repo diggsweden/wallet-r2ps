@@ -39,7 +39,7 @@ pub fn run() {
 
     let health = TsfHealth::new();
 
-    let services = match build_services(&app_config, kafka_config.clone()) {
+    let services = match build_services(&app_config, kafka_config.clone(), health.clone()) {
         Ok(services) => services,
         Err(e) => {
             log_check_result(&e.into());

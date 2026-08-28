@@ -7,7 +7,9 @@ use crate::application::port::outgoing::jose_port::{JoseError, MockJosePort};
 use crate::application::port::outgoing::state_init_response_spi_port::{
     StateInitResponseError, StateInitResponseSpiPort,
 };
+use crate::application::service::TsfHealth;
 use crate::application::service::state_init_service::{StateInitError, StateInitService};
+use crate::application::test_utils::healthy;
 use crate::domain::{
     Curve, EcPublicJwk, HsmKey, StateInitRequest, StateInitResponse, WrappedPrivateKey,
 };
@@ -114,6 +116,7 @@ fn test_valid_initialization_pipeline() {
         Arc::new(make_succeeding_hsm()),
         "wallet-hsm-key".to_string(),
         "mock-opaque-id".to_string(),
+        healthy(),
     );
 
     let request = StateInitRequest {
@@ -163,6 +166,7 @@ fn test_initialization_fails_on_hsm_key_generation_error() {
         Arc::new(mock_hsm),
         "wallet-hsm-key".to_string(),
         "mock-opaque-id".to_string(),
+        healthy(),
     );
 
     let request = StateInitRequest {
@@ -198,6 +202,7 @@ fn test_initialization_fails_on_signing_error() {
         Arc::new(make_succeeding_hsm()),
         "wallet-hsm-key".to_string(),
         "mock-opaque-id".to_string(),
+        healthy(),
     );
 
     let request = StateInitRequest {
@@ -230,6 +235,7 @@ fn test_initialization_fails_on_spi_send_error() {
         Arc::new(make_succeeding_hsm()),
         "wallet-hsm-key".to_string(),
         "mock-opaque-id".to_string(),
+        healthy(),
     );
 
     let request = StateInitRequest {
@@ -271,6 +277,7 @@ fn test_strict_jwk_validation_rejection(
         Arc::new(MockHsmSpiPort::new()),
         "wallet-hsm-key".to_string(),
         "mock-opaque-id".to_string(),
+        healthy(),
     );
 
     let request = StateInitRequest {
@@ -311,6 +318,7 @@ fn test_initialization_rejects_identical_client_jws_and_jwe_keys_when_both_suppl
         Arc::new(MockHsmSpiPort::new()),
         "wallet-hsm-key".to_string(),
         "mock-opaque-id".to_string(),
+        healthy(),
     );
 
     // Same coordinates, different kid — kid is client-supplied, so not a proof of distinctness.
@@ -343,6 +351,7 @@ fn test_initialization_accepts_absent_jwe_key_with_warning() {
         Arc::new(make_succeeding_hsm()),
         "wallet-hsm-key".to_string(),
         "mock-opaque-id".to_string(),
+        healthy(),
     );
 
     let request = StateInitRequest {
@@ -356,4 +365,34 @@ fn test_initialization_accepts_absent_jwe_key_with_warning() {
     let result = service.initialize(request);
     assert!(result.is_ok());
     assert_eq!(mock_spi.responses.lock().unwrap().len(), 1);
+}
+
+#[test]
+fn initialize_is_rejected_when_the_tsf_is_unhealthy() {
+    let mock_spi = Arc::new(MockStateInitResponseSpi {
+        responses: Mutex::new(Vec::new()),
+        fail: false,
+    });
+    let service = StateInitService::new(
+        mock_spi.clone(),
+        Arc::new(make_mock_jose()),
+        Arc::new(MockHsmSpiPort::new()),
+        "wallet-hsm-key".to_string(),
+        "mock-opaque-id".to_string(),
+        TsfHealth::new(), // unhealthy
+    );
+
+    let request = StateInitRequest {
+        request_id: "test-req-123".to_string(),
+        client_jws_public_key: create_valid_jwk(),
+        client_jwe_public_key: Some(create_valid_jwe_jwk()),
+        response_topic: "test-topic".to_string(),
+        initial_key_curve: Curve::P256,
+    };
+
+    let result = service.initialize(request).unwrap_err();
+    // call to initialize gives SelfTestQuarantine error and no responses were sent.
+    assert!(matches!(result, StateInitError::SelfTestQuarantine));
+    let responses = mock_spi.responses.lock().unwrap();
+    assert_eq!(responses.len(), 0);
 }
