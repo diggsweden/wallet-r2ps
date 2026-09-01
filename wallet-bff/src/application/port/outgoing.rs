@@ -10,7 +10,10 @@ use crate::domain::{HsmWorkerRequest, StateInitRequest, StateInitResponse};
 #[async_trait::async_trait]
 pub trait DeviceStatePort: Send + Sync {
     async fn save(&self, key: &str, state: &str, ttl_seconds: u64);
-    async fn load(&self, key: &str) -> Option<String>;
+    /// `Ok(Some(_))` if found, `Ok(None)` if the key is missing, `Err(_)` if
+    /// the store is unreachable (e.g. Valkey reconnect exhausted). Callers
+    /// distinguish "missing" (→ 404) from "unreachable" (→ 503).
+    async fn load(&self, key: &str) -> Result<Option<String>, String>;
 }
 
 /// SPI port: send worker requests to the hsm-worker request topic.

@@ -27,13 +27,17 @@ use wallet_bff::infrastructure::adapters::incoming::web::replay_protection::Repl
 
 struct MockDeviceStatePort {
     state: Option<String>,
+    load_error: Option<String>,
 }
 
 #[async_trait::async_trait]
 impl DeviceStatePort for MockDeviceStatePort {
     async fn save(&self, _key: &str, _state: &str, _ttl_seconds: u64) {}
-    async fn load(&self, _key: &str) -> Option<String> {
-        self.state.clone()
+    async fn load(&self, _key: &str) -> Result<Option<String>, String> {
+        if let Some(ref e) = self.load_error {
+            return Err(e.clone());
+        }
+        Ok(self.state.clone())
     }
 }
 
@@ -131,6 +135,7 @@ impl StateInitCorrelationPort for MockStateInitCorrelationPort {
 
 struct TestAppConfig {
     device_state: Option<String>,
+    device_state_load_error: Option<String>,
     sync_response: Option<CachedResponse>,
     state_init_response: Option<StateInitResponse>,
     serve_sync: bool,
@@ -142,6 +147,7 @@ impl Default for TestAppConfig {
     fn default() -> Self {
         Self {
             device_state: Some("mock-state-jws".to_string()),
+            device_state_load_error: None,
             sync_response: None,
             state_init_response: None,
             serve_sync: false,
@@ -161,6 +167,7 @@ fn make_test_app(cfg: TestAppConfig) -> TestContext {
     let state = Arc::new(AppState {
         device_state_port: Arc::new(MockDeviceStatePort {
             state: cfg.device_state,
+            load_error: cfg.device_state_load_error,
         }),
         request_sender_port: Arc::new(MockRequestSenderPort {
             sent: sent_requests.clone(),
@@ -379,6 +386,58 @@ async fn an_hsm_request_for_an_unknown_device_is_rejected_as_not_found() {
     );
 }
 
+#[tokio::test]
+async fn an_hsm_request_returns_503_when_device_state_store_is_unavailable() {
+    let ctx = make_test_app(TestAppConfig {
+        device_state: None,
+        device_state_load_error: Some("connection refused".to_string()),
+        ..Default::default()
+    });
+
+    let body = serde_json::json!({
+        "clientId": "some-client",
+        "outerRequestJws": build_test_outer_jws()
+    });
+
+    let response = ctx
+        .app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/hsm/v1/requests")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&body).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    let content_type = response
+        .headers()
+        .get(axum::http::header::CONTENT_TYPE)
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_string();
+    assert!(
+        content_type.contains("application/problem+json"),
+        "unavailable store must return application/problem+json, got: {content_type}"
+    );
+    let body = read_body_json(response).await;
+    assert_eq!(body["status"], 503);
+    assert_eq!(body["title"], "Service Unavailable");
+    assert_eq!(body["instance"], "/hsm/v1/requests");
+    assert!(
+        body["detail"]
+            .as_str()
+            .unwrap()
+            .contains("temporarily unavailable"),
+        "detail must indicate transient unavailability, got: {}",
+        body["detail"]
+    );
+}
+
 // ---------------------------------------------------------------------------
 // GET /hsm/v1/requests/{correlationId}
 // ---------------------------------------------------------------------------
@@ -579,6 +638,53 @@ async fn initializing_an_existing_device_state_without_overwrite_returns_the_cur
     assert_eq!(
         dto["stateJws"], "mock-state-jws",
         "existing stateJws must be returned when overwrite=false"
+    );
+}
+
+#[tokio::test]
+async fn creating_a_device_state_returns_503_when_store_is_unavailable() {
+    let ctx = make_test_app(TestAppConfig {
+        device_state: None,
+        device_state_load_error: Some("connection refused".to_string()),
+        ..Default::default()
+    });
+
+    let body = serde_json::json!({
+        "publicKey": dummy_public_key_json(),
+        "overwrite": false
+    });
+
+    let response = ctx
+        .app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/hsm/v1/device-states")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&body).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    let content_type = response
+        .headers()
+        .get(axum::http::header::CONTENT_TYPE)
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_string();
+    assert!(content_type.contains("application/problem+json"));
+    let body = read_body_json(response).await;
+    assert_eq!(body["status"], 503);
+    assert_eq!(body["title"], "Service Unavailable");
+    assert_eq!(body["instance"], "/hsm/v1/device-states");
+    assert!(
+        body["detail"]
+            .as_str()
+            .unwrap()
+            .contains("temporarily unavailable"),
     );
 }
 
