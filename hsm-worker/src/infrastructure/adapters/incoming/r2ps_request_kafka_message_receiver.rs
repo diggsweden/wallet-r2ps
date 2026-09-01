@@ -17,7 +17,7 @@ use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::{JoinHandle, spawn};
 use std::time::Duration;
-use tracing::{Span, debug, error, instrument, warn};
+use tracing::{debug, error, warn};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 /// Lazy-init counter so the global meter provider (set by
@@ -101,21 +101,25 @@ impl WorkerRequestKafkaReceiver {
     }
 }
 
-/// Per-message handler. `#[instrument]` creates an OTel span via the
+/// Per-message handler. Builds an OTel span exported via the
 /// tracing-opentelemetry layer (see `infrastructure::telemetry`). We
 /// extract the W3C tracecontext from the message's headers (injected
 /// by the bff producer) and set it as the span's parent so the
 /// consumer span becomes a child of the bff request trace.
-#[instrument(skip_all, name = "process_request_kafka")]
 fn process_message(
     msg: &BorrowedMessage<'_>,
     worker_use_case: &(dyn WorkerRequestUseCase + Send + Sync),
 ) {
-    requests_counter().add(1, &[]);
+    let span = tracing::info_span!("process_request_kafka");
     let parent_ctx = global::get_text_map_propagator(|propagator| {
         propagator.extract(&KafkaHeaderExtractor(msg.headers()))
     });
-    Span::current().set_parent(parent_ctx);
+    if let Err(err) = span.set_parent(parent_ctx) {
+        tracing::warn!(?err, "Failed to set parent_ctx");
+    }
+    let _enter = span.enter();
+
+    requests_counter().add(1, &[]);
 
     let payload = match msg.payload() {
         Some(bytes) => bytes,

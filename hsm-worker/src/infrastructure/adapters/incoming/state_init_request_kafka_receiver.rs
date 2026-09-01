@@ -15,7 +15,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::{JoinHandle, spawn};
 use std::time::Duration;
-use tracing::{Span, debug, error, instrument, warn};
+use tracing::{debug, error, warn};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 pub struct StateInitRequestKafkaReceiver {
@@ -86,12 +86,15 @@ impl StateInitRequestKafkaReceiver {
 /// Per-message handler mirroring r2ps_request_kafka_message_receiver:
 /// extract W3C tracecontext from headers so the consumer span becomes a
 /// child of the bff producer's trace.
-#[instrument(skip_all, name = "process_state_init_kafka")]
 fn process_message(msg: &BorrowedMessage<'_>, state_init_service: &StateInitService) {
+    let span = tracing::info_span!("process_state_init_kafka");
     let parent_ctx = global::get_text_map_propagator(|propagator| {
         propagator.extract(&KafkaHeaderExtractor(msg.headers()))
     });
-    Span::current().set_parent(parent_ctx);
+    if let Err(err) = span.set_parent(parent_ctx) {
+        tracing::warn!(?err, "Failed to set parent_ctx");
+    }
+    let _enter = span.enter();
 
     let payload = match msg.payload() {
         Some(bytes) => bytes,

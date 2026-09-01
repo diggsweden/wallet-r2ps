@@ -8,7 +8,7 @@ use rdkafka::Message;
 use rdkafka::consumer::{Consumer, StreamConsumer};
 use rdkafka::message::BorrowedMessage;
 use std::sync::Arc;
-use tracing::{Span, error, info, instrument};
+use tracing::{error, info};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use crate::application::port::incoming::ResponseUseCase;
@@ -57,7 +57,6 @@ pub fn start(
 /// hsm-worker's response producer) and sets it as the parent of the
 /// app span — so the bff response-handling span sits in the same trace
 /// as the upstream bff request that originally produced the work.
-#[instrument(skip_all, name = "consume_hsm_response")]
 fn process_message(
     msg: &BorrowedMessage<'_>,
     topic: &str,
@@ -66,7 +65,12 @@ fn process_message(
     let parent_ctx = global::get_text_map_propagator(|propagator| {
         propagator.extract(&KafkaHeaderExtractor(msg.headers()))
     });
-    Span::current().set_parent(parent_ctx);
+
+    let span = tracing::info_span!("consume_hsm_response");
+    if let Err(err) = span.set_parent(parent_ctx) {
+        tracing::warn!(?err, "Failed to set parent_ctx");
+    }
+    let _enter = span.enter();
 
     let Some(payload) = msg.payload() else {
         return;
