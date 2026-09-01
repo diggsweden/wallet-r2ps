@@ -72,10 +72,10 @@ async fn test_device_state_valkey_round_trip() {
     let adapter = DeviceStateRedisAdapter::new(conn);
 
     adapter.save("dev-1", "state-jws-value", 60).await;
-    let loaded = adapter.load("dev-1").await;
+    let loaded = adapter.load("dev-1").await.expect("valkey up");
     assert_eq!(loaded, Some("state-jws-value".to_string()));
 
-    let missing = adapter.load("nonexistent").await;
+    let missing = adapter.load("nonexistent").await.expect("valkey up");
     assert_eq!(missing, None);
 }
 
@@ -89,9 +89,12 @@ async fn test_device_state_valkey_ttl_expiry() {
     let adapter = DeviceStateRedisAdapter::new(conn);
 
     adapter.save("ttl-key", "value", 1).await;
-    assert_eq!(adapter.load("ttl-key").await, Some("value".to_string()));
+    assert_eq!(
+        adapter.load("ttl-key").await.expect("valkey up"),
+        Some("value".to_string())
+    );
     tokio::time::sleep(Duration::from_secs(2)).await;
-    assert_eq!(adapter.load("ttl-key").await, None);
+    assert_eq!(adapter.load("ttl-key").await.expect("valkey up"), None);
 }
 
 // Verifies that a second save() on the same key replaces the previous value.
@@ -107,7 +110,7 @@ async fn test_device_state_valkey_overwrite() {
     adapter.save("dev-1", "first-state", 60).await;
     adapter.save("dev-1", "second-state", 60).await;
     assert_eq!(
-        adapter.load("dev-1").await,
+        adapter.load("dev-1").await.expect("valkey up"),
         Some("second-state".to_string())
     );
 }
@@ -420,7 +423,7 @@ async fn test_state_init_consumer_receives_and_notifies_correlation_service() {
     assert_eq!(result.dev_authorization_code, "dac_test_123");
 
     // Verify device state was persisted in Valkey
-    let state = device_state_port.load("device-xyz").await;
+    let state = device_state_port.load("device-xyz").await.expect("valkey up");
     assert_eq!(state, Some("init-state-jws".to_string()));
 }
 
@@ -540,7 +543,7 @@ async fn test_bff_kafka_round_trip() {
 
     // Device state saved asynchronously — give it a moment
     tokio::time::sleep(Duration::from_millis(100)).await;
-    let state = device_state_port.load("device-rt").await;
+    let state = device_state_port.load("device-rt").await.expect("valkey up");
     assert_eq!(state, Some("new-state-jws".to_string()));
 }
 

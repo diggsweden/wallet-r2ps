@@ -33,8 +33,8 @@ impl DeviceStatePort for MockDeviceState {
             .unwrap()
             .push((key.to_string(), state.to_string(), ttl_seconds));
     }
-    async fn load(&self, _key: &str) -> Option<String> {
-        None
+    async fn load(&self, _key: &str) -> Result<Option<String>, String> {
+        Ok(None)
     }
 }
 

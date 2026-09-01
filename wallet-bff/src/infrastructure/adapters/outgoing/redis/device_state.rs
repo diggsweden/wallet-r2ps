@@ -35,20 +35,17 @@ impl DeviceStatePort for DeviceStateRedisAdapter {
         }
     }
 
-    async fn load(&self, key: &str) -> Option<String> {
-        let result = with_redis_retry(
+    async fn load(&self, key: &str) -> Result<Option<String>, String> {
+        with_redis_retry(
             &self.conn,
             "device_state.load",
             key,
             |mut conn| async move { conn.get::<_, Option<String>>(key).await },
         )
-        .await;
-        match result {
-            Ok(v) => v,
-            Err(e) => {
-                error!("Failed to load device state for key {}: {}", key, e);
-                None
-            }
-        }
+        .await
+        .map_err(|e| {
+            error!("Failed to load device state for key {}: {}", key, e);
+            format!("Device state store error: {e}")
+        })
     }
 }

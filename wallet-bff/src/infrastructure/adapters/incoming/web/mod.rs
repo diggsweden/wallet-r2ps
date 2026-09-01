@@ -61,6 +61,20 @@ pub(super) fn tracked_problem_response(
     build_problem_response(status, title, detail, instance, Some(request_id))
 }
 
+/// 503 ProblemDetail for transient upstream data-store outages
+/// (e.g. Valkey reconnect exhausted after `with_redis_retry`).
+/// Detail intentionally omits internals per SAK.25/26 — the adapter
+/// logs the underlying error separately.
+pub(super) fn service_unavailable_problem(instance: &str, detail: &str) -> Response {
+    build_problem_response(
+        StatusCode::SERVICE_UNAVAILABLE,
+        "Service Unavailable",
+        Some(detail),
+        instance,
+        None,
+    )
+}
+
 fn build_problem_response(
     status: StatusCode,
     title: &str,

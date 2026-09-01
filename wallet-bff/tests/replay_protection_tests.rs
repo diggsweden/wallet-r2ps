@@ -104,10 +104,31 @@ async fn duplicate_nonce_returns_409() {
 }
 
 #[tokio::test]
-async fn nonce_store_error_returns_500() {
+async fn nonce_store_error_returns_503() {
     let app = make_app(Err("redis unavailable".to_string()));
     let resp = post_to(app, "/test", post_body("client-a", "nonce-abc")).await;
-    assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+    let content_type = resp
+        .headers()
+        .get(axum::http::header::CONTENT_TYPE)
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_string();
+    assert!(content_type.contains("application/problem+json"));
+    let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(body["status"], 503);
+    assert_eq!(body["title"], "Service Unavailable");
+    assert_eq!(body["instance"], "/test");
+    assert!(
+        body["detail"]
+            .as_str()
+            .unwrap()
+            .contains("temporarily unavailable"),
+    );
 }
 
 // GET requests have no replay risk and must bypass nonce checking entirely.

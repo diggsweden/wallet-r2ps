@@ -130,11 +130,9 @@ pub async fn replay_protection(
         }
         Err(e) => {
             tracing::error!("Nonce store error: {}", e);
-            return super::problem_response(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Internal Server Error",
-                Some("Failed to validate request nonce."),
+            return super::service_unavailable_problem(
                 &instance,
+                "Nonce store is temporarily unavailable. Please retry.",
             );
         }
     }
