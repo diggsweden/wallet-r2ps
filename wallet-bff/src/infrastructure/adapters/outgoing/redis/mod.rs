@@ -82,13 +82,17 @@ impl SharedConnection {
     }
 }
 
-/// Retries `f` on connection-class and failover errors. Up to three attempts:
+/// Retries `f` on connection-class and failover errors. Up to six attempts,
+/// with exponential backoff between plain retries (50, 100, 200, 400, 800 ms,
+/// capped at 1 s). The wider budget absorbs sub-second connection tear-downs
+/// driven by service-mesh sidecars (Envoy drain / `max_connection_duration`)
+/// so a single Redis call reconnects transparently instead of surfacing.
 ///
 ///  * `READONLY` (from a replica demoted by Sentinel failover) or `MASTERDOWN`
-///    → re-resolve via Sentinel immediately, brief pause, retry once.
-///  * IO / timeout / connection-dropped → one plain retry against the current
-///    manager (transient blip); if still failing, re-resolve and retry once —
-///    the address itself may be stale after a failover.
+///    → re-resolve via Sentinel immediately, brief pause, then keep retrying.
+///  * IO / timeout / connection-dropped → plain retry against the current
+///    manager (transient blip); if still failing, re-resolve once — the
+///    address itself may be stale after a failover — and keep retrying.
 ///
 /// Emits a `redis.cmd` span with `attempts` and (when triggered) `reresolved`.
 pub(super) async fn with_redis_retry<T, F, Fut>(
@@ -101,7 +105,7 @@ where
     F: FnMut(ConnectionManager) -> Fut,
     Fut: std::future::Future<Output = redis::RedisResult<T>>,
 {
-    const MAX_ATTEMPTS: u32 = 3;
+    const MAX_ATTEMPTS: u32 = 6;
     let span = tracing::info_span!(
         "redis.cmd",
         op,
@@ -144,7 +148,9 @@ where
                         tokio::time::sleep(Duration::from_millis(100)).await;
                     } else {
                         warn!(op, key, attempt = attempts, error = %e, "redis retry");
-                        tokio::time::sleep(Duration::from_millis(50 * u64::from(attempts))).await;
+                        let shift = (attempts - 1).min(5);
+                        let sleep_ms = (50u64 << shift).min(1000);
+                        tokio::time::sleep(Duration::from_millis(sleep_ms)).await;
                     }
                 }
                 Err(e) => {
