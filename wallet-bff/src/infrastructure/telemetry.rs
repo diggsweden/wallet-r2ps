@@ -30,9 +30,13 @@ impl Drop for TelemetryGuard {
     }
 }
 
-pub fn init(service_name: &'static str) -> Result<TelemetryGuard, Box<dyn std::error::Error>> {
+pub fn init(
+    default_service_name: &'static str,
+) -> Result<TelemetryGuard, Box<dyn std::error::Error>> {
     let endpoint = std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT")
         .unwrap_or_else(|_| DEFAULT_OTLP_ENDPOINT.to_string());
+    let service_name =
+        std::env::var("OTEL_SERVICE_NAME").unwrap_or_else(|_| default_service_name.to_string());
 
     // Register W3C tracecontext as the global propagator so incoming
     // `traceparent` headers (set by Istio envoy) can be extracted and
@@ -40,7 +44,9 @@ pub fn init(service_name: &'static str) -> Result<TelemetryGuard, Box<dyn std::e
     // span starts a new trace, disjoint from the envoy parent.
     global::set_text_map_propagator(TraceContextPropagator::new());
 
-    let resource = Resource::builder().with_service_name(service_name).build();
+    let resource = Resource::builder()
+        .with_service_name(service_name.clone())
+        .build();
 
     // Traces: OTLP/gRPC → gateway-collector → TempoStack.
     let span_exporter = opentelemetry_otlp::SpanExporter::builder()
