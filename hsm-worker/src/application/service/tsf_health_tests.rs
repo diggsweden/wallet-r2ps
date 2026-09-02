@@ -73,7 +73,7 @@ fn a_clone_observes_the_same_state() {
 }
 
 #[test]
-fn quartantine_marks_healthy_tsf_unhealthy() {
+fn quarantine_marks_healthy_tsf_unhealthy() {
     let tsf_health = TsfHealth::new();
     tsf_health.apply(&[pass("a")]);
 

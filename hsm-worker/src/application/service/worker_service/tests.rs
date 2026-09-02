@@ -205,7 +205,7 @@ fn a_request_is_rejected_with_an_upstream_error_when_the_tsf_is_unhealthy() {
 }
 
 #[test]
-fn funtion_is_restored_when_self_test_turns_healthy() {
+fn function_is_restored_when_self_test_turns_healthy() {
     let health = TsfHealth::new(); // unhealthy
     let (service, mock_response_port) = setup_worker_service_with_health(health.clone());
 
