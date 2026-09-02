@@ -47,25 +47,38 @@ fn fail(name: &'static str, detail: &str) -> Arc<dyn SelfTestProbe> {
 }
 
 #[test]
-fn empty_probe_list_gives_empty_result() {
+fn empty_probe_list_report_every_claim_not_implemented() {
     let service = SelfTestService::new(vec![]);
-    assert_eq!(service.run_suite(Trigger::Startup), vec![]);
+    let results = service.run_suite(Trigger::Startup);
+
+    assert_eq!(results.len(), TsfClaim::ALL.len());
+    assert!(
+        results
+            .iter()
+            .all(|r| matches!(r.outcome, Outcome::NotImplemented))
+    )
 }
 
 #[test]
-fn one_passing_probe_gives_one_passing_result() {
+fn one_passing_probe_gives_one_pass_and_leaves_other_claims_not_implemented() {
     let service = SelfTestService::new(vec![pass("a")]);
 
     let results = service.run_suite(Trigger::Startup);
 
-    assert_eq!(
-        results,
-        vec![CheckResult {
-            name: "a",
-            claim: TsfClaim::CryptographicLibraries,
-            outcome: Outcome::Pass,
-        }]
-    );
+    let passed: Vec<&CheckResult> = results
+        .iter()
+        .filter(|r| r.outcome == Outcome::Pass)
+        .collect();
+
+    assert_eq!(passed.len(), 1);
+    assert_eq!(passed[0].name, "a");
+    assert_eq!(passed[0].claim, TsfClaim::CryptographicLibraries);
+
+    let not_implemented = results
+        .iter()
+        .filter(|r| matches!(r.outcome, Outcome::NotImplemented))
+        .count();
+    assert_eq!(not_implemented, TsfClaim::ALL.len() - 1);
 }
 
 #[test]
@@ -75,7 +88,7 @@ fn mixed_probes_preserve_order_and_carry_name_claim_outcome() {
     let results = service.run_suite(Trigger::Startup);
 
     assert_eq!(
-        results,
+        &results[..2],
         vec![
             CheckResult {
                 name: "b",
@@ -91,4 +104,6 @@ fn mixed_probes_preserve_order_and_carry_name_claim_outcome() {
             },
         ]
     );
+
+    assert_eq!(results.len(), 2 + TsfClaim::ALL.len() - 1);
 }

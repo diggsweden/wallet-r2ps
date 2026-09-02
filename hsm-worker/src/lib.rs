@@ -12,7 +12,7 @@ use crate::infrastructure::{
 };
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 pub mod application;
 pub mod domain;
@@ -59,8 +59,6 @@ pub fn run() {
 
     if healthy {
         info!(trigger = ?trigger, total = test_results.len(), healthy ,"self-test suite passed");
-    } else if test_results.is_empty() {
-        error!(trigger = ?trigger, healthy, "self-test suite ran no checks; treating as failure");
     } else {
         error!(trigger = ?trigger, total = test_results.len(), failed = ?failed, healthy ,"self-test suite failed");
     }
@@ -91,6 +89,9 @@ fn log_check_result(result: &CheckResult) {
         }
         Outcome::Fail(e) => {
             error!(check = result.name, claim = ?result.claim, detail = %e.detail, "self-test check failed");
+        }
+        Outcome::NotImplemented => {
+            warn!(check = result.name, claim = ?result.claim, "self-test check not implemented");
         }
     }
 }

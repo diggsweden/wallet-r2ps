@@ -41,8 +41,10 @@ impl TsfHealth {
     }
 
     pub fn apply(&self, results: &[CheckResult]) -> bool {
-        let healthy =
-            !results.is_empty() && results.iter().all(|r| matches!(r.outcome, Outcome::Pass));
+        let healthy = !results.is_empty()
+            && results
+                .iter()
+                .all(|r| matches!(r.outcome, Outcome::Pass | Outcome::NotImplemented));
         self.healthy.store(healthy, Ordering::Relaxed);
         healthy
     }

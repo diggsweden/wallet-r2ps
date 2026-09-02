@@ -27,6 +27,14 @@ fn fail(name: &'static str) -> CheckResult {
     }
 }
 
+fn not_implemented(name: &'static str) -> CheckResult {
+    CheckResult {
+        name,
+        claim: TsfClaim::CryptographicLibraries,
+        outcome: crate::application::self_test_spi_port::Outcome::NotImplemented,
+    }
+}
+
 #[test]
 fn a_new_health_flag_starts_unhealthy() {
     assert!(!TsfHealth::new().is_healthy())
@@ -38,6 +46,10 @@ fn a_new_health_flag_starts_unhealthy() {
 #[case::single_failure_at_start(vec![fail("a"), pass("b"), pass("c")], false)]
 #[case::single_failure_in_middle(vec![pass("a"), fail("b"), pass("c")], false)]
 #[case::all_failing(vec![fail("a"), fail("b"), fail("c")], false)]
+#[case::failure_still_gates_alongside_not_implemented(
+    vec![fail("a"), not_implemented("b")],
+    false
+)]
 fn apply_reports_healthy_only_when_every_check_passes(
     #[case] results: Vec<CheckResult>,
     #[case] expected_healthy: bool,
