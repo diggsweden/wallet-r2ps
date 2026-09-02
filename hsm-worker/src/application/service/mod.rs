@@ -14,6 +14,9 @@ mod state_init_service_tests;
 #[cfg(test)]
 mod tsf_health_tests;
 
+#[cfg(test)]
+mod self_test_service_tests;
+
 pub use self_test_service::SelfTestService;
 pub use state_init_service::StateInitService;
 pub use tsf_health::TsfHealth;
