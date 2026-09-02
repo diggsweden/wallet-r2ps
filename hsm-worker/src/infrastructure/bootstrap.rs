@@ -5,7 +5,7 @@
 use crate::application::port::outgoing::hsm_spi_port::HsmSpiPort;
 use crate::application::port::outgoing::jose_port::JoseError;
 use crate::application::port::outgoing::self_test_spi_port::{
-    CheckResult, Outcome, SelfTestError, TsfClaim,
+    CheckResult, Outcome, SelfTestError, SelfTestProbe, TsfClaim,
 };
 use crate::application::service::{StateInitService, TsfHealth};
 use crate::application::session_state_spi_port::SessionStateSpiPort;
@@ -19,6 +19,10 @@ use crate::infrastructure::config::load_pem_from_base64;
 use crate::infrastructure::config::{jose_utils, key_derivation};
 use crate::infrastructure::hsm_wrapper::HsmWrapper;
 use crate::infrastructure::r2ps_response_kafka_message_sender::WorkerResponseKafkaSender;
+use crate::infrastructure::self_test_probes::credential_store_roundtrip::CredentialStoreRoundtripProbe;
+use crate::infrastructure::self_test_probes::crypto_a256gcm_kat::CryptoA256GcmKatProbe;
+use crate::infrastructure::self_test_probes::crypto_es256_kat::CryptoEs256KatProbe;
+use crate::infrastructure::self_test_probes::hsm_roundtrip::HsmRoundtripProbe;
 use crate::infrastructure::state_init_response_kafka_sender::StateInitResponseKafkaMessageSender;
 use p256::SecretKey;
 use p256::pkcs8::DecodePrivateKey;
@@ -317,6 +321,24 @@ pub fn build_services(
         hsm,
         session_state,
     })
+}
+
+pub fn build_self_test_probes(
+    app_config: &AppConfig,
+    services: &Services,
+) -> Vec<Arc<dyn SelfTestProbe>> {
+    vec![
+        Arc::new(CryptoEs256KatProbe),
+        Arc::new(CryptoA256GcmKatProbe),
+        Arc::new(HsmRoundtripProbe::new(
+            services.hsm.clone(),
+            app_config.hsm_root_key_label.clone(),
+            app_config.jws_domain_separator.clone(),
+        )),
+        Arc::new(CredentialStoreRoundtripProbe::new(
+            services.session_state.clone(),
+        )),
+    ]
 }
 
 fn derive_key_from_hsm(

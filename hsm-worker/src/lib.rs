@@ -5,12 +5,8 @@
 use crate::application::WorkerRequestUseCase;
 use crate::application::self_test_spi_port::{CheckResult, Outcome, Trigger};
 use crate::application::service::{SelfTestService, TsfHealth};
-use crate::infrastructure::bootstrap::build_services;
+use crate::infrastructure::bootstrap::{build_self_test_probes, build_services};
 use crate::infrastructure::config::app_config::AppConfig;
-use crate::infrastructure::self_test_probes::credential_store_roundtrip::CredentialStoreRoundtripProbe;
-use crate::infrastructure::self_test_probes::crypto_a256gcm_kat::CryptoA256GcmKatProbe;
-use crate::infrastructure::self_test_probes::crypto_es256_kat::CryptoEs256KatProbe;
-use crate::infrastructure::self_test_probes::hsm_roundtrip::HsmRoundtripProbe;
 use crate::infrastructure::{
     KafkaConfig, StateInitRequestKafkaReceiver, WorkerRequestKafkaReceiver,
 };
@@ -47,23 +43,8 @@ pub fn run() {
         }
     };
 
-    let worker_use_case: Arc<dyn WorkerRequestUseCase + Send + Sync> = Arc::new(services.worker);
-    let state_init_service = Arc::new(services.state_init);
+    let self_test_service = SelfTestService::new(build_self_test_probes(&app_config, &services));
 
-    let hsm_roundtrip_probe = HsmRoundtripProbe::new(
-        services.hsm.clone(),
-        app_config.hsm_root_key_label.clone(),
-        app_config.jws_domain_separator.clone(),
-    );
-
-    let credential_store_probe = CredentialStoreRoundtripProbe::new(services.session_state.clone());
-
-    let self_test_service = SelfTestService::new(vec![
-        Arc::new(CryptoEs256KatProbe),
-        Arc::new(CryptoA256GcmKatProbe),
-        Arc::new(hsm_roundtrip_probe),
-        Arc::new(credential_store_probe),
-    ]);
     let trigger = Trigger::Startup;
     let test_results = self_test_service.run_suite(trigger);
     let mut failed: Vec<&str> = Vec::new();
@@ -83,6 +64,9 @@ pub fn run() {
     } else {
         error!(trigger = ?trigger, total = test_results.len(), failed = ?failed, healthy ,"self-test suite failed");
     }
+
+    let worker_use_case: Arc<dyn WorkerRequestUseCase + Send + Sync> = Arc::new(services.worker);
+    let state_init_service = Arc::new(services.state_init);
 
     // start request worker
     let worker_kafka_receiver = WorkerRequestKafkaReceiver::new(worker_use_case, running.clone());
