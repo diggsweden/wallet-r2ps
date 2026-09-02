@@ -5,7 +5,7 @@
 use crate::application::port::outgoing::hsm_spi_port::HsmSpiPort;
 use crate::application::port::outgoing::jose_port::JoseError;
 use crate::application::port::outgoing::self_test_spi_port::{
-    CheckResult, Outcome, SelfTestError, TsfClaim,
+    CheckResult, Outcome, SelfTestError, SelfTestProbe, TsfClaim,
 };
 use crate::application::service::{StateInitService, TsfHealth};
 use crate::application::session_state_spi_port::SessionStateSpiPort;
@@ -19,6 +19,10 @@ use crate::infrastructure::config::load_pem_from_base64;
 use crate::infrastructure::config::{jose_utils, key_derivation};
 use crate::infrastructure::hsm_wrapper::HsmWrapper;
 use crate::infrastructure::r2ps_response_kafka_message_sender::WorkerResponseKafkaSender;
+use crate::infrastructure::self_test_probes::credential_store_roundtrip::CredentialStoreRoundtripProbe;
+use crate::infrastructure::self_test_probes::crypto_a256gcm_kat::CryptoA256GcmKatProbe;
+use crate::infrastructure::self_test_probes::crypto_es256_kat::CryptoEs256KatProbe;
+use crate::infrastructure::self_test_probes::hsm_roundtrip::HsmRoundtripProbe;
 use crate::infrastructure::state_init_response_kafka_sender::StateInitResponseKafkaMessageSender;
 use p256::SecretKey;
 use p256::pkcs8::DecodePrivateKey;
@@ -180,29 +184,30 @@ pub fn build_services(
                 let jws_pem = load_pem_from_base64(jws_b64).map_err(|e| {
                     BootstrapError::LegacyKeyConfig(format!("SERVER_JWS_PRIVATE_KEY: {e:?}"))
                 })?;
-                let jose_secret = SecretKey::from_pkcs8_pem(&pem::encode(&jws_pem)).map_err(
-                    |_| {
+                let jose_secret =
+                    SecretKey::from_pkcs8_pem(&pem::encode(&jws_pem)).map_err(|_| {
                         BootstrapError::LegacyKeyConfig(
                             "SERVER_JWS_PRIVATE_KEY is not a P-256 PKCS#8 key".to_owned(),
                         )
-                    },
-                )?;
-                let jwe_b64 = app_config.server_jwe_private_key.as_deref().ok_or_else(|| {
-                    BootstrapError::LegacyKeyConfig(
-                        "SERVER_JWE_PRIVATE_KEY required when SERVER_JWS_PRIVATE_KEY is set"
-                            .to_owned(),
-                    )
-                })?;
+                    })?;
+                let jwe_b64 = app_config
+                    .server_jwe_private_key
+                    .as_deref()
+                    .ok_or_else(|| {
+                        BootstrapError::LegacyKeyConfig(
+                            "SERVER_JWE_PRIVATE_KEY required when SERVER_JWS_PRIVATE_KEY is set"
+                                .to_owned(),
+                        )
+                    })?;
                 let jwe_pem = load_pem_from_base64(jwe_b64).map_err(|e| {
                     BootstrapError::LegacyKeyConfig(format!("SERVER_JWE_PRIVATE_KEY: {e:?}"))
                 })?;
-                let jwe_secret = SecretKey::from_pkcs8_pem(&pem::encode(&jwe_pem)).map_err(
-                    |_| {
+                let jwe_secret =
+                    SecretKey::from_pkcs8_pem(&pem::encode(&jwe_pem)).map_err(|_| {
                         BootstrapError::LegacyKeyConfig(
                             "SERVER_JWE_PRIVATE_KEY is not a P-256 PKCS#8 key".to_owned(),
                         )
-                    },
-                )?;
+                    })?;
                 let id = app_config.opaque_server_identifier.clone();
                 ModeConfig {
                     jose_secret: jose_secret.clone(),
@@ -236,9 +241,7 @@ pub fn build_services(
                 let jwe_secret = match app_config.server_encryption_key.as_deref() {
                     Some(enc_b64) => {
                         let enc_pem = load_pem_from_base64(enc_b64).map_err(|e| {
-                            BootstrapError::LegacyKeyConfig(format!(
-                                "SERVER_ENCRYPTION_KEY: {e:?}"
-                            ))
+                            BootstrapError::LegacyKeyConfig(format!("SERVER_ENCRYPTION_KEY: {e:?}"))
                         })?;
                         SecretKey::from_pkcs8_pem(&pem::encode(&enc_pem)).map_err(|_| {
                             BootstrapError::LegacyKeyConfig(
@@ -317,6 +320,24 @@ pub fn build_services(
         hsm,
         session_state,
     })
+}
+
+pub fn build_self_test_probes(
+    app_config: &AppConfig,
+    services: &Services,
+) -> Vec<Arc<dyn SelfTestProbe>> {
+    vec![
+        Arc::new(CryptoEs256KatProbe),
+        Arc::new(CryptoA256GcmKatProbe),
+        Arc::new(HsmRoundtripProbe::new(
+            services.hsm.clone(),
+            app_config.hsm_root_key_label.clone(),
+            app_config.jws_domain_separator.clone(),
+        )),
+        Arc::new(CredentialStoreRoundtripProbe::new(
+            services.session_state.clone(),
+        )),
+    ]
 }
 
 fn derive_key_from_hsm(

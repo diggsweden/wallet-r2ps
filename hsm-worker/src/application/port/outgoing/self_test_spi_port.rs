@@ -19,6 +19,16 @@ pub enum TsfClaim {
     TransactionIdentifierRegistry,
 }
 
+impl TsfClaim {
+    pub const ALL: [TsfClaim; 5] = [
+        TsfClaim::CryptographicLibraries,
+        TsfClaim::WscdHsmConnectivity,
+        TsfClaim::CredentialStoreIntegrity,
+        TsfClaim::AuditLogAvailability,
+        TsfClaim::TransactionIdentifierRegistry,
+    ];
+}
+
 /// What caused this suite run.
 ///
 /// One variant today. FPT_TST.1.1 also requires periodic and on-demand runs,
@@ -44,6 +54,11 @@ pub struct SelfTestError {
 pub enum Outcome {
     Pass,
     Fail(SelfTestError),
+    /// No `SelfTestProbe` evidences this claim yet. Not a pass and not a
+    /// runtime failure — `TsfHealth` must not gate on it — but it has to
+    /// reach the audit trail so "N checks, all passed" can't be mistaken
+    /// for full AN 30 coverage.
+    NotImplemented,
 }
 
 /// Audited under FAU_GEN.1.1(i).
