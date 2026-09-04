@@ -412,30 +412,11 @@ async fn an_hsm_request_returns_503_when_device_state_store_is_unavailable() {
         .await
         .unwrap();
 
+    // Body shape (content-type, status/title/detail fields) is covered once,
+    // at the source, by build_problem_response's own unit tests.
     assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
-    let content_type = response
-        .headers()
-        .get(axum::http::header::CONTENT_TYPE)
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .to_string();
-    assert!(
-        content_type.contains("application/problem+json"),
-        "unavailable store must return application/problem+json, got: {content_type}"
-    );
     let body = read_body_json(response).await;
-    assert_eq!(body["status"], 503);
-    assert_eq!(body["title"], "Service Unavailable");
     assert_eq!(body["instance"], "/hsm/v1/requests");
-    assert!(
-        body["detail"]
-            .as_str()
-            .unwrap()
-            .contains("temporarily unavailable"),
-        "detail must indicate transient unavailability, got: {}",
-        body["detail"]
-    );
 }
 
 // ---------------------------------------------------------------------------
@@ -667,25 +648,11 @@ async fn creating_a_device_state_returns_503_when_store_is_unavailable() {
         .await
         .unwrap();
 
+    // Body shape (content-type, status/title/detail fields) is covered once,
+    // at the source, by build_problem_response's own unit tests.
     assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
-    let content_type = response
-        .headers()
-        .get(axum::http::header::CONTENT_TYPE)
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .to_string();
-    assert!(content_type.contains("application/problem+json"));
     let body = read_body_json(response).await;
-    assert_eq!(body["status"], 503);
-    assert_eq!(body["title"], "Service Unavailable");
     assert_eq!(body["instance"], "/hsm/v1/device-states");
-    assert!(
-        body["detail"]
-            .as_str()
-            .unwrap()
-            .contains("temporarily unavailable"),
-    );
 }
 
 #[tokio::test]

@@ -415,7 +415,10 @@ async fn test_state_init_consumer_receives_and_notifies_correlation_service() {
     assert_eq!(result.dev_authorization_code, "dac_test_123");
 
     // Verify device state was persisted in Valkey
-    let state = device_state_port.load("device-xyz").await.expect("valkey up");
+    let state = device_state_port
+        .load("device-xyz")
+        .await
+        .expect("valkey up");
     assert_eq!(state, Some("init-state-jws".to_string()));
 }
 
@@ -535,7 +538,10 @@ async fn test_bff_kafka_round_trip() {
 
     // Device state saved asynchronously — give it a moment
     tokio::time::sleep(Duration::from_millis(100)).await;
-    let state = device_state_port.load("device-rt").await.expect("valkey up");
+    let state = device_state_port
+        .load("device-rt")
+        .await
+        .expect("valkey up");
     assert_eq!(state, Some("new-state-jws".to_string()));
 }
 
