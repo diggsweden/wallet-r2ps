@@ -2,6 +2,7 @@
 //
 // SPDX-License-Identifier: EUPL-1.2
 
+pub mod clock_port;
 pub mod hsm_spi_port;
 pub mod jose_port;
 pub mod pake_port;

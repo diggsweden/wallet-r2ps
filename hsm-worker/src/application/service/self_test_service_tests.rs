@@ -82,6 +82,16 @@ fn one_passing_probe_gives_one_pass_and_leaves_other_claims_not_implemented() {
 }
 
 #[test]
+fn periodic_trigger_runs_the_same_probes_as_startup() {
+    let service = SelfTestService::new(vec![pass("a"), fail("b", "boom")]);
+
+    let startup_results = service.run_suite(Trigger::Startup);
+    let periodic_results = service.run_suite(Trigger::Periodic);
+
+    assert_eq!(startup_results, periodic_results);
+}
+
+#[test]
 fn mixed_probes_preserve_order_and_carry_name_claim_outcome() {
     let service = SelfTestService::new(vec![fail("b", "boom"), pass("a")]);
 

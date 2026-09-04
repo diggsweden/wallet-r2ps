@@ -8,10 +8,11 @@ use crate::application::service::{SelfTestService, TsfHealth};
 use crate::infrastructure::bootstrap::{build_self_test_probes, build_services};
 use crate::infrastructure::config::app_config::AppConfig;
 use crate::infrastructure::{
-    KafkaConfig, StateInitRequestKafkaReceiver, WorkerRequestKafkaReceiver,
+    KafkaConfig, PeriodicSelfTestTrigger, StateInitRequestKafkaReceiver, WorkerRequestKafkaReceiver,
 };
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 use tracing::{debug, error, info, warn};
 
 pub mod application;
@@ -43,9 +44,50 @@ pub fn run() {
         }
     };
 
-    let self_test_service = SelfTestService::new(build_self_test_probes(&app_config, &services));
+    let self_test_service = Arc::new(SelfTestService::new(build_self_test_probes(
+        &app_config,
+        &services,
+    )));
 
-    let trigger = Trigger::Startup;
+    run_and_log_suite(&self_test_service, &health, Trigger::Startup);
+
+    let worker_use_case: Arc<dyn WorkerRequestUseCase + Send + Sync> = Arc::new(services.worker);
+    let state_init_service = Arc::new(services.state_init);
+
+    // start request worker
+    let worker_kafka_receiver = WorkerRequestKafkaReceiver::new(worker_use_case, running.clone());
+    let join_handle = worker_kafka_receiver.start_worker_thread(kafka_config.clone());
+
+    // start state init request worker
+    let state_init_receiver =
+        StateInitRequestKafkaReceiver::new(state_init_service, running.clone());
+    let state_init_handle = state_init_receiver.start_worker_thread(kafka_config.clone());
+
+    // start periodic self-test trigger (FPT_TST.1.1)
+    let periodic_self_test_trigger = PeriodicSelfTestTrigger::new(
+        self_test_service,
+        health,
+        running.clone(),
+        Duration::from_secs(app_config.self_test_periodic_interval_secs),
+    );
+    let periodic_self_test_handle = periodic_self_test_trigger.start_worker_thread();
+
+    info!("HSM worker started");
+
+    // wait until all worker threads finish
+    let _ = join_handle.join();
+    let _ = state_init_handle.join();
+    let _ = periodic_self_test_handle.join();
+}
+
+/// Runs the self-test suite, logs each check result, and applies the outcome to `health`.
+/// Shared by the start-up run in `run()` and the periodic trigger so both produce identical
+/// logging/gating behavior.
+pub(crate) fn run_and_log_suite(
+    self_test_service: &SelfTestService,
+    health: &TsfHealth,
+    trigger: Trigger,
+) -> bool {
     let test_results = self_test_service.run_suite(trigger);
     let mut failed: Vec<&str> = Vec::new();
 
@@ -63,23 +105,7 @@ pub fn run() {
         error!(trigger = ?trigger, total = test_results.len(), failed = ?failed, healthy ,"self-test suite failed");
     }
 
-    let worker_use_case: Arc<dyn WorkerRequestUseCase + Send + Sync> = Arc::new(services.worker);
-    let state_init_service = Arc::new(services.state_init);
-
-    // start request worker
-    let worker_kafka_receiver = WorkerRequestKafkaReceiver::new(worker_use_case, running.clone());
-    let join_handle = worker_kafka_receiver.start_worker_thread(kafka_config.clone());
-
-    // start state init request worker
-    let state_init_receiver =
-        StateInitRequestKafkaReceiver::new(state_init_service, running.clone());
-    let state_init_handle = state_init_receiver.start_worker_thread(kafka_config.clone());
-
-    info!("HSM worker started");
-
-    // wait until both worker threads finish
-    let _ = join_handle.join();
-    let _ = state_init_handle.join();
+    healthy
 }
 
 fn log_check_result(result: &CheckResult) {

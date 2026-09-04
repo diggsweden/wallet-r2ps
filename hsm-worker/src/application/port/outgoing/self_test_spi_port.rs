@@ -31,13 +31,13 @@ impl TsfClaim {
 
 /// What caused this suite run.
 ///
-/// One variant today. FPT_TST.1.1 also requires periodic and on-demand runs,
-/// and FAU_GEN.2.1 requires user-initiated events to carry the requesting
-/// identity — so the on-demand variant will carry it, and the audit record has
-/// to distinguish the three cases.
+/// On-demand is not yet represented. FAU_GEN.2.1 requires user-initiated events to carry the
+/// requesting identity — so that variant will carry it, and the audit record has to distinguish
+/// all three cases.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Trigger {
     Startup,
+    Periodic,
 }
 
 /// Why a check failed.
