@@ -27,7 +27,10 @@ pub struct BffRequest {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BffNewStateRequest {
-    pub public_key: EcPublicJwk,
+    /// Client public key the worker verifies request JWS signatures with
+    pub client_jws_public_key: EcPublicJwk,
+    /// Client public key the worker encrypts pre-session responses to (ECDH-ES)
+    pub client_jwe_public_key: EcPublicJwk,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ttl: Option<String>,
 }
@@ -58,4 +61,5 @@ pub struct BffNewStateResponse {
     pub status: String,
     pub client_id: String,
     pub dev_authorization_code: Option<String>,
+    pub server_jwe_public_key: Option<EcPublicJwk>,
 }

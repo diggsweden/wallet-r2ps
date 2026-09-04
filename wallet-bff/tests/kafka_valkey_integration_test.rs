@@ -220,7 +220,8 @@ async fn test_state_init_sender_produces_to_kafka() {
         KafkaStateInitSender::new(&bootstrap, "v4", "test-state-init-responses".to_string());
     let request = StateInitRequest {
         request_id: "req-200".to_string(),
-        public_key: test_ec_jwk(),
+        client_jws_public_key: test_ec_jwk(),
+        client_jwe_public_key: Some(test_ec_jwk()),
         response_topic: String::new(), // overwritten by sender
         initial_key_curve: Curve::P256,
     };
@@ -248,7 +249,11 @@ async fn test_state_init_sender_produces_to_kafka() {
     let payload = msg.payload().expect("empty payload");
     let received: StateInitRequest = serde_json::from_slice(payload).expect("deserialize failed");
     assert_eq!(received.request_id, "req-200");
-    assert_eq!(received.public_key.crv, "P-256");
+    assert_eq!(received.client_jws_public_key.crv, "P-256");
+    assert_eq!(
+        received.client_jwe_public_key.as_ref().unwrap().crv,
+        "P-256"
+    );
     assert_eq!(received.response_topic, "test-state-init-responses");
 }
 
@@ -357,7 +362,10 @@ async fn test_state_init_consumer_receives_and_notifies_correlation_service() {
 
     let device_state_port: Arc<dyn DeviceStatePort> =
         Arc::new(DeviceStateRedisAdapter::new(conn.clone()));
-    let correlation = Arc::new(StateInitCorrelationService::new(device_state_port.clone()));
+    let correlation = Arc::new(StateInitCorrelationService::new(
+        device_state_port.clone(),
+        Arc::new(std::sync::OnceLock::new()),
+    ));
 
     let request_id = "req-400";
     let topic = format!("test-state-init-responses-{}", uuid::Uuid::new_v4());
@@ -380,7 +388,7 @@ async fn test_state_init_consumer_receives_and_notifies_correlation_service() {
         state_jws: "init-state-jws".to_string(),
         dev_authorization_code: "dac_test_123".to_string(),
         server_jws_public_key: None,
-        server_jws_kid: None,
+        server_jwe_public_key: None,
         opaque_server_id: None,
         initial_hsm_key: None,
     };

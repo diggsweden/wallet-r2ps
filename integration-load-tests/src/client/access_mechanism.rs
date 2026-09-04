@@ -9,7 +9,7 @@ use anyhow::{bail, Context, Result};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use josekit::jwk::Jwk;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use crate::crypto::{opaque_client, pin_stretch};
 use crate::protocol::message_builder::{build_pake_request_jws, build_session_request_jws};
@@ -23,8 +23,17 @@ use super::rest_client::RestClient;
 
 pub struct AccessMechanismClient {
     rest: Arc<RestClient>,
-    server_public_key: Jwk,
-    device_private_key: Jwk,
+    /// Server JWS public key — passed at construction for the initial ECDH-ES encryption
+    /// before the server JWE key is known. Replaced by `server_jwe_key` after `init_state`.
+    server_jws_public_key: Jwk,
+    /// Server JWE public key — populated from the `init_state` response and used for all
+    /// subsequent PAKE inner-JWE encryption (ECDH-ES). Distinct from the JWS key since
+    /// key separation was introduced.
+    server_jwe_key: OnceLock<Jwk>,
+    device_jws_private_key: Jwk,
+    /// Distinct from the signing key — Device-encrypted responses are
+    /// decrypted with this key (ECDH-ES).
+    device_jwe_private_key: Jwk,
     kid: String,
     pin_stretch_d: String,
     opaque_context: String,
@@ -32,10 +41,12 @@ pub struct AccessMechanismClient {
 }
 
 impl AccessMechanismClient {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         rest: Arc<RestClient>,
         server_public_key: Jwk,
-        device_private_key: Jwk,
+        device_jws_private_key: Jwk,
+        device_jwe_private_key: Jwk,
         kid: String,
         pin_stretch_d: String,
         opaque_context: String,
@@ -43,8 +54,10 @@ impl AccessMechanismClient {
     ) -> Self {
         Self {
             rest,
-            server_public_key,
-            device_private_key,
+            server_jws_public_key: server_public_key,
+            server_jwe_key: OnceLock::new(),
+            device_jws_private_key,
+            device_jwe_private_key,
             kid,
             pin_stretch_d,
             opaque_context,
@@ -52,15 +65,23 @@ impl AccessMechanismClient {
         }
     }
 
+    fn server_encryption_key(&self) -> &Jwk {
+        self.server_jwe_key
+            .get()
+            .unwrap_or(&self.server_jws_public_key)
+    }
+
     /// Initialize device state via the BFF.
     /// Returns (client_id, authorization_code).
     pub async fn init_state(
         &self,
-        public_key: &EcPublicJwk,
+        jws_public_key: &EcPublicJwk,
+        jwe_public_key: &EcPublicJwk,
         ttl: &str,
     ) -> Result<(String, String)> {
         let request = BffNewStateRequest {
-            public_key: public_key.clone(),
+            client_jws_public_key: jws_public_key.clone(),
+            client_jwe_public_key: jwe_public_key.clone(),
             ttl: Some(ttl.to_string()),
         };
 
@@ -69,6 +90,15 @@ impl AccessMechanismClient {
         let auth_code = resp
             .dev_authorization_code
             .context("No authorization code in device-states response")?;
+
+        if let Some(server_jwe_jwk) = resp.server_jwe_public_key {
+            let jwk = Jwk::try_from(&server_jwe_jwk).context("Failed to build server JWE JWK")?;
+            if self.server_jwe_key.set(jwk).is_err() {
+                tracing::warn!(
+                    "server_jwe_key already set; ignoring duplicate init_state response"
+                );
+            }
+        }
 
         Ok((client_id, auth_code))
     }
@@ -94,8 +124,8 @@ impl AccessMechanismClient {
             OperationId::RegisterStart,
             &pake_req,
             None,
-            &self.server_public_key,
-            &self.device_private_key,
+            self.server_encryption_key(),
+            &self.device_jws_private_key,
             &self.kid,
         )?;
         let resp = self.rest.submit_request(client_id, &jws).await?;
@@ -107,7 +137,7 @@ impl AccessMechanismClient {
             .context("No result in registration start response")?;
 
         // Extract OPAQUE response bytes
-        let pake_resp = unwrap_pake_response(&result_jws, &self.device_private_key)?;
+        let pake_resp = unwrap_pake_response(&result_jws, &self.device_jwe_private_key)?;
         let opaque_bytes = pake_resp
             .data
             .context("No OPAQUE data in registration start response")?;
@@ -132,8 +162,8 @@ impl AccessMechanismClient {
             OperationId::RegisterFinish,
             &pake_req,
             None,
-            &self.server_public_key,
-            &self.device_private_key,
+            self.server_encryption_key(),
+            &self.device_jws_private_key,
             &self.kid,
         )?;
         let resp = self.rest.submit_request(client_id, &jws).await?;
@@ -160,8 +190,8 @@ impl AccessMechanismClient {
             OperationId::AuthenticateStart,
             &pake_req,
             None,
-            &self.server_public_key,
-            &self.device_private_key,
+            self.server_encryption_key(),
+            &self.device_jws_private_key,
             &self.kid,
         )?;
         let resp = self.rest.submit_request(client_id, &jws).await?;
@@ -171,7 +201,7 @@ impl AccessMechanismClient {
         let result_jws = resp.result.context("No result in login start response")?;
 
         // Extract OPAQUE response + session_id
-        let pake_resp = unwrap_pake_response(&result_jws, &self.device_private_key)?;
+        let pake_resp = unwrap_pake_response(&result_jws, &self.device_jwe_private_key)?;
         let opaque_bytes = pake_resp
             .data
             .context("No OPAQUE data in login start response")?;
@@ -201,8 +231,8 @@ impl AccessMechanismClient {
             OperationId::AuthenticateFinish,
             &pake_req,
             Some(&session_id),
-            &self.server_public_key,
-            &self.device_private_key,
+            self.server_encryption_key(),
+            &self.device_jws_private_key,
             &self.kid,
         )?;
         let resp = self.rest.submit_request(client_id, &jws).await?;
@@ -226,7 +256,7 @@ impl AccessMechanismClient {
             &payload,
             session_id,
             session_key,
-            &self.device_private_key,
+            &self.device_jws_private_key,
             &self.kid,
         )?;
         let resp = self.rest.submit_request(client_id, &jws).await?;
@@ -272,7 +302,7 @@ impl AccessMechanismClient {
             &payload,
             session_id,
             session_key,
-            &self.device_private_key,
+            &self.device_jws_private_key,
             &self.kid,
         )?;
         let resp = self.rest.submit_request(client_id, &jws).await?;

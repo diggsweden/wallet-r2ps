@@ -15,19 +15,28 @@ use rand_core::OsRng;
 
 struct JoseFixture {
     adapter: JoseAdapter,
-    public_pem: String,
+    /// Public half of the JWE encryption key — JWEs must be encrypted to this key.
+    encryption_public_pem: String,
+    /// Public half of the JWS signing key — must NOT work as a JWE recipient.
+    signing_public_pem: String,
 }
 
 #[fixture]
 fn jose() -> JoseFixture {
-    let secret_key = SecretKey::random(&mut OsRng);
-    let public_pem_str = secret_key
+    let signing_key = SecretKey::random(&mut OsRng);
+    let encryption_key = SecretKey::random(&mut OsRng);
+    let signing_public_pem = signing_key
+        .public_key()
+        .to_public_key_pem(Default::default())
+        .unwrap();
+    let encryption_public_pem = encryption_key
         .public_key()
         .to_public_key_pem(Default::default())
         .unwrap();
     JoseFixture {
-        adapter: JoseAdapter::new(secret_key).unwrap(),
-        public_pem: public_pem_str.to_string(),
+        adapter: JoseAdapter::new(signing_key, encryption_key).unwrap(),
+        encryption_public_pem,
+        signing_public_pem,
     }
 }
 
@@ -48,7 +57,7 @@ fn decrypt_device_jwe_happy_path(jose: JoseFixture) {
         request_type: OperationId::Info,
         data: Some("Hello, World! This is a secret message.".to_string()),
     };
-    let jwe = make_device_jwe(&jose.public_pem, &inner);
+    let jwe = make_device_jwe(&jose.encryption_public_pem, &inner);
     let bytes = jose
         .adapter
         .jwe_decrypt(&jwe, JweDecryptionKey::Device)
@@ -60,6 +69,29 @@ fn decrypt_device_jwe_happy_path(jose: JoseFixture) {
         decoded.data.unwrap(),
         "Hello, World! This is a secret message."
     );
+}
+
+#[rstest]
+fn decrypt_rejects_jwe_encrypted_to_signing_key(jose: JoseFixture) {
+    let inner = InnerRequest {
+        version: 1,
+        request_type: OperationId::Info,
+        data: Some("must not decrypt".to_string()),
+    };
+    let jwe = make_device_jwe(&jose.signing_public_pem, &inner);
+    assert!(
+        jose.adapter
+            .jwe_decrypt(&jwe, JweDecryptionKey::Device)
+            .is_err(),
+        "JWE encrypted to the JWS signing key must be rejected"
+    );
+}
+
+#[rstest]
+fn accepts_identical_signing_and_encryption_keys_with_warning() {
+    // Backward compat: identical keys are accepted (with a log warning).
+    let key = SecretKey::random(&mut OsRng);
+    assert!(JoseAdapter::new(key.clone(), key).is_ok());
 }
 
 #[rstest]

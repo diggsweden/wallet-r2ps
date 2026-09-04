@@ -11,7 +11,7 @@ use crate::application::service::worker_service::error::{UpstreamError, WorkerEr
 use crate::domain::OuterRequest;
 use crate::domain::{DeviceHsmState, EcPublicJwk, HsmWorkerRequest, SessionId};
 use std::sync::Arc;
-use tracing::info;
+use tracing::{info, warn};
 
 /// Intermediate result after decoding the outer JWS, before inner JWE decryption.
 pub struct PartialRequest {
@@ -19,7 +19,7 @@ pub struct PartialRequest {
     pub state: DeviceHsmState,
     pub outer_request: OuterRequest,
     pub device_kid: String,
-    pub device_public_key: EcPublicJwk,
+    pub device_jwe_public_key: EcPublicJwk,
 }
 
 pub struct RequestDecoder {
@@ -58,16 +58,22 @@ impl RequestDecoder {
             .peek_kid(outer_request_jws.as_str())
             .ok_or(UpstreamError::OuterJwsMissingKid)?;
 
-        let device_public_key = state
+        let device_key_entry = state
             .find_device_key(&device_kid)
-            .ok_or(UpstreamError::UnknownDevice)?
-            .public_key
-            .clone();
+            .ok_or(UpstreamError::UnknownDevice)?;
+        let device_jws_public_key = device_key_entry.jws_public_key.clone();
+        if device_key_entry.jwe_public_key.is_none() {
+            warn!(
+                kid = %device_key_entry.jws_public_key.kid,
+                "Legacy device state: jwe_public_key absent, falling back to jws_public_key — key separation not enforced"
+            );
+        }
+        let device_jwe_public_key = device_key_entry.effective_jwe_public_key().clone();
 
         let outer_request = OuterRequest::from_jws(
             outer_request_jws.as_str(),
             self.jose.as_ref(),
-            &device_public_key,
+            &device_jws_public_key,
         )?;
 
         match &outer_request.server_kid {
@@ -85,7 +91,7 @@ impl RequestDecoder {
             state,
             outer_request,
             device_kid,
-            device_public_key,
+            device_jwe_public_key,
         })
     }
 
@@ -121,7 +127,7 @@ impl RequestDecoder {
             request_type: operation_context.inner_request.request_type,
             session_key: None, // populated by WorkerService
             ttl: None,         // populated by WorkerService
-            device_public_key: partial.device_public_key,
+            device_jwe_public_key: partial.device_jwe_public_key,
         };
 
         Ok(WorkerInput {

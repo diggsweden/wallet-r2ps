@@ -28,13 +28,20 @@ fn state_without_password_file() -> DeviceHsmState {
     DeviceHsmState {
         version: 1,
         device_keys: vec![DeviceKeyEntry {
-            public_key: EcPublicJwk {
+            jws_public_key: EcPublicJwk {
                 kty: "EC".to_string(),
                 crv: "P-256".to_string(),
                 x: "x".to_string(),
                 y: "y".to_string(),
                 kid: "device-key-1".to_string(),
             },
+            jwe_public_key: Some(EcPublicJwk {
+                kty: "EC".to_string(),
+                crv: "P-256".to_string(),
+                x: "x".to_string(),
+                y: "y".to_string(),
+                kid: "device-jwe-key-1".to_string(),
+            }),
             password_files: vec![],
             dev_authorization_code: None,
         }],
@@ -159,13 +166,20 @@ fn state_with_auth_code(code: &str) -> DeviceHsmState {
     DeviceHsmState {
         version: 1,
         device_keys: vec![DeviceKeyEntry {
-            public_key: EcPublicJwk {
+            jws_public_key: EcPublicJwk {
                 kty: "EC".to_string(),
                 crv: "P-256".to_string(),
                 x: "x".to_string(),
                 y: "y".to_string(),
                 kid: "device-key-1".to_string(),
             },
+            jwe_public_key: Some(EcPublicJwk {
+                kty: "EC".to_string(),
+                crv: "P-256".to_string(),
+                x: "x".to_string(),
+                y: "y".to_string(),
+                kid: "device-jwe-key-1".to_string(),
+            }),
             password_files: vec![],
             dev_authorization_code: Some(code.to_string()),
         }],

@@ -160,7 +160,7 @@ impl ResponseBuilder {
                 jose_port::JweEncryptionKey::Session(session_key)
             }
             EncryptOption::Device => {
-                jose_port::JweEncryptionKey::Device(&context.device_public_key)
+                jose_port::JweEncryptionKey::Device(&context.device_jwe_public_key)
             }
         };
 

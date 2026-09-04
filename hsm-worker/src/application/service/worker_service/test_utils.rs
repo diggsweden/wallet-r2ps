@@ -92,6 +92,9 @@ impl JosePort for MockJoseDeterministic {
     fn jws_kid(&self) -> &str {
         "mock-kid"
     }
+    fn jwe_public_key(&self) -> &EcPublicJwk {
+        unimplemented!()
+    }
 }
 
 // --- SPI Mocks ---
@@ -190,13 +193,20 @@ fn make_state_impl(device_kid: &str, password_files: Vec<PasswordFileEntry>) -> 
     DeviceHsmState {
         version: 1,
         device_keys: vec![DeviceKeyEntry {
-            public_key: EcPublicJwk {
+            jws_public_key: EcPublicJwk {
                 kty: "EC".to_string(),
                 crv: "P-256".to_string(),
                 x: "x".to_string(),
                 y: "y".to_string(),
                 kid: device_kid.to_string(),
             },
+            jwe_public_key: Some(EcPublicJwk {
+                kty: "EC".to_string(),
+                crv: "P-256".to_string(),
+                x: "x".to_string(),
+                y: "y".to_string(),
+                kid: format!("{device_kid}-jwe"),
+            }),
             password_files,
             dev_authorization_code: None,
         }],

@@ -45,8 +45,14 @@ pub struct PasswordFileEntry {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(ToSchema))]
 pub struct DeviceKeyEntry {
-    /// The device's EC public key as a JWK (JSON Web Key) object
-    pub public_key: EcPublicJwk,
+    /// The device's EC public key used to verify request JWS signatures.
+    /// Accepts legacy `public_key` field name for backward compatibility with old stored state.
+    #[serde(alias = "public_key")]
+    pub jws_public_key: EcPublicJwk,
+    /// The device's EC public key used to encrypt responses to the device via ECDH-ES.
+    /// Absent in legacy state; callers fall back to `jws_public_key` with a warning.
+    #[serde(default)]
+    pub jwe_public_key: Option<EcPublicJwk>,
     /// Ordered list of OPAQUE password file entries (latest is last)
     pub password_files: Vec<PasswordFileEntry>,
     /// One-time authorization code for initial device registration
@@ -55,7 +61,13 @@ pub struct DeviceKeyEntry {
 
 impl DeviceKeyEntry {
     pub fn kid(&self) -> &str {
-        &self.public_key.kid
+        &self.jws_public_key.kid
+    }
+
+    /// Returns the JWE public key to use for encrypting responses to this device.
+    /// Falls back to the JWS key for legacy state that predates key separation.
+    pub fn effective_jwe_public_key(&self) -> &EcPublicJwk {
+        self.jwe_public_key.as_ref().unwrap_or(&self.jws_public_key)
     }
 }
 

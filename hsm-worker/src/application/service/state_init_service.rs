@@ -7,7 +7,7 @@ use crate::application::port::outgoing::hsm_spi_port::HsmSpiPort;
 use crate::application::port::outgoing::jose_port::JosePort;
 use crate::domain::{DeviceHsmState, DeviceKeyEntry, StateInitRequest, StateInitResponse};
 use std::sync::Arc;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 pub struct StateInitService {
@@ -49,12 +49,35 @@ impl StateInitService {
         debug!("Initializing state, request id: {}", request.request_id);
         let response_topic = request.response_topic.clone();
 
-        // 1. Validate public_key JWK (EC P-256)
-        validate_ec_public_jwk(&request.public_key)?;
+        // 1. Validate client JWK keys (EC P-256)
+        validate_ec_public_jwk(&request.client_jws_public_key)?;
+
+        // Resolve JWE key: fall back to JWS key for legacy clients that supply only one key.
+        let client_jwe_public_key = match request.client_jwe_public_key {
+            Some(k) => {
+                validate_ec_public_jwk(&k)?;
+                if k.x == request.client_jws_public_key.x && k.y == request.client_jws_public_key.y
+                {
+                    error!(
+                        kid = %request.client_jws_public_key.kid,
+                        "Client supplied two keys with identical coordinates — key separation violated"
+                    );
+                    return Err(StateInitError::InvalidJwk);
+                }
+                k
+            }
+            None => {
+                warn!(
+                    kid = %request.client_jws_public_key.kid,
+                    "client_jwe_public_key absent (legacy client); falling back to jws key — key separation not enforced"
+                );
+                request.client_jws_public_key.clone()
+            }
+        };
 
         info!(
-            "Initializing state for public key with kid: {}",
-            request.public_key.kid
+            "Initializing state for JWS public key with kid: {} (JWE kid: {})",
+            request.client_jws_public_key.kid, client_jwe_public_key.kid
         );
 
         // 2. Generate dev_authorization_code
@@ -82,7 +105,8 @@ impl StateInitService {
         let state = DeviceHsmState {
             version: 1,
             device_keys: vec![DeviceKeyEntry {
-                public_key: request.public_key,
+                jws_public_key: request.client_jws_public_key,
+                jwe_public_key: Some(client_jwe_public_key),
                 password_files: vec![],
                 dev_authorization_code: Some(dev_auth_code.clone()),
             }],
@@ -103,7 +127,7 @@ impl StateInitService {
             state_jws,
             dev_authorization_code: dev_auth_code,
             server_jws_public_key: self.jose.jws_public_key().clone(),
-            server_jws_kid: self.jose.jws_kid().to_owned(),
+            server_jwe_public_key: self.jose.jwe_public_key().clone(),
             opaque_server_id: self.opaque_server_id.clone(),
             initial_hsm_key,
         };

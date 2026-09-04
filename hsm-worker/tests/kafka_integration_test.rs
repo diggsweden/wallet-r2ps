@@ -161,7 +161,13 @@ async fn test_state_init_response_sender_produces_to_kafka() {
             y: "test-y".to_string(),
             kid: "test-server-kid".to_string(),
         },
-        server_jws_kid: "test-server-kid".to_string(),
+        server_jwe_public_key: EcPublicJwk {
+            kty: "EC".to_string(),
+            crv: "P-256".to_string(),
+            x: "test-jwe-x".to_string(),
+            y: "test-jwe-y".to_string(),
+            kid: "test-server-jwe-kid".to_string(),
+        },
         opaque_server_id: "test-server-id".to_string(),
         initial_hsm_key: EcPublicJwk {
             kty: "EC".to_string(),
@@ -277,7 +283,8 @@ async fn test_state_init_consumer_receives_and_processes() {
     use p256::SecretKey;
 
     let secret = SecretKey::random(&mut OsRng);
-    let jose = Arc::new(JoseAdapter::new(secret).unwrap());
+    let enc_secret = SecretKey::random(&mut OsRng);
+    let jose = Arc::new(JoseAdapter::new(secret, enc_secret).unwrap());
 
     // Mock HSM that returns a dummy key for state init tests
     use hsm_worker::application::port::outgoing::hsm_spi_port::HsmSpiPort as StateInitHsmSpiPort;
@@ -350,15 +357,28 @@ async fn test_state_init_consumer_receives_and_processes() {
     let device_secret = SecretKey::random(&mut OsRng);
     let ec_point = device_secret.public_key().to_encoded_point(false);
 
+    let client_jwk = EcPublicJwk {
+        kty: "EC".to_string(),
+        crv: "P-256".to_string(),
+        x: BASE64_URL_SAFE_NO_PAD.encode(ec_point.x().unwrap()),
+        y: BASE64_URL_SAFE_NO_PAD.encode(ec_point.y().unwrap()),
+        kid: "test-device-kid".to_string(),
+    };
+    // The JWE key must be a distinct key — the worker rejects identical
+    // JWS/JWE key material at state init.
+    let device_jwe_secret = SecretKey::random(&mut OsRng);
+    let jwe_ec_point = device_jwe_secret.public_key().to_encoded_point(false);
+    let client_jwe_jwk = EcPublicJwk {
+        kty: "EC".to_string(),
+        crv: "P-256".to_string(),
+        x: BASE64_URL_SAFE_NO_PAD.encode(jwe_ec_point.x().unwrap()),
+        y: BASE64_URL_SAFE_NO_PAD.encode(jwe_ec_point.y().unwrap()),
+        kid: "test-device-jwe-kid".to_string(),
+    };
     let request = StateInitRequest {
         request_id: "req-401".to_string(),
-        public_key: EcPublicJwk {
-            kty: "EC".to_string(),
-            crv: "P-256".to_string(),
-            x: BASE64_URL_SAFE_NO_PAD.encode(ec_point.x().unwrap()),
-            y: BASE64_URL_SAFE_NO_PAD.encode(ec_point.y().unwrap()),
-            kid: "test-device-kid".to_string(),
-        },
+        client_jws_public_key: client_jwk,
+        client_jwe_public_key: Some(client_jwe_jwk),
         response_topic: "test-state-init-response-topic".to_string(),
         initial_key_curve: Curve::P256,
     };
@@ -429,15 +449,17 @@ async fn test_worker_kafka_round_trip() {
     use p256::elliptic_curve::sec1::ToEncodedPoint;
     use p256::pkcs8::{EncodePrivateKey, EncodePublicKey};
 
-    // Generate server key pair
+    // Generate server key pairs (signing + encryption); clients encrypt inner JWEs
+    // toward the encryption key.
     use hsm_worker::application::port::outgoing::jose_port::JosePort;
     let server_secret = SecretKey::random(&mut OsRng);
-    let pub_pem_str = server_secret
+    let server_enc_secret = SecretKey::random(&mut OsRng);
+    let pub_pem_str = server_enc_secret
         .public_key()
         .to_public_key_pem(Default::default())
         .unwrap()
         .to_string();
-    let jose = Arc::new(JoseAdapter::new(server_secret).unwrap());
+    let jose = Arc::new(JoseAdapter::new(server_secret, server_enc_secret).unwrap());
 
     // No-op PAKE and HSM (not needed for list-keys on a fresh device)
     struct NoOpPake;
@@ -543,7 +565,8 @@ async fn test_worker_kafka_round_trip() {
     let device_state = hsm_worker::domain::DeviceHsmState {
         version: 1,
         device_keys: vec![hsm_worker::domain::DeviceKeyEntry {
-            public_key: device_jwk.clone(),
+            jws_public_key: device_jwk.clone(),
+            jwe_public_key: Some(device_jwk.clone()),
             password_files: vec![],
             dev_authorization_code: None,
         }],

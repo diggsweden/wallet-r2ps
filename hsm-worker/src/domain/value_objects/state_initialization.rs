@@ -16,7 +16,12 @@ use utoipa::ToSchema;
 pub struct StateInitRequest {
     /// Correlation ID for this initialization request
     pub request_id: String,
-    pub public_key: EcPublicJwk,
+    /// Client JWS public key; the worker verifies device request signatures with this key
+    pub client_jws_public_key: EcPublicJwk,
+    /// Client JWE public key; the worker encrypts pre-session responses to this key (ECDH-ES).
+    /// Absent for legacy clients that send a single key; service falls back to jws key with a warning.
+    #[serde(default)]
+    pub client_jwe_public_key: Option<EcPublicJwk>,
     /// Kafka topic the worker should send its response to
     pub response_topic: String,
     /// Curve used to generate the initial HSM key during state initialization.
@@ -37,10 +42,10 @@ pub struct StateInitResponse {
     pub state_jws: TypedJws<DeviceHsmState>,
     /// One-time authorization code for device registration
     pub dev_authorization_code: String,
-    /// Server JWS public key (EC JWK); clients may use this for JWE encryption and JWS verification
+    /// Server JWS public key. Clients use this for JWS verification only
     pub server_jws_public_key: EcPublicJwk,
-    /// KID of the server JWS public key
-    pub server_jws_kid: String,
+    /// Server JWE public key. Clients encrypt pre-auth inner JWEs to this key (ECDH-ES).
+    pub server_jwe_public_key: EcPublicJwk,
     /// OPAQUE server identifier used during registration (must match on authenticate)
     pub opaque_server_id: String,
     /// Public key of the initial HSM key generated during state initialization.

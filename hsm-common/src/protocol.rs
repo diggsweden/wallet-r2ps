@@ -265,7 +265,14 @@ pub struct HsmWorkerResponse {
 #[serde(rename_all = "camelCase")]
 pub struct StateInitRequest {
     pub request_id: String,
-    pub public_key: EcPublicJwk,
+    /// Client JWS public key; the worker verifies device request signatures with this key.
+    /// Accepts legacy `publicKey` field for backward compatibility with old clients.
+    #[serde(alias = "publicKey")]
+    pub client_jws_public_key: EcPublicJwk,
+    /// Client JWE public key; the worker encrypts pre-session responses to this key (ECDH-ES).
+    /// Absent for legacy clients; service falls back to jws key with a warning.
+    #[serde(default)]
+    pub client_jwe_public_key: Option<EcPublicJwk>,
     /// Kafka topic the hsm-worker should send its response to
     pub response_topic: String,
     /// Curve used to generate the initial HSM key during state initialization.
@@ -281,10 +288,12 @@ pub struct StateInitResponse {
     /// JWS-encoded DeviceHsmState (compact serialization)
     pub state_jws: String,
     pub dev_authorization_code: String,
+    /// Server JWS public key; clients use this to verify the servers' signature.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub server_jws_public_key: Option<EcPublicJwk>,
+    /// Server JWE public key; clients encrypt pre-auth inner JWEs to this key (ECDH-ES).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub server_jws_kid: Option<String>,
+    pub server_jwe_public_key: Option<EcPublicJwk>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub opaque_server_id: Option<String>,
     /// Public key of the initial HSM key, present when `initial_key_curve` was set in the request.

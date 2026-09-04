@@ -209,11 +209,12 @@ fn setup_crypto() -> (
     use rand_core::OsRng;
 
     let secret_key = SecretKey::random(&mut OsRng);
+    let encryption_key = SecretKey::random(&mut OsRng);
     let public_key_pem = secret_key
         .public_key()
         .to_public_key_pem(Default::default())
         .unwrap();
-    let jose = Arc::new(JoseAdapter::new(secret_key).unwrap());
+    let jose = Arc::new(JoseAdapter::new(secret_key, encryption_key).unwrap());
     let verifier = josekit::jws::ES256
         .verifier_from_pem(public_key_pem.as_bytes())
         .unwrap();

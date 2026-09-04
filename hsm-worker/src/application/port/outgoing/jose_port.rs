@@ -19,7 +19,7 @@ pub enum JweEncryptionKey<'a> {
     Device(&'a EcPublicJwk),
 }
 
-/// Device variant uses the server private key held by the adapter.
+/// Device variant uses the server JWE encryption private key held by the adapter
 pub enum JweDecryptionKey<'a> {
     Device,
     Session(&'a SessionKey),
@@ -39,4 +39,5 @@ pub trait JosePort: Send + Sync {
     fn peek_kid(&self, compact: &str) -> Option<String>;
     fn jws_public_key(&self) -> &EcPublicJwk;
     fn jws_kid(&self) -> &str;
+    fn jwe_public_key(&self) -> &EcPublicJwk;
 }

@@ -45,12 +45,14 @@ enum Command {
         #[arg(long)]
         force: bool,
     },
-    /// Derive and print the JWS and OPAQUE public keys for the given root key and domain separators.
+    /// Derive and print the JWS, JWE and OPAQUE public keys for the given root key and domain separators.
     DerivePublicKeys {
         #[arg(long)]
         root_key_label: String,
         #[arg(long, default_value = "jws-v1")]
         jws_domain_sep: String,
+        #[arg(long, default_value = "jwe-v1")]
+        jwe_domain_sep: String,
         #[arg(long, default_value = "opaque-v1")]
         opaque_domain_sep: String,
     },
@@ -267,20 +269,28 @@ fn main() {
         Command::DerivePublicKeys {
             root_key_label,
             jws_domain_sep,
+            jwe_domain_sep,
             opaque_domain_sep,
         } => {
             let hsm = open_hsm(hsm_lib, slot_token_label, pin, String::new());
 
             let jws_secret = derive_secret(&hsm, &root_key_label, &jws_domain_sep);
+            let jwe_secret = derive_secret(&hsm, &root_key_label, &jwe_domain_sep);
             let opaque_secret = derive_secret(&hsm, &root_key_label, &opaque_domain_sep);
 
             let jws_jwk = jose_utils::ec_public_key_from_secret(&jws_secret);
+            let jwe_jwk = jose_utils::ec_public_key_from_secret(&jwe_secret);
             let opaque_jwk = jose_utils::ec_public_key_from_secret(&opaque_secret);
 
             println!("JWS public key:");
             println!("  domain_sep : {}", jws_domain_sep);
             println!("  kid        : {}", jws_jwk.kid);
             println!("  jwk        : {}", public_key_jwk_json(&jws_secret));
+            println!();
+            println!("JWE public key:");
+            println!("  domain_sep : {}", jwe_domain_sep);
+            println!("  kid        : {}", jwe_jwk.kid);
+            println!("  jwk        : {}", public_key_jwk_json(&jwe_secret));
             println!();
             println!("OPAQUE public key:");
             println!("  domain_sep : {}", opaque_domain_sep);

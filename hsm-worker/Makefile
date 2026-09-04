@@ -13,6 +13,7 @@ PKCS11_USER_PIN         ?= 123456
 PKCS11_WRAP_KEY_ALIAS   ?= hsm-wrap-key
 HSM_ROOT_KEY_LABEL      ?= rk-$(shell date +%Y%m)
 JWS_DOMAIN_SEPARATOR    ?= $(HSM_ROOT_KEY_LABEL)_jws-$(shell date +%Y%m)
+JWE_DOMAIN_SEPARATOR    ?= $(HSM_ROOT_KEY_LABEL)_jwe-$(shell date +%Y%m)
 OPAQUE_DOMAIN_SEPARATOR ?= $(HSM_ROOT_KEY_LABEL)_opaque-$(shell date +%Y%m)
 
 KEYTOOL_LOCAL   := ./target/debug/digg-hsm-keytool \
@@ -114,11 +115,12 @@ hsm-create-root-key:
 		--label $(HSM_ROOT_KEY_LABEL) \
 		--test-domain-sep $(JWS_DOMAIN_SEPARATOR)
 
-## Print the JWS and OPAQUE public keys to wire into clients. Use the same HSM_ROOT_KEY_LABEL as hsm-create-root-key
+## Print the JWS, JWE and OPAQUE public keys to wire into clients. Use the same HSM_ROOT_KEY_LABEL as hsm-create-root-key
 hsm-derive-public-keys:
 	$(KEYTOOL) derive-public-keys \
 		--root-key-label $(HSM_ROOT_KEY_LABEL) \
 		--jws-domain-sep $(JWS_DOMAIN_SEPARATOR) \
+		--jwe-domain-sep $(JWE_DOMAIN_SEPARATOR) \
 		--opaque-domain-sep $(OPAQUE_DOMAIN_SEPARATOR)
 
 ## Remove wrapping key and root key (dry-run by default; add FORCE=1 to actually delete)

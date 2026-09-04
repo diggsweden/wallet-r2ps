@@ -52,7 +52,14 @@ pub struct BffRequest {
 #[derive(Debug, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct NewStateRequestDto {
-    pub public_key: EcPublicJwk,
+    /// Client public key used to verify the device's request signatures (JWS).
+    /// Accepts legacy `publicKey` field for backward compatibility with old clients.
+    #[serde(alias = "publicKey")]
+    pub client_jws_public_key: EcPublicJwk,
+    /// Client public key the server encrypts pre-session responses to (JWE, ECDH-ES).
+    /// Absent for legacy clients that send a single key.
+    #[serde(default)]
+    pub client_jwe_public_key: Option<EcPublicJwk>,
     pub client_id: Option<String>,
     /// When `true`, overwrites any existing device state for the supplied `clientId`.
     /// When `false` (default), a fresh `clientId` is always generated.
@@ -73,8 +80,12 @@ pub struct NewStateResponseDto {
     pub client_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dev_authorization_code: Option<String>,
+    /// Server JWS public key; clients use this to verify the servers' signature.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub server_jws_public_key: Option<EcPublicJwk>,
+    /// Server JWE public key; clients encrypt pre-auth inner JWEs to this key (ECDH-ES).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub server_jwe_public_key: Option<EcPublicJwk>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub opaque_server_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
