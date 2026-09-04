@@ -104,10 +104,17 @@ async fn duplicate_nonce_returns_409() {
 }
 
 #[tokio::test]
-async fn nonce_store_error_returns_500() {
+async fn nonce_store_error_returns_503() {
+    // Body shape (content-type, status/title/detail fields) is covered once,
+    // at the source, by build_problem_response's own unit tests.
     let app = make_app(Err("redis unavailable".to_string()));
     let resp = post_to(app, "/test", post_body("client-a", "nonce-abc")).await;
-    assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+    let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(body["instance"], "/test");
 }
 
 // GET requests have no replay risk and must bypass nonce checking entirely.

@@ -61,6 +61,20 @@ pub(super) fn tracked_problem_response(
     build_problem_response(status, title, detail, instance, Some(request_id))
 }
 
+/// 503 ProblemDetail for transient upstream data-store outages
+/// (e.g. Valkey reconnect exhausted after `with_redis_retry`).
+/// Detail intentionally omits internals per SAK.25/26 — the adapter
+/// logs the underlying error separately.
+pub(super) fn service_unavailable_problem(instance: &str, detail: &str) -> Response {
+    build_problem_response(
+        StatusCode::SERVICE_UNAVAILABLE,
+        "Service Unavailable",
+        Some(detail),
+        instance,
+        None,
+    )
+}
+
 fn build_problem_response(
     status: StatusCode,
     title: &str,
@@ -144,4 +158,74 @@ pub fn router(state: Arc<AppState>, rp_state: Arc<ReplayProtectionState>) -> Rou
             }),
         )
         .with_state(state)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    async fn body_json(response: Response) -> serde_json::Value {
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        serde_json::from_slice(&bytes).unwrap()
+    }
+
+    #[tokio::test]
+    async fn build_problem_response_sets_status_and_problem_json_content_type() {
+        let response = build_problem_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Service Unavailable",
+            Some("Nonce store is temporarily unavailable. Please retry."),
+            "/hsm/v1/requests",
+            None,
+        );
+
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(
+            response.headers().get(header::CONTENT_TYPE).unwrap(),
+            "application/problem+json"
+        );
+
+        let body = body_json(response).await;
+        assert_eq!(body["title"], "Service Unavailable");
+        assert_eq!(body["status"], 503);
+        assert_eq!(
+            body["detail"],
+            "Nonce store is temporarily unavailable. Please retry."
+        );
+        assert_eq!(body["instance"], "/hsm/v1/requests");
+    }
+
+    #[tokio::test]
+    async fn build_problem_response_omits_absent_optional_fields_from_json() {
+        let response = build_problem_response(
+            StatusCode::NOT_FOUND,
+            "Not Found",
+            None,
+            "/hsm/v1/device-states",
+            None,
+        );
+
+        let body = body_json(response).await;
+        // detail/request_id/type use skip_serializing_if, so absent means
+        // the key itself is missing from the JSON, not present-with-null.
+        assert!(!body.as_object().unwrap().contains_key("detail"));
+        assert!(!body.as_object().unwrap().contains_key("request_id"));
+        assert!(!body.as_object().unwrap().contains_key("type"));
+    }
+
+    #[tokio::test]
+    async fn build_problem_response_includes_request_id_when_tracked() {
+        let response = build_problem_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Internal Server Error",
+            Some("boom"),
+            "/hsm/v1/requests",
+            Some("corr-123"),
+        );
+
+        let body = body_json(response).await;
+        assert_eq!(body["request_id"], "corr-123");
+    }
 }

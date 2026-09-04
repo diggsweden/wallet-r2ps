@@ -11,7 +11,7 @@ use std::time::Duration;
 use tracing::info;
 use uuid::Uuid;
 
-use super::{problem_response, tracked_problem_response};
+use super::{problem_response, service_unavailable_problem, tracked_problem_response};
 use crate::application::port::incoming::ResponseUseCase;
 use crate::application::port::outgoing::{
     DeviceStatePort, RequestSenderPort, StateInitCorrelationPort, StateInitSenderPort,
@@ -121,6 +121,7 @@ pub async fn task_response(
         (status = 404, description = "Device state not found", body = ProblemDetail, content_type = "application/problem+json"),
         (status = 409, description = "Duplicate nonce — generate a new nonce and retry", body = ProblemDetail, content_type = "application/problem+json"),
         (status = 500, description = "Internal server error", body = ProblemDetail, content_type = "application/problem+json"),
+        (status = 503, description = "Upstream data store temporarily unavailable", body = ProblemDetail, content_type = "application/problem+json"),
         (status = "default", description = "Unexpected error", body = ProblemDetail, content_type = "application/problem+json"),
     )
 )]
@@ -138,8 +139,8 @@ pub async fn service(
     let state_jws = match req.state_jws {
         Some(s) => s,
         None => match state.device_state_port.load(&req.client_id).await {
-            Some(s) => s,
-            None => {
+            Ok(Some(s)) => s,
+            Ok(None) => {
                 info!("No state found for clientId: {}", req.client_id);
                 return problem_response(
                     StatusCode::NOT_FOUND,
@@ -149,6 +150,12 @@ pub async fn service(
                         req.client_id
                     )),
                     &instance,
+                );
+            }
+            Err(_) => {
+                return service_unavailable_problem(
+                    &instance,
+                    "Device state store is temporarily unavailable. Please retry.",
                 );
             }
         },
@@ -226,6 +233,7 @@ pub async fn service(
     responses(
         (status = 200, description = "State initialized successfully", body = NewStateResponseDto),
         (status = 500, description = "Internal server error", body = ProblemDetail, content_type = "application/problem+json"),
+        (status = 503, description = "Upstream data store temporarily unavailable", body = ProblemDetail, content_type = "application/problem+json"),
         (status = "default", description = "Unexpected error", body = ProblemDetail, content_type = "application/problem+json"),
     )
 )]
@@ -255,19 +263,29 @@ pub async fn create_state(
         Uuid::new_v4().to_string()
     };
 
-    if !req.overwrite
-        && let Some(existing_state) = state.device_state_port.load(&client_id).await
-    {
-        let dto = NewStateResponseDto {
-            status: "OK".to_string(),
-            client_id,
-            dev_authorization_code: None,
-            server_jws_public_key: None,
-            server_jwe_public_key: state.server_jwe_public_key.get().cloned(),
-            opaque_server_id: None,
-            state_jws: Some(existing_state),
-        };
-        return Json(dto).into_response();
+    if !req.overwrite {
+        match state.device_state_port.load(&client_id).await {
+            Ok(Some(existing_state)) => {
+                let dto = NewStateResponseDto {
+                    status: "OK".to_string(),
+                    client_id,
+                    dev_authorization_code: None,
+                    server_jws_public_key: None,
+                    server_jwe_public_key: state.server_jwe_public_key.get().cloned(),
+                    opaque_server_id: None,
+                    state_jws: Some(existing_state),
+                };
+                return Json(dto).into_response();
+            }
+            Ok(None) => {}
+            Err(_) => {
+                return service_unavailable_problem(
+                    &instance,
+                    "Device state store is temporarily unavailable. Please retry.",
+                )
+                .into_response();
+            }
+        }
     }
 
     let request_id = Uuid::new_v4().to_string();
