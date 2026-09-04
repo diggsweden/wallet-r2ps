@@ -4,20 +4,24 @@
 
 use std::sync::Arc;
 
-use crate::application::self_test_spi_port::{
-    CheckResult, Outcome, SelfTestProbe, Trigger, TsfClaim,
+use crate::application::{
+    clock_port::WallClock,
+    self_test_spi_port::{CheckResult, Outcome, SelfTestProbe, TsfClaim},
 };
 
 pub struct SelfTestService {
     probes: Vec<Arc<dyn SelfTestProbe>>,
+    wall_clock: Arc<dyn WallClock>,
 }
 
 impl SelfTestService {
-    pub fn new(probes: Vec<Arc<dyn SelfTestProbe>>) -> Self {
-        Self { probes }
+    pub fn new(probes: Vec<Arc<dyn SelfTestProbe>>, wall_clock: Arc<dyn WallClock>) -> Self {
+        Self { probes, wall_clock }
     }
 
-    pub fn run_suite(&self, _trigger: Trigger) -> Vec<CheckResult> {
+    /// Runs every probe. The same suite regardless of what triggered the run — the `Trigger`
+    /// belongs to the audit record the caller builds, not to the selection of probes.
+    pub fn run_suite(&self) -> Vec<CheckResult> {
         let mut results: Vec<CheckResult> = self
             .probes
             .iter()
@@ -28,6 +32,7 @@ impl SelfTestService {
                     Ok(()) => Outcome::Pass,
                     Err(e) => Outcome::Fail(e),
                 },
+                at: self.wall_clock.now_utc(),
             })
             .collect();
 
@@ -37,6 +42,7 @@ impl SelfTestService {
                     name: not_implemented_name(claim),
                     claim,
                     outcome: Outcome::NotImplemented,
+                    at: self.wall_clock.now_utc(),
                 });
             }
         }
@@ -46,12 +52,12 @@ impl SelfTestService {
 
 fn not_implemented_name(claim: TsfClaim) -> &'static str {
     match claim {
-        TsfClaim::CryptographicLibraries => "cryptographic-libraries-not-implemented",
-        TsfClaim::WscdHsmConnectivity => "wscd-hsm-connectivity-not-implemented",
-        TsfClaim::CredentialStoreIntegrity => "credential-store-integrity-not-implemented",
-        TsfClaim::AuditLogAvailability => "audit-log-availability-not-implemented",
+        TsfClaim::CryptographicLibraries => "cryptographic_libraries_not_implemented",
+        TsfClaim::WscdHsmConnectivity => "wscd_hsm_connectivity_not_implemented",
+        TsfClaim::CredentialStoreIntegrity => "credential_store_integrity_not_implemented",
+        TsfClaim::AuditLogAvailability => "audit_log_availability_not_implemented",
         TsfClaim::TransactionIdentifierRegistry => {
-            "transaction-identifier-registry-not-implemented"
+            "transaction_identifier_registry_not_implemented"
         }
     }
 }

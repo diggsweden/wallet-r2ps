@@ -16,6 +16,11 @@
 //!
 //! Two-way by design. `FPT_RCV.4` and Table 7 / T.TSF_FAILURE (p. 39) require recovery to a
 //! secure state, so a later passing run must be able to lift a quarantine.
+//!
+//! The periodic self-test trigger writes this flag from its own thread for the lifetime of the
+//! process, while the worker and state-init threads read it on every request to decide whether
+//! to refuse. `Release`/`Acquire` ordering makes the store happen-before the load it's meant to
+//! gate.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -37,7 +42,7 @@ impl TsfHealth {
     }
 
     pub fn is_healthy(&self) -> bool {
-        self.healthy.load(Ordering::Relaxed)
+        self.healthy.load(Ordering::Acquire)
     }
 
     pub fn apply(&self, results: &[CheckResult]) -> bool {
@@ -45,12 +50,12 @@ impl TsfHealth {
             && results
                 .iter()
                 .all(|r| matches!(r.outcome, Outcome::Pass | Outcome::NotImplemented));
-        self.healthy.store(healthy, Ordering::Relaxed);
+        self.healthy.store(healthy, Ordering::Release);
         healthy
     }
 
     pub fn quarantine(&self) {
-        self.healthy.store(false, Ordering::Relaxed);
+        self.healthy.store(false, Ordering::Release);
     }
 }
 

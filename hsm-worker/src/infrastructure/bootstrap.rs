@@ -24,6 +24,7 @@ use crate::infrastructure::self_test_probes::crypto_a256gcm_kat::CryptoA256GcmKa
 use crate::infrastructure::self_test_probes::crypto_es256_kat::CryptoEs256KatProbe;
 use crate::infrastructure::self_test_probes::hsm_roundtrip::HsmRoundtripProbe;
 use crate::infrastructure::state_init_response_kafka_sender::StateInitResponseKafkaMessageSender;
+use chrono::{DateTime, Utc};
 use p256::SecretKey;
 use p256::pkcs8::DecodePrivateKey;
 use std::sync::Arc;
@@ -51,9 +52,9 @@ pub enum BootstrapError {
     OpaqueInit(String),
 }
 
-impl From<BootstrapError> for CheckResult {
-    fn from(value: BootstrapError) -> Self {
-        let (name, claim, detail) = match value {
+impl BootstrapError {
+    pub fn into_check_result(self, at: DateTime<Utc>) -> CheckResult {
+        let (name, claim, detail) = match self {
             BootstrapError::HsmConnect(detail) => {
                 ("hsm_connect", TsfClaim::WscdHsmConnectivity, detail)
             }
@@ -90,6 +91,7 @@ impl From<BootstrapError> for CheckResult {
             name,
             claim,
             outcome: Outcome::Fail(SelfTestError { detail }),
+            at,
         }
     }
 }

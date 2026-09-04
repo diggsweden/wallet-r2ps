@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: EUPL-1.2
 
+use chrono::Utc;
+
 use crate::application::WorkerPorts;
 use crate::application::WorkerRequestUseCase;
 use crate::application::hsm_spi_port::MockHsmSpiPort;
@@ -216,6 +218,7 @@ fn function_is_restored_when_self_test_turns_healthy() {
         name: "a",
         claim: CredentialStoreIntegrity,
         outcome: Pass,
+        at: Utc::now(),
     }]);
 
     // second request (healthy state)

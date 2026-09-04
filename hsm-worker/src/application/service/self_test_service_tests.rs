@@ -2,8 +2,11 @@
 //
 // SPDX-License-Identifier: EUPL-1.2
 
+use chrono::{DateTime, Utc};
+
+use crate::application::clock_port::WallClock;
 use crate::application::self_test_spi_port::{
-    CheckResult, Outcome, SelfTestError, SelfTestProbe, Trigger, TsfClaim,
+    CheckResult, Outcome, SelfTestError, SelfTestProbe, TsfClaim,
 };
 use crate::application::service::SelfTestService;
 use std::sync::Arc;
@@ -30,6 +33,18 @@ impl SelfTestProbe for FakeProbe {
     }
 }
 
+fn fake_now() -> DateTime<Utc> {
+    "2026-01-01T12:00:00Z".parse().unwrap()
+}
+
+struct FakeWallClock;
+
+impl WallClock for FakeWallClock {
+    fn now_utc(&self) -> DateTime<Utc> {
+        fake_now()
+    }
+}
+
 fn pass(name: &'static str) -> Arc<dyn SelfTestProbe> {
     Arc::new(FakeProbe {
         name,
@@ -48,22 +63,23 @@ fn fail(name: &'static str, detail: &str) -> Arc<dyn SelfTestProbe> {
 
 #[test]
 fn empty_probe_list_report_every_claim_not_implemented() {
-    let service = SelfTestService::new(vec![]);
-    let results = service.run_suite(Trigger::Startup);
+    let service = SelfTestService::new(vec![], Arc::new(FakeWallClock));
+    let results = service.run_suite();
 
     assert_eq!(results.len(), TsfClaim::ALL.len());
     assert!(
         results
             .iter()
             .all(|r| matches!(r.outcome, Outcome::NotImplemented))
-    )
+    );
+    assert!(results.iter().all(|r| r.at == fake_now()));
 }
 
 #[test]
 fn one_passing_probe_gives_one_pass_and_leaves_other_claims_not_implemented() {
-    let service = SelfTestService::new(vec![pass("a")]);
+    let service = SelfTestService::new(vec![pass("a")], Arc::new(FakeWallClock));
 
-    let results = service.run_suite(Trigger::Startup);
+    let results = service.run_suite();
 
     let passed: Vec<&CheckResult> = results
         .iter()
@@ -83,9 +99,9 @@ fn one_passing_probe_gives_one_pass_and_leaves_other_claims_not_implemented() {
 
 #[test]
 fn mixed_probes_preserve_order_and_carry_name_claim_outcome() {
-    let service = SelfTestService::new(vec![fail("b", "boom"), pass("a")]);
+    let service = SelfTestService::new(vec![fail("b", "boom"), pass("a")], Arc::new(FakeWallClock));
 
-    let results = service.run_suite(Trigger::Startup);
+    let results = service.run_suite();
 
     assert_eq!(
         &results[..2],
@@ -96,11 +112,13 @@ fn mixed_probes_preserve_order_and_carry_name_claim_outcome() {
                 outcome: Outcome::Fail(SelfTestError {
                     detail: "boom".to_string(),
                 }),
+                at: fake_now(),
             },
             CheckResult {
                 name: "a",
                 claim: TsfClaim::CryptographicLibraries,
                 outcome: Outcome::Pass,
+                at: fake_now(),
             },
         ]
     );
