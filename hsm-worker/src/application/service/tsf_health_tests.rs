@@ -2,6 +2,7 @@
 //
 // SPDX-License-Identifier: EUPL-1.2
 
+use chrono::Utc;
 use rstest::rstest;
 
 use crate::application::{
@@ -14,6 +15,7 @@ fn pass(name: &'static str) -> CheckResult {
         name,
         claim: TsfClaim::CryptographicLibraries,
         outcome: Pass,
+        at: Utc::now(),
     }
 }
 
@@ -24,6 +26,7 @@ fn fail(name: &'static str) -> CheckResult {
         outcome: crate::application::self_test_spi_port::Outcome::Fail(SelfTestError {
             detail: "forced".to_string(),
         }),
+        at: Utc::now(),
     }
 }
 
@@ -32,6 +35,7 @@ fn not_implemented(name: &'static str) -> CheckResult {
         name,
         claim: TsfClaim::CryptographicLibraries,
         outcome: crate::application::self_test_spi_port::Outcome::NotImplemented,
+        at: Utc::now(),
     }
 }
 

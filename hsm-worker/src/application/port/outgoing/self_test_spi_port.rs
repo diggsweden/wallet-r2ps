@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: EUPL-1.2
 
+use chrono::{DateTime, Utc};
+
 /// Which FPT_TST.1 Application Note 30 requirement a check is evidence for.
 ///
 /// `TsfClaim` names the requirement category being demonstrated, not the check that
@@ -27,17 +29,38 @@ impl TsfClaim {
         TsfClaim::AuditLogAvailability,
         TsfClaim::TransactionIdentifierRegistry,
     ];
+
+    /// Stable audit-record identifier, independent of the variant name.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            TsfClaim::CryptographicLibraries => "cryptographic_libraries",
+            TsfClaim::WscdHsmConnectivity => "wscd_hsm_connectivity",
+            TsfClaim::CredentialStoreIntegrity => "credential_store_integrity",
+            TsfClaim::AuditLogAvailability => "audit_log_availability",
+            TsfClaim::TransactionIdentifierRegistry => "transaction_identifier_registry",
+        }
+    }
 }
 
 /// What caused this suite run.
 ///
-/// One variant today. FPT_TST.1.1 also requires periodic and on-demand runs,
-/// and FAU_GEN.2.1 requires user-initiated events to carry the requesting
-/// identity — so the on-demand variant will carry it, and the audit record has
-/// to distinguish the three cases.
+/// On-demand is not yet represented. FAU_GEN.2.1 requires user-initiated events to carry the
+/// requesting identity — so that variant will carry it, and the audit record has to distinguish
+/// all three cases.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Trigger {
     Startup,
+    Periodic,
+}
+
+impl Trigger {
+    /// Stable audit-record identifier, independent of the variant name.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Trigger::Startup => "startup",
+            Trigger::Periodic => "periodic",
+        }
+    }
 }
 
 /// Why a check failed.
@@ -61,6 +84,20 @@ pub enum Outcome {
     NotImplemented,
 }
 
+impl Outcome {
+    /// Stable audit-record identifier, independent of the variant name.
+    ///
+    /// `Fail` discards its payload so every failure shares one value; the reason is the
+    /// record's own `detail` field.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Outcome::Pass => "pass",
+            Outcome::Fail(_) => "fail",
+            Outcome::NotImplemented => "not_implemented",
+        }
+    }
+}
+
 /// Audited under FAU_GEN.1.1(i).
 #[derive(Debug, PartialEq, Eq)]
 pub struct CheckResult {
@@ -69,6 +106,9 @@ pub struct CheckResult {
     /// The Application Note 30 item this check is evidence for.
     pub claim: TsfClaim,
     pub outcome: Outcome,
+    /// FAU_GEN.1.2 date and time of the event: when this check ran. Taken per check rather
+    /// than once for the suite, so a slow or hung probe is visible in the audit trail.
+    pub at: DateTime<Utc>,
 }
 
 pub trait SelfTestProbe: Send + Sync {

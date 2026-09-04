@@ -4,6 +4,7 @@
 
 //! Shared fixtures for the `tests/` integration binaries.
 
+use chrono::Utc;
 use hsm_worker::application::self_test_spi_port::CheckResult;
 use hsm_worker::application::self_test_spi_port::Outcome::Pass;
 use hsm_worker::application::self_test_spi_port::TsfClaim::CryptographicLibraries;
@@ -16,6 +17,7 @@ pub fn healthy() -> TsfHealth {
         name: "test",
         claim: CryptographicLibraries,
         outcome: Pass,
+        at: Utc::now(),
     }]);
     health
 }
