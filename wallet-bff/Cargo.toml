@@ -37,12 +37,12 @@ iso8601-duration = { version = "0.2.0", features = ["serde"] }
 async-trait = "0.1"
 utoipa = { version = "5", features = ["uuid"] }
 utoipa-swagger-ui = { version = "9", features = ["axum"] }
-tower-http = { version = "0.6", features = ["trace"] }
+tower-http = { version = "0.7", features = ["trace"] }
 
 [dev-dependencies]
-uuid = { version = "=1.23.3", features = ["v4"] }
+uuid = { version = "=1.26.0", features = ["v4"] }
 rstest = "=0.26.1"
 tower = { version = "=0.5.3", features = ["util"] }
-testcontainers = "=0.27.3"
+testcontainers = "=0.28.0"
 testcontainers-modules = { version = "=0.15.0", features = ["kafka", "valkey"] }
-base64 = "=0.22.1"
+base64 = "=0.23.1"
