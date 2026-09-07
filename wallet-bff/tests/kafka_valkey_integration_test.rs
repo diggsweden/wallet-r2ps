@@ -9,9 +9,9 @@ use rdkafka::consumer::{Consumer, StreamConsumer};
 use rdkafka::producer::{FutureProducer, FutureRecord};
 use rdkafka::{ClientConfig, Message};
 use redis::aio::ConnectionManager;
-use testcontainers::ContainerAsync;
-use testcontainers::runners::AsyncRunner;
 use testcontainers_modules::kafka::apache::{self, Kafka};
+use testcontainers_modules::testcontainers::ContainerAsync;
+use testcontainers_modules::testcontainers::runners::AsyncRunner;
 use testcontainers_modules::valkey::Valkey;
 use tokio::sync::Mutex;
 

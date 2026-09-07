@@ -43,6 +43,5 @@ tower-http = { version = "0.6", features = ["trace"] }
 uuid = { version = "=1.23.3", features = ["v4"] }
 rstest = "=0.26.1"
 tower = { version = "=0.5.3", features = ["util"] }
-testcontainers = "=0.27.3"
 testcontainers-modules = { version = "=0.15.0", features = ["kafka", "valkey"] }
 base64 = "=0.22.1"
