@@ -4,8 +4,9 @@
 
 use crate::application::WorkerRequestUseCase;
 use crate::application::clock_port::WallClock;
-use crate::application::self_test_spi_port::{CheckResult, Outcome, Trigger};
-use crate::application::service::{SelfTestService, TsfHealth};
+use crate::application::self_test_spi_port::Trigger;
+use crate::application::service::audit_event::emit;
+use crate::application::service::{AuditEvent, SelfTestService, TsfHealth};
 use crate::infrastructure::bootstrap::{build_self_test_probes, build_services};
 use crate::infrastructure::config::app_config::AppConfig;
 use crate::infrastructure::system_clock::SystemClock;
@@ -15,7 +16,7 @@ use crate::infrastructure::{
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info};
 
 pub mod application;
 pub mod domain;
@@ -43,7 +44,8 @@ pub fn run() {
     let services = match build_services(&app_config, kafka_config.clone(), health.clone()) {
         Ok(services) => services,
         Err(e) => {
-            log_check_result(&e.into_check_result(wall_clock.now_utc()));
+            let result = e.into_check_result(wall_clock.now_utc());
+            emit(&AuditEvent::for_check(Trigger::Startup, &result));
             std::process::exit(1);
         }
     };
@@ -53,7 +55,7 @@ pub fn run() {
         wall_clock,
     ));
 
-    run_and_log_suite(&self_test_service, &health, Trigger::Startup);
+    self_test_service.run_and_report(&health, Trigger::Startup);
 
     let worker_use_case: Arc<dyn WorkerRequestUseCase + Send + Sync> = Arc::new(services.worker);
     let state_init_service = Arc::new(services.state_init);
@@ -82,46 +84,4 @@ pub fn run() {
     let _ = join_handle.join();
     let _ = state_init_handle.join();
     let _ = periodic_self_test_handle.join();
-}
-
-/// Runs the self-test suite, logs each check result, and applies the outcome to `health`.
-/// Shared by the start-up run in `run()` and the periodic trigger so both produce identical
-/// logging/gating behavior.
-pub(crate) fn run_and_log_suite(
-    self_test_service: &SelfTestService,
-    health: &TsfHealth,
-    trigger: Trigger,
-) -> bool {
-    let test_results = self_test_service.run_suite();
-    let mut failed: Vec<&str> = Vec::new();
-
-    for result in &test_results {
-        log_check_result(result);
-        if let Outcome::Fail(_) = &result.outcome {
-            failed.push(result.name);
-        }
-    }
-    let healthy = health.apply(&test_results);
-
-    if healthy {
-        info!(trigger = ?trigger, total = test_results.len(), healthy ,"self-test suite passed");
-    } else {
-        error!(trigger = ?trigger, total = test_results.len(), failed = ?failed, healthy ,"self-test suite failed");
-    }
-
-    healthy
-}
-
-fn log_check_result(result: &CheckResult) {
-    match &result.outcome {
-        Outcome::Pass => {
-            info!(check = result.name, claim = ?result.claim, "self-test check passed")
-        }
-        Outcome::Fail(e) => {
-            error!(check = result.name, claim = ?result.claim, detail = %e.detail, "self-test check failed");
-        }
-        Outcome::NotImplemented => {
-            warn!(check = result.name, claim = ?result.claim, "self-test check not implemented");
-        }
-    }
 }

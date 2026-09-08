@@ -4,9 +4,12 @@
 
 use std::sync::Arc;
 
+use tracing::{error, info};
+
 use crate::application::{
     clock_port::WallClock,
-    self_test_spi_port::{CheckResult, Outcome, SelfTestProbe, TsfClaim},
+    self_test_spi_port::{CheckResult, Outcome, SelfTestProbe, Trigger, TsfClaim},
+    service::{AuditEvent, TsfHealth, audit_event::emit},
 };
 
 pub struct SelfTestService {
@@ -47,6 +50,36 @@ impl SelfTestService {
             }
         }
         results
+    }
+
+    /// Runs the self-test suite, emits an audit record per check plus a verdict record, and
+    /// applies the outcome to `health`. Shared by the start-up run in `run()` and the periodic
+    /// trigger so both produce identical audit/gating behavior.
+    pub(crate) fn run_and_report(&self, health: &TsfHealth, trigger: Trigger) -> bool {
+        let test_results = self.run_suite();
+        let mut failed: Vec<&str> = Vec::new();
+
+        for result in &test_results {
+            let event = AuditEvent::for_check(trigger, result);
+            emit(&event);
+            if let Outcome::Fail(_) = &result.outcome {
+                failed.push(result.name);
+            }
+        }
+
+        let at = self.wall_clock.now_utc();
+        let verdict_event = AuditEvent::for_verdict(trigger, at, &test_results);
+        emit(&verdict_event);
+
+        let healthy = health.apply(&test_results);
+
+        if healthy {
+            info!(trigger = ?trigger, total = test_results.len(), healthy ,"self-test suite passed");
+        } else {
+            error!(trigger = ?trigger, total = test_results.len(), failed = ?failed, healthy ,"self-test suite failed");
+        }
+
+        healthy
     }
 }
 
