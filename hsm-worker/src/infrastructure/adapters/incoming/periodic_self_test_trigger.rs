@@ -10,7 +10,6 @@ use std::time::Duration;
 use crate::application::self_test_spi_port::Trigger;
 use crate::application::service::{PeriodicScheduler, SelfTestService, TsfHealth};
 use crate::infrastructure::adapters::outgoing::system_clock::SystemClock;
-use crate::run_and_log_suite;
 
 /// How often the shutdown flag is re-checked while waiting for the next periodic run;
 /// mirrors the 100ms poll cadence the Kafka receivers use for shutdown responsiveness.
@@ -46,7 +45,8 @@ impl PeriodicSelfTestTrigger {
 
             while self.running.load(Ordering::Relaxed) {
                 if scheduler.due() {
-                    run_and_log_suite(&self.self_test_service, &self.health, Trigger::Periodic);
+                    self.self_test_service
+                        .run_and_report(&self.health, Trigger::Periodic);
                 }
                 std::thread::sleep(POLL_TICK);
             }
