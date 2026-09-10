@@ -9,9 +9,9 @@ use std::time::Duration;
 use rdkafka::consumer::{BaseConsumer, Consumer};
 use rdkafka::producer::{BaseProducer, BaseRecord};
 use rdkafka::{ClientConfig, Message};
-use testcontainers::ContainerAsync;
-use testcontainers::runners::AsyncRunner;
 use testcontainers_modules::kafka::apache::{self, Kafka};
+use testcontainers_modules::testcontainers::ContainerAsync;
+use testcontainers_modules::testcontainers::runners::AsyncRunner;
 
 use hsm_worker::application::port::incoming::worker_request_use_case::WorkerRequestError;
 use hsm_worker::application::port::outgoing::state_init_response_spi_port::{
