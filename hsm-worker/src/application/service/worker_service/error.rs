@@ -17,6 +17,7 @@ pub enum UpstreamError {
     UnknownServerKid,
     ServerKidRequired,
     EncodeFailed(&'static str),
+    SelfTestQuarantine,
 }
 
 /// Errors sent to the client in the (unencrypted) outer response.

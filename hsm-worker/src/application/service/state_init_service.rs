@@ -5,6 +5,7 @@
 use crate::application::StateInitResponseSpiPort;
 use crate::application::port::outgoing::hsm_spi_port::HsmSpiPort;
 use crate::application::port::outgoing::jose_port::JosePort;
+use crate::application::service::TsfHealth;
 use crate::domain::{DeviceHsmState, DeviceKeyEntry, StateInitRequest, StateInitResponse};
 use std::sync::Arc;
 use tracing::{debug, error, info, warn};
@@ -13,9 +14,10 @@ use uuid::Uuid;
 pub struct StateInitService {
     response_spi_port: Arc<dyn StateInitResponseSpiPort + Send + Sync>,
     jose: Arc<dyn JosePort>,
-    hsm_spi_port: Arc<dyn HsmSpiPort + Send + Sync>,
+    hsm_spi_port: Arc<dyn HsmSpiPort>,
     hsm_key_label: String,
     opaque_server_id: String,
+    health: TsfHealth,
 }
 
 #[derive(Debug)]
@@ -25,15 +27,17 @@ pub enum StateInitError {
     SigningError,
     SendError,
     HsmKeyGenerationError,
+    SelfTestQuarantine,
 }
 
 impl StateInitService {
     pub fn new(
         response_spi_port: Arc<dyn StateInitResponseSpiPort + Send + Sync>,
         jose: Arc<dyn JosePort>,
-        hsm_spi_port: Arc<dyn HsmSpiPort + Send + Sync>,
+        hsm_spi_port: Arc<dyn HsmSpiPort>,
         hsm_key_label: String,
         opaque_server_id: String,
+        health: TsfHealth,
     ) -> Self {
         Self {
             response_spi_port,
@@ -41,12 +45,22 @@ impl StateInitService {
             hsm_spi_port,
             hsm_key_label,
             opaque_server_id,
+            health,
         }
     }
 
     /// Initialize a new DeviceHsmState for a client
     pub fn initialize(&self, request: StateInitRequest) -> Result<String, StateInitError> {
         debug!("Initializing state, request id: {}", request.request_id);
+
+        if !self.health.is_healthy() {
+            error!(
+                "Rejecting state-init request {}: TSF self-test suite is unhealthy",
+                request.request_id
+            );
+            return Err(StateInitError::SelfTestQuarantine);
+        }
+
         let response_topic = request.response_topic.clone();
 
         // 1. Validate client JWK keys (EC P-256)

@@ -43,6 +43,9 @@ pub struct AppConfig {
     pub kafka_broker_address_family: String,
     pub kafka_group_id: String,
     pub kafka_group_instance_id: String,
+
+    /// How often the periodic self-test trigger re-runs the suite (FPT_TST.1.1).
+    pub self_test_periodic_interval_secs: u64,
 }
 
 impl AppConfig {
@@ -55,6 +58,7 @@ impl AppConfig {
             .set_default("opaque_context", "RPS-Ops")?
             .set_default("opaque_server_identifier", "cloud-wallet.digg.se")?
             .set_default("hsm_key_label", "wallet-hsm-key")?
+            .set_default("self_test_periodic_interval_secs", 300)?
             .add_source(Environment::default())
             .build()?
             .try_deserialize()
