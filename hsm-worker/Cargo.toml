@@ -62,7 +62,7 @@ p256 = { version = "0.13", default-features = false, features = [
     "jwk",
 ] }
 elliptic-curve = { version = "0.13", features = ["sec1", "jwk"] }
-pem = "3"
+pem = "4"
 der = "0.8.0"
 rand_core = { version = "0.6", features = ["getrandom"] }
 chrono = { version = "0.4", features = ["serde"] }
