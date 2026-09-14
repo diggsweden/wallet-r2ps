@@ -82,17 +82,17 @@ impl SharedConnection {
     }
 }
 
-/// Retries `f` on connection-class and failover errors. Up to six attempts,
-/// with exponential backoff between plain retries (50, 100, 200, 400, 800 ms,
-/// capped at 1 s). The wider budget absorbs sub-second connection tear-downs
-/// driven by service-mesh sidecars (Envoy drain / `max_connection_duration`)
-/// so a single Redis call reconnects transparently instead of surfacing.
+/// Retries `f` on connection-class and failover errors. Up to three attempts.
+/// Each retry awaits the ConnectionManager's in-flight reconnect (which has
+/// its own bounded connect-retry loop), so one retry already covers an idle
+/// kill or sidecar drain of the socket. A genuinely dead Valkey surfaces as
+/// an error after a few seconds; the HTTP client is expected to retry.
 ///
 ///  * `READONLY` (from a replica demoted by Sentinel failover) or `MASTERDOWN`
-///    → re-resolve via Sentinel immediately, brief pause, then keep retrying.
+///    → re-resolve via Sentinel immediately, brief pause, then retry.
 ///  * IO / timeout / connection-dropped → plain retry against the current
 ///    manager (transient blip); if still failing, re-resolve once — the
-///    address itself may be stale after a failover — and keep retrying.
+///    address itself may be stale after a failover — and retry a final time.
 ///
 /// Emits a `redis.cmd` span with `attempts` and (when triggered) `reresolved`.
 pub(super) async fn with_redis_retry<T, F, Fut>(
@@ -105,7 +105,7 @@ where
     F: FnMut(ConnectionManager) -> Fut,
     Fut: std::future::Future<Output = redis::RedisResult<T>>,
 {
-    const MAX_ATTEMPTS: u32 = 6;
+    const MAX_ATTEMPTS: u32 = 3;
     let span = tracing::info_span!(
         "redis.cmd",
         op,
@@ -148,9 +148,7 @@ where
                         tokio::time::sleep(Duration::from_millis(100)).await;
                     } else {
                         warn!(op, key, attempt = attempts, error = %e, "redis retry");
-                        let shift = (attempts - 1).min(5);
-                        let sleep_ms = (50u64 << shift).min(1000);
-                        tokio::time::sleep(Duration::from_millis(sleep_ms)).await;
+                        tokio::time::sleep(Duration::from_millis(50)).await;
                     }
                 }
                 Err(e) => {
@@ -176,7 +174,7 @@ fn is_failover_error(e: &redis::RedisError) -> bool {
 }
 
 fn is_retryable_io(e: &redis::RedisError) -> bool {
-    !e.is_unrecoverable_error() && (e.is_io_error() || e.is_connection_dropped() || e.is_timeout())
+    e.is_io_error() || e.is_connection_dropped() || e.is_timeout()
 }
 
 async fn build_manager(config: &AppConfig) -> redis::RedisResult<ConnectionManager> {
