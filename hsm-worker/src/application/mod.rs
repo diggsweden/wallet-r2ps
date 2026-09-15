@@ -13,6 +13,8 @@ pub mod service;
 mod device_state_tests;
 #[cfg(test)]
 mod protocol_tests;
+#[cfg(test)]
+pub(crate) mod test_utils;
 
 pub use config::*;
 pub use port::WorkerPorts;

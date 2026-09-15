@@ -77,3 +77,11 @@ fn gen_ecc_key_wrap_unwrap_sign() -> Result<(), Box<dyn std::error::Error>> {
     assert!(result);
     Ok(())
 }
+
+#[test]
+#[ignore]
+fn check_wrap_sign_passes_against_live_hsm() -> Result<(), Box<dyn std::error::Error>> {
+    let hsm_wrapper = get_hsm().lock()?;
+    hsm_wrapper.check_wrap_sign()?;
+    Ok(())
+}

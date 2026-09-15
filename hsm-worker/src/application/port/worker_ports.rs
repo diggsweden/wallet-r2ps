@@ -13,6 +13,6 @@ pub struct WorkerPorts {
     pub jose: Arc<dyn JosePort>,
     pub worker_response: Arc<dyn WorkerResponseSpiPort + Send + Sync>,
     pub session_state: Arc<dyn SessionStateSpiPort>,
-    pub hsm: Arc<dyn HsmSpiPort + Send + Sync>,
+    pub hsm: Arc<dyn HsmSpiPort>,
     pub pake: Arc<dyn PakePort>,
 }
