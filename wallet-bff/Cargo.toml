@@ -26,10 +26,10 @@ serde_json = "1.0"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 tracing-opentelemetry = "0.33"
-opentelemetry = "0.32"
-opentelemetry_sdk = { version = "0.32" }
-opentelemetry-otlp = { version = "0.32", features = ["grpc-tonic"] }
-opentelemetry-http = "0.32"
+opentelemetry = "0.33"
+opentelemetry_sdk = { version = "0.33" }
+opentelemetry-otlp = { version = "0.33", features = ["grpc-tonic"] }
+opentelemetry-http = "0.33"
 dotenvy = "0.15.7"
 config = "0.15.19"
 uuid = { version = "1.18.1", features = ["v4", "serde"] }
@@ -40,8 +40,8 @@ utoipa-swagger-ui = { version = "9", features = ["axum"] }
 tower-http = { version = "0.7", features = ["trace"] }
 
 [dev-dependencies]
-uuid = { version = "=1.26.0", features = ["v4"] }
-rstest = "=0.26.1"
+uuid = { version = "=1.26.1", features = ["v4"] }
+rstest = "=0.27.0"
 tower = { version = "=0.5.3", features = ["util"] }
 testcontainers-modules = { version = "=0.15.0", features = ["kafka", "valkey"] }
 base64 = "=0.23.1"
