@@ -24,9 +24,9 @@ jobs:
     permissions:
       contents: read # Read code for building
       packages: write # Push dev images to ghcr.io
-    uses: diggsweden/reusable-ci/.github/workflows/release-dev-orchestrator.yml@617cb32268cb6aefdfa4117b4159d37e3b47d7b3 # v2.8.3
+    uses: diggsweden/reusable-ci/.github/workflows/release-dev-orchestrator.yml@997d7dc2238b40c79798fda309d8061b0707a3e5 # v3.0.0
     with:
-      reusable-ci-ref: d31c989acd139c3e8754e116496c826af8dbbca0
+      reusable-ci-ref: 997d7dc2238b40c79798fda309d8061b0707a3e5 # v3.0.0
       project-type: cargo
       # artifacts-config opts into the multi-container dev release path:
       # one job per container in the same dev run, parallel matrix.
@@ -35,4 +35,3 @@ jobs:
       artifacts-config: .github/artifacts.yml
       # SBOM coverage covered by wallet-backend-reference's dev runs.
       # Keep r2ps on the default `none` for faster dev feedback.
-    secrets: inherit
