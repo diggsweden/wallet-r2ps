@@ -32,25 +32,29 @@
       "description": "sha2 and digest are capped below 0.11 — opaque-ke 4.x requires the digest 0.10 trait family. Patch updates within 0.10.x still flow through. When upgrading opaque-ke to a digest-0.11-compatible version, update this allowedVersions in the same PR.",
       "matchManagers": ["cargo"],
       "matchPackageNames": ["sha2", "digest"],
-      "allowedVersions": "<0.11"
+      "allowedVersions": "<0.11",
+      "minimumReleaseAge": "7 days"
     },
     {
       "description": "hkdf is capped below 0.13 — opaque-ke 4.x requires hkdf 0.12 (digest 0.10 trait family). Patch updates within 0.12.x still flow through. Update in the same PR as the opaque-ke upgrade.",
       "matchManagers": ["cargo"],
       "matchPackageNames": ["hkdf"],
-      "allowedVersions": "<0.13"
+      "allowedVersions": "<0.13",
+      "minimumReleaseAge": "7 days"
     },
     {
       "description": "rand_core is capped below 0.7 — 0.10 removed the `getrandom` feature flag that OsRng depends on, breaking the build. Updating requires verifying opaque-ke 4.x compatibility with rand_core 0.10 and adjusting OsRng usage in opaque_pake_adapter, hsm_wrapper, and worker_service. Update in the same PR as the opaque-ke upgrade.",
       "matchManagers": ["cargo"],
       "matchPackageNames": ["rand_core"],
-      "allowedVersions": "<0.7"
+      "allowedVersions": "<0.7",
+      "minimumReleaseAge": "7 days"
     },
     {
       "description": "p256 and elliptic-curve are capped below 0.14 — elliptic-curve 0.14 split the hash2curve/oprf modules out into standalone crates with a new OprfParameters trait, but opaque-ke 4.x (including the 4.1.0-pre.2 prerelease) still depends on the voprf crate 0.5.0, which requires the old elliptic_curve::voprf::VoprfParameters trait from 0.13. NistP256 in p256 0.14 no longer implements that trait, so opaque_ke::CipherSuite fails to resolve. Update in the same PR as the opaque-ke upgrade, once a release compatible with elliptic-curve 0.14 exists.",
       "matchManagers": ["cargo"],
       "matchPackageNames": ["p256", "elliptic-curve"],
-      "allowedVersions": "<0.14"
+      "allowedVersions": "<0.14",
+      "minimumReleaseAge": "7 days"
     }
   ]
 }
