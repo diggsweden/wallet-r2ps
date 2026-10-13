@@ -49,3 +49,43 @@ fn session_state_cache_apply_transition_requires_session_id_when_transition_pres
     let result = cache.apply_transition(None, Some(&SessionTransition::End));
     assert!(matches!(result, Err(SessionStateError::UnknownSession)));
 }
+
+#[test]
+fn second_mark_hsm_operation_is_rejected_by_the_cache() {
+    let cache = SessionStateMemoryCache::new();
+    let id = SessionId::new();
+    cache
+        .apply_transition(
+            Some(&id),
+            Some(&SessionTransition::CreatePendingAuth {
+                pending_state: PendingLoginState::new(vec![0u8; 8]),
+                purpose: None,
+            }),
+        )
+        .unwrap();
+    cache
+        .apply_transition(
+            Some(&id),
+            Some(&SessionTransition::Authenticate {
+                session_key: SessionKey::new(vec![0u8; 4]),
+            }),
+        )
+        .unwrap();
+
+    assert!(
+        cache
+            .apply_transition(
+                Some(&id),
+                Some(&SessionTransition::MarkHsmOperationPerformed)
+            )
+            .is_ok()
+    );
+    assert!(
+        cache
+            .apply_transition(
+                Some(&id),
+                Some(&SessionTransition::MarkHsmOperationPerformed)
+            )
+            .is_err()
+    );
+}
