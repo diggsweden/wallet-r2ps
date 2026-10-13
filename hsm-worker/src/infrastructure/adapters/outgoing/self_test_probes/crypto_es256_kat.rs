@@ -24,10 +24,12 @@ pub(crate) const KAT_PUBLIC_KEY_Y: &str = "x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjK
 
 // RFC 7515 §A.3.1, Figure 27 — JWS Compact Serialization (line breaks removed; the RFC
 // wraps them for print layout only, they are not part of the value).
+// nosemgrep: generic.secrets.security.detected-jwt-token.detected-jwt-token
 pub(crate) const KAT_VALID_JWS: &str = "eyJhbGciOiJFUzI1NiJ9.eyJpc3MiOiJqb2UiLA0KICJleHAiOjEzMDA4MTkzODAsDQogImh0dHA6Ly9leGFtcGxlLmNvbS9pc19yb290Ijp0cnVlfQ.DtEhU3ljbEg8L38VWAfUAqOyKAM6-Xx-F4GawxaepmXFCgfTjDxw5djxLa8ISlSApmWQxfKTUJqPP3-Kg6NU1Q";
 
 // Same header and payload, low bit of the signature's final byte flipped (Q -> A). Must
 // be rejected.
+// nosemgrep: generic.secrets.security.detected-jwt-token.detected-jwt-token
 pub(crate) const KAT_TAMPERED_JWS: &str = "eyJhbGciOiJFUzI1NiJ9.eyJpc3MiOiJqb2UiLA0KICJleHAiOjEzMDA4MTkzODAsDQogImh0dHA6Ly9leGFtcGxlLmNvbS9pc19yb290Ijp0cnVlfQ.DtEhU3ljbEg8L38VWAfUAqOyKAM6-Xx-F4GawxaepmXFCgfTjDxw5djxLa8ISlSApmWQxfKTUJqPP3-Kg6NU1A";
 
 // RFC 7515 §A.3.1, Figure 7 — the decoded JWS Payload, exactly (including the embedded
