@@ -2822,9 +2822,9 @@ dependencies = [
 
 [[package]]
 name = "problem_details"
-version = "0.10.0"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8787ca67c7582bfae20c7635cd73063419856d269127d538dbd9387371f4df71"
+checksum = "6aa844208f6060a0e8f7005be86bf704101b84a5536fe84d9484323da36404eb"
 dependencies = [
  "http",
  "http-serde",
@@ -4491,9 +4491,9 @@ dependencies = [
 
 [[package]]
 name = "uuid"
-version = "1.27.0"
+version = "1.28.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "97277d36b9c3ace13e58fa6e753f8b0bbbf302a18dd193240d70f9e29681059a"
+checksum = "7cc1186384beb7dd8eedea376413fd654937285ea6c9cfbb928dc3043ea4b606"
 dependencies = [
  "getrandom 0.4.3",
  "js-sys",
