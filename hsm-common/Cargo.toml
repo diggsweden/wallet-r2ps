@@ -21,6 +21,6 @@ iso8601-duration = { version = "0.2.0", features = ["serde"] }
 josekit = "0.10.3"
 
 [dependencies.utoipa]
-version = "5"
+version = "6"
 features = ["uuid"]
 optional = true

@@ -70,7 +70,7 @@ uuid = { version = "1.18.1", features = ["v4", "serde"] }
 digest = "0.10.7"
 hex = "0.4.3"
 clap = { version = "4", features = ["derive"] }
-utoipa = { version = "5", features = ["uuid"], optional = true }
+utoipa = { version = "6", features = ["uuid"], optional = true }
 iso8601-duration = { version = "0.2.0", features = ["serde"] }
 problem_details = "0.10.0"
 
