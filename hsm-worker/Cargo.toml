@@ -78,4 +78,4 @@ problem_details = "0.10.0"
 rstest = "=0.27.0"
 mockall = "=0.15.0"
 testcontainers-modules = { version = "=0.15.0", features = ["kafka"] }
-tokio = { version = "=1.53.2", features = ["macros", "rt-multi-thread", "time"] }
+tokio = { version = "=1.53.3", features = ["macros", "rt-multi-thread", "time"] }
