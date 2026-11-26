@@ -32,6 +32,8 @@ pub struct AppConfig {
     /// Sentinel-managed master (service) name. Required when
     /// [`redis_sentinel_hosts`] is set.
     pub redis_sentinel_master: String,
+    /// Password for the sentinels themselves. Empty means no AUTH.
+    pub redis_sentinel_password: String,
 
     /// HTTP server bind host
     pub server_host: String,
@@ -78,6 +80,7 @@ impl AppConfig {
             .set_default("redis_database", 0)?
             .set_default("redis_sentinel_hosts", "")?
             .set_default("redis_sentinel_master", "")?
+            .set_default("redis_sentinel_password", "")?
             .set_default("server_host", "0.0.0.0")?
             .set_default("server_port", 8088)?
             .set_default("serve_sync", true)?

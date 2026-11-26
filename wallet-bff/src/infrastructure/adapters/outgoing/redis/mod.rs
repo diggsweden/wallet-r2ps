@@ -232,13 +232,16 @@ async fn resolve_master_client(config: &AppConfig) -> redis::RedisResult<Client>
         })
         .collect();
 
-    let mut sc = SentinelClientBuilder::new(addrs, master, SentinelServerType::Master)?
+    let mut builder = SentinelClientBuilder::new(addrs, master, SentinelServerType::Master)?
         .set_client_to_redis_db(i64::from(config.redis_database))
         .set_client_to_redis_username(config.redis_username.clone())
         .set_client_to_redis_password(config.redis_password.clone())
         .set_client_to_redis_tcp_settings(redis_tcp_settings())
-        .set_client_to_sentinel_tcp_settings(redis_tcp_settings())
-        .build()?;
+        .set_client_to_sentinel_tcp_settings(redis_tcp_settings());
+    if !config.redis_sentinel_password.is_empty() {
+        builder = builder.set_client_to_sentinel_password(config.redis_sentinel_password.clone());
+    }
+    let mut sc = builder.build()?;
 
     info!(
         "Resolving Redis primary via Sentinel (hosts={}, master={})",
