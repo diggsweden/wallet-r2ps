@@ -1,0 +1,11 @@
+# SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
+#
+# SPDX-License-Identifier: EUPL-1.2
+
+[advisories]
+ignore = [
+    # crypto-bigint 0.5.5 via elliptic-curve 0.13, capped in renovate.json until
+    # a stable opaque-ke compatible with elliptic-curve 0.14 exists. Remove in
+    # the same PR as the opaque-ke upgrade.
+    "RUSTSEC-2026-0387",
+]
